@@ -13,10 +13,10 @@ const backend = defineBackend({
 const apiStack = backend.createStack("alimex-api");
 const dataStack = backend.createStack("alimex-data");
 
-const tableName = process.env.TENDER_PRICING_TABLE ?? "alimex-tender-pricing";
+const tableName = process.env.TENDER_PRICING_TABLE?.trim();
 
 const tenderPricingTable = new Table(dataStack, "TenderPricingTable", {
-  tableName,
+  ...(tableName ? { tableName } : {}),
   partitionKey: {
     name: "PK",
     type: AttributeType.STRING,
