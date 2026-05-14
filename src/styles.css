@@ -1,0 +1,205 @@
+:root {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: #14213d;
+  background:
+    radial-gradient(circle at top left, rgba(252, 163, 17, 0.18), transparent 32%),
+    linear-gradient(180deg, #f7f4ea 0%, #ece6d6 100%);
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: #14213d;
+  background: inherit;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 14px;
+  cursor: pointer;
+}
+
+input {
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #d2c5a9;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.center-shell,
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.auth-card,
+.panel-card {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(20, 33, 61, 0.08);
+  box-shadow: 0 24px 60px rgba(20, 33, 61, 0.12);
+  backdrop-filter: blur(14px);
+}
+
+.auth-card {
+  width: min(100%, 26rem);
+  padding: 2rem;
+  border-radius: 28px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.auth-form button,
+.panel-header button,
+.secondary-button {
+  padding: 0.9rem 1.1rem;
+  background: #14213d;
+  color: #fff;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+}
+
+.side-menu {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 2rem;
+  background: #14213d;
+  color: #fff;
+}
+
+.menu-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.menu-item {
+  width: 100%;
+  padding: 0.9rem 1rem;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+}
+
+.menu-item.active {
+  background: #fca311;
+  color: #14213d;
+  font-weight: 700;
+}
+
+.secondary-button {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.content-panel {
+  padding: 2rem;
+  display: grid;
+  align-content: start;
+}
+
+.panel-card {
+  width: min(100%, 760px);
+  padding: 2rem;
+  border-radius: 30px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.response-grid {
+  display: grid;
+  gap: 1rem;
+  margin: 1.5rem 0 0;
+}
+
+.response-grid div {
+  padding: 1rem 1.1rem;
+  border-radius: 18px;
+  background: #f5f1e6;
+}
+
+.response-grid dt {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #7b6b4d;
+}
+
+.response-grid dd {
+  margin: 0.35rem 0 0;
+  font-size: 1.05rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.8rem;
+  color: #7b6b4d;
+}
+
+.muted {
+  color: #4f5d75;
+}
+
+.error-text {
+  color: #b42318;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+@media (max-width: 820px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .side-menu {
+    padding-bottom: 1.25rem;
+  }
+
+  .content-panel {
+    padding-top: 0;
+  }
+
+  .panel-header {
+    flex-direction: column;
+  }
+}

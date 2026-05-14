@@ -1,0 +1,36 @@
+{
+  "name": "minimal-amplify-react",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node node_modules/vite/bin/vite.js",
+    "build": "node node_modules/typescript/lib/tsc.js -p tsconfig.app.json && node node_modules/vite/bin/vite.js build",
+    "test:lambda": "node node_modules/typescript/lib/tsc.js -p tsconfig.lambda-tests.json && node --test .test-dist/tests/**/*.test.js",
+    "preview": "node node_modules/vite/bin/vite.js preview",
+    "ampx:sandbox": "ampx sandbox",
+    "ampx:deploy": "ampx pipeline-deploy --branch main",
+    "ampx:generate-outputs": "ampx generate outputs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.972.0",
+    "@aws-sdk/lib-dynamodb": "3.972.0",
+    "aws-amplify": "6.16.3",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@aws-amplify/backend": "1.21.1",
+    "@aws-amplify/backend-cli": "1.8.2",
+    "@types/aws-lambda": "8.10.161",
+    "@types/node": "24.0.13",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.4",
+    "typescript": "5.8.2",
+    "vite": "5.4.19"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
