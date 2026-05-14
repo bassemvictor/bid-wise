@@ -3,8 +3,8 @@ import { formatTitle } from "./utils";
 const tenderSectionLabels: Record<string, string> = {
   "product-configuration": "Product Configuration",
   "material-roll-calculation": "Material Roll Calculation",
-  "material-sourcing": "Material Sourcing",
-  "cost-build-up": "Cost Build-Up",
+  "material-sourcing": "Material Sourcing & Costing",
+  "cost-build-up": "Cost Build-Up Per Bag",
   alternatives: "Alternatives",
   "pricing-approval": "Pricing Approval",
 };
@@ -18,8 +18,20 @@ export const getPageTitle = (pathname: string) => {
     return "Tender Intake";
   }
 
+  if (pathname === "/tenders") {
+    return "All Tenders";
+  }
+
   if (pathname === "/price-scenarios") {
     return "Price Scenarios";
+  }
+
+  if (pathname === "/stock") {
+    return "Current Stock";
+  }
+
+  if (pathname === "/import-presets") {
+    return "Import Presets";
   }
 
   const segments = pathname.split("/").filter(Boolean);
@@ -54,10 +66,15 @@ export const getBreadcrumbs = (pathname: string) => {
   }
 
   if (segments[0] === "tenders") {
-    crumbs.push({ label: "Tenders", href: "/tenders/intake" });
+    crumbs.push({ label: "Tenders", href: "/tenders" });
+
+    if (segments.length === 1) {
+      crumbs.push({ label: "All Tenders" });
+      return crumbs;
+    }
 
     if (segments[1] === "intake") {
-      crumbs.push({ label: "Tender Intake" });
+      crumbs.push({ label: segments[2] ? "Edit Tender Intake" : "Tender Intake" });
       return crumbs;
     }
 
@@ -80,6 +97,12 @@ export const getBreadcrumbs = (pathname: string) => {
       crumbs.push({ label: segments[1] });
     }
 
+    return crumbs;
+  }
+
+  if (segments[0] === "stock" || segments[0] === "import-presets") {
+    crumbs.push({ label: "Material Sourcing", href: "/stock" });
+    crumbs.push({ label: segments[0] === "stock" ? "Current Stock" : "Import Presets" });
     return crumbs;
   }
 

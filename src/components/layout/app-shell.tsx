@@ -13,8 +13,7 @@ const navigation = [
   {
     label: "Tenders",
     items: [
-      { label: "Tender Intake", href: "/tenders/intake" },
-      { label: "All Tenders", href: "/tenders/TDR-1001" },
+      { label: "All Tenders", href: "/tenders" },
       { label: "Activities", href: "/tenders/TDR-1001/material-sourcing" },
     ],
   },
@@ -29,10 +28,18 @@ const navigation = [
   {
     label: "Master Data",
     items: [
-      { label: "Products", href: "/dashboard" },
-      { label: "Materials", href: "/dashboard" },
-      { label: "Suppliers", href: "/dashboard" },
-      { label: "Accessories", href: "/dashboard" },
+      { label: "Customers", href: "/customers" },
+      { label: "Products", href: "/products" },
+      { label: "Materials", href: "/materials" },
+      { label: "Suppliers", href: "/suppliers" },
+      { label: "Accessories", href: "/accessories" },
+    ],
+  },
+  {
+    label: "Material Sourcing",
+    items: [
+      { label: "Current Stock", href: "/stock" },
+      { label: "Import Presets", href: "/import-presets" },
     ],
   },
   {
@@ -55,7 +62,7 @@ export const AppShell = () => {
       <div className="flex min-h-screen">
         <aside
           className={cn(
-            "fixed inset-y-0 left-0 z-40 w-72 bg-sidebar px-5 py-6 text-sidebar-foreground transition-transform lg:static lg:translate-x-0",
+            "fixed inset-y-0 left-0 z-40 w-72 bg-sidebar px-5 py-6 text-sidebar-foreground transition-transform lg:translate-x-0",
             sidebarOpen ? "translate-x-0" : "-translate-x-full",
           )}
         >
@@ -63,7 +70,7 @@ export const AppShell = () => {
             <div className="mb-8 flex items-center justify-between">
               <div>
                 <p className="text-xs uppercase tracking-[0.22em] text-blue-200/80">Alimex</p>
-                <h1 className="mt-2 text-2xl font-semibold">Tender Pricing</h1>
+                <h1 className="mt-2 text-2xl font-semibold">BidWise</h1>
               </div>
               <button
                 className="rounded-lg p-2 text-blue-100 lg:hidden"
@@ -74,7 +81,7 @@ export const AppShell = () => {
               </button>
             </div>
 
-            <nav className="flex-1 space-y-7 overflow-y-auto">
+            <nav className="flex-1 space-y-7">
               {navigation.map((section) => (
                 <div key={section.label}>
                   <p className="mb-3 text-xs uppercase tracking-[0.18em] text-blue-200/60">
@@ -119,7 +126,7 @@ export const AppShell = () => {
           />
         ) : null}
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col lg:pl-72">
           <header className="sticky top-0 z-20 border-b border-border/90 bg-white/90 backdrop-blur">
             <div className="flex items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
               <div className="flex min-w-0 items-center gap-4">

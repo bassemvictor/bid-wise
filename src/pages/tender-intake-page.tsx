@@ -1,179 +1,641 @@
-import { useState, type FormEvent } from "react";
+import {
+  BriefcaseBusiness,
+  CircleDollarSign,
+  FileText,
+  Package,
+  Truck,
+} from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 
+import { TenderWorkflowStepper } from "../components/tenders/tender-workflow-stepper";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
+import { Select } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
-import { api, isApiConfigured } from "../lib/api";
-import type { TenderRequest } from "../../shared/types";
+import { api, ApiError, isApiConfigured } from "../lib/api";
+import type { Accessory, Customer, Material, TenderRequest, TenderRequestType } from "../../shared/types";
 
-type TenderIntakeForm = Omit<TenderRequest, "entityType">;
+type TenderIntakeForm = Omit<
+  TenderRequest,
+  | "entityType"
+  | "createdAt"
+  | "updatedAt"
+  | "bagDiameterMm"
+  | "bagLengthMm"
+  | "knownRequiredPrice"
+  | "knownCompetitorPrice"
+  | "customerCommissionPercent"
+> & {
+  bagDiameterMm: string;
+  bagLengthMm: string;
+  knownRequiredPrice: string;
+  knownCompetitorPrice: string;
+  customerCommissionPercent: string;
+};
 
 const initialState: TenderIntakeForm = {
   tenderId: "",
   tenantId: "alimex-demo",
-  title: "",
   customerName: "",
-  status: "draft",
-  dueDate: "",
-  currency: "USD",
-  owner: "",
+  tenderNumber: "",
+  internalInquiryNumber: "",
+  tenderDueDate: "",
+  requestType: "inquiry",
+  requestedMaterial: "",
+  bagDiameterMm: "",
+  bagLengthMm: "",
+  topDesign: "",
+  bottomDesign: "",
+  accessoriesMaterial: "",
+  requestedMaterialNotes: "",
+  knownRequiredPrice: "",
+  knownCompetitorPrice: "",
+  customerCommissionPercent: "",
+  priceNegotiationExpected: false,
+  requestedDeliveryTime: "",
+  deliveryPlace: "factory",
+  assignedTo: "",
+  archived: false,
+  transportationRequired: false,
+  installationRequired: false,
   notes: "",
-  createdAt: "",
-  updatedAt: "",
+  status: "DRAFT_INTAKE",
 };
 
+const requestTypeOptions: TenderRequestType[] = [
+  "inquiry",
+  "public tender",
+  "budget offer",
+  "limited tender",
+  "direct order",
+];
+
+const requiredFields: Array<keyof TenderIntakeForm> = [
+  "customerName",
+  "tenderNumber",
+  "internalInquiryNumber",
+  "tenderDueDate",
+  "requestType",
+  "requestedMaterial",
+  "requestedDeliveryTime",
+  "deliveryPlace",
+];
+
+const sectionCards = [
+  {
+    title: "Customer & Tender Information",
+    description: "Capture the commercial entry point and reference identifiers for the opportunity.",
+    icon: BriefcaseBusiness,
+  },
+  {
+    title: "Requested Product Details",
+    description: "Record the requested product geometry, design, and accessory expectations.",
+    icon: Package,
+  },
+  {
+    title: "Commercial Information",
+    description: "Document price signals and negotiation expectations before costing begins.",
+    icon: CircleDollarSign,
+  },
+  {
+    title: "Delivery Information",
+    description: "Capture lead time, delivery location, and service requirements.",
+    icon: Truck,
+  },
+  {
+    title: "Notes",
+    description: "Keep the tender context, assumptions, and clarifications together.",
+    icon: FileText,
+  },
+] as const;
+
 export const TenderIntakePage = () => {
+  const navigate = useNavigate();
+  const { tenderId } = useParams();
   const [form, setForm] = useState(initialState);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [accessories, setAccessories] = useState<Accessory[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof TenderIntakeForm, string>>>({});
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
+  const [saveMode, setSaveMode] = useState<"draft" | "next" | null>(null);
+
+  useEffect(() => {
+    if (!isApiConfigured) {
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadMasterData = async () => {
+      try {
+        const [loadedCustomers, loadedMaterials, loadedAccessories] = await Promise.all([
+          api.get<Customer[]>("/customers?tenantId=alimex-demo"),
+          api.get<Material[]>("/materials?tenantId=alimex-demo"),
+          api.get<Accessory[]>("/accessories?tenantId=alimex-demo"),
+        ]);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setCustomers(loadedCustomers.filter((item) => item.active));
+        setMaterials(loadedMaterials.filter((item) => item.active));
+        setAccessories(loadedAccessories.filter((item) => item.active));
+      } catch (reason) {
+        if (isMounted) {
+          setError(reason instanceof Error ? reason.message : "Unable to load intake dropdown options.");
+        }
+      }
+    };
+
+    void loadMasterData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isApiConfigured || !tenderId) {
+      return;
+    }
+
+    let isMounted = true;
+
+    const load = async () => {
+      try {
+        const record = await api.get<TenderRequest>(`/tenders/${tenderId}?tenantId=alimex-demo`);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setForm({
+          tenderId: record.tenderId,
+          tenantId: record.tenantId,
+          customerName: record.customerName,
+          tenderNumber: record.tenderNumber,
+          internalInquiryNumber: record.internalInquiryNumber,
+          tenderDueDate: record.tenderDueDate,
+          requestType: record.requestType,
+          requestedMaterial: record.requestedMaterial,
+          bagDiameterMm: record.bagDiameterMm?.toString() ?? "",
+          bagLengthMm: record.bagLengthMm?.toString() ?? "",
+          topDesign: record.topDesign,
+          bottomDesign: record.bottomDesign,
+          accessoriesMaterial: record.accessoriesMaterial,
+          requestedMaterialNotes: record.requestedMaterialNotes ?? "",
+          knownRequiredPrice: record.knownRequiredPrice?.toString() ?? "",
+          knownCompetitorPrice: record.knownCompetitorPrice?.toString() ?? "",
+          customerCommissionPercent: record.customerCommissionPercent?.toString() ?? "",
+          priceNegotiationExpected: record.priceNegotiationExpected,
+          requestedDeliveryTime: record.requestedDeliveryTime,
+          deliveryPlace: record.deliveryPlace,
+          transportationRequired: record.transportationRequired,
+          installationRequired: record.installationRequired,
+          notes: record.notes ?? "",
+          status: record.status,
+          assignedTo: record.assignedTo ?? "",
+          archived: record.archived ?? false,
+        });
+      } catch (reason) {
+        if (reason instanceof ApiError && reason.status === 404) {
+          setError("Tender not found.");
+          return;
+        }
+
+        setError(reason instanceof Error ? reason.message : "Unable to load tender intake.");
+      }
+    };
+
+    void load();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [tenderId]);
 
   const updateField = <K extends keyof TenderIntakeForm>(key: K, value: TenderIntakeForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
+    setFieldErrors((current) => {
+      if (!current[key]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  };
+
+  const buildPayload = (status: TenderRequest["status"]): TenderRequest => ({
+    entityType: "TENDER_REQUEST",
+    tenantId: form.tenantId,
+    tenderId: form.tenderId || crypto.randomUUID(),
+    customerName: form.customerName.trim(),
+    tenderNumber: form.tenderNumber.trim(),
+    internalInquiryNumber: form.internalInquiryNumber.trim(),
+    tenderDueDate: form.tenderDueDate,
+    requestType: form.requestType,
+    requestedMaterial: form.requestedMaterial.trim(),
+    bagDiameterMm: form.bagDiameterMm === "" ? null : Number(form.bagDiameterMm),
+    bagLengthMm: form.bagLengthMm === "" ? null : Number(form.bagLengthMm),
+    topDesign: form.topDesign.trim(),
+    bottomDesign: form.bottomDesign.trim(),
+    accessoriesMaterial: form.accessoriesMaterial.trim(),
+    requestedMaterialNotes: form.requestedMaterialNotes?.trim() ?? "",
+    knownRequiredPrice: form.knownRequiredPrice === "" ? null : Number(form.knownRequiredPrice),
+    knownCompetitorPrice:
+      form.knownCompetitorPrice === "" ? null : Number(form.knownCompetitorPrice),
+    customerCommissionPercent:
+      form.customerCommissionPercent === "" ? null : Number(form.customerCommissionPercent),
+    priceNegotiationExpected: form.priceNegotiationExpected,
+    requestedDeliveryTime: form.requestedDeliveryTime.trim(),
+    deliveryPlace: form.deliveryPlace,
+    assignedTo: form.assignedTo?.trim() ?? "",
+    archived: form.archived ?? false,
+    transportationRequired: form.transportationRequired,
+    installationRequired: form.installationRequired,
+    notes: form.notes?.trim() ?? "",
+    status,
+    createdAt: "",
+    updatedAt: "",
+  });
+
+  const validateRequiredFields = () => {
+    const nextErrors: Partial<Record<keyof TenderIntakeForm, string>> = {};
+
+    for (const field of requiredFields) {
+      if (String(form[field] ?? "").trim().length === 0) {
+        nextErrors[field] = "This field is required.";
+      }
+    }
+
+    setFieldErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const persistTender = async (mode: "draft" | "next") => {
+    setMessage("");
+    setError("");
+    setSaveMode(mode);
+
+    if (!isApiConfigured) {
+      setError("Set VITE_API_BASE_URL before submitting a tender intake.");
+      setSaveMode(null);
+      return;
+    }
+
+    if (mode === "next" && !validateRequiredFields()) {
+      setError("Complete the required intake fields before moving to product configuration.");
+      setSaveMode(null);
+      return;
+    }
+
+    const targetStatus: TenderRequest["status"] =
+      mode === "next" ? "PRODUCT_CONFIGURATION" : "DRAFT_INTAKE";
+
+    try {
+      const payload = buildPayload(targetStatus);
+      const response = form.tenderId
+        ? await api.put<TenderRequest>(`/tenders/${payload.tenderId}`, payload)
+        : await api.post<TenderRequest>("/tenders", payload);
+
+      setForm((current) => ({ ...current, tenderId: response.tenderId, status: response.status }));
+      setMessage(
+        mode === "draft" ? "Draft saved successfully." : "Tender intake saved and moved to product configuration.",
+      );
+
+      if (mode === "next") {
+        navigate(`/tenders/${response.tenderId}/product-configuration`);
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to save tender intake.");
+    } finally {
+      setSaveMode(null);
+    }
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setMessage("");
-    setError("");
-
-    if (!isApiConfigured) {
-      setError("Set VITE_API_BASE_URL before submitting a tender intake.");
-      return;
-    }
-
-    setIsSaving(true);
-
-    try {
-      const payload = {
-        ...form,
-        tenderId: form.tenderId || crypto.randomUUID(),
-        entityType: "TenderRequest" as const,
-      };
-
-      await api.post<TenderRequest>("/tenders", payload);
-      setMessage("Tender intake saved.");
-      setForm(initialState);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Failed to save tender intake.");
-    } finally {
-      setIsSaving(false);
-    }
+    await persistTender("next");
   };
 
+  const renderFieldMessage = (field: keyof TenderIntakeForm) =>
+    fieldErrors[field] ? <p className="text-xs text-rose-600">{fieldErrors[field]}</p> : null;
+
   return (
-    <div className="grid gap-6 xl:grid-cols-[1.35fr_0.85fr]">
-      <Card>
-        <CardHeader>
-          <div>
-            <CardTitle>Create Tender Request</CardTitle>
-            <CardDescription>Capture tender metadata without embedding sample records in the UI.</CardDescription>
-          </div>
-          <Badge>Tender Intake</Badge>
-        </CardHeader>
-        <CardContent>
-          <form className="grid gap-5" onSubmit={handleSubmit}>
-            <div className="grid gap-5 md:grid-cols-2">
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Tenant ID
-                <Input value={form.tenantId} onChange={(event) => updateField("tenantId", event.target.value)} />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Tender ID
-                <Input
-                  placeholder="Optional. Auto-generated if empty."
-                  value={form.tenderId}
-                  onChange={(event) => updateField("tenderId", event.target.value)}
-                />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Tender Title
-                <Input value={form.title} onChange={(event) => updateField("title", event.target.value)} required />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Customer Name
-                <Input
-                  value={form.customerName}
-                  onChange={(event) => updateField("customerName", event.target.value)}
-                  required
-                />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Due Date
-                <Input
-                  type="date"
-                  value={form.dueDate}
-                  onChange={(event) => updateField("dueDate", event.target.value)}
-                  required
-                />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Currency
-                <Input value={form.currency} onChange={(event) => updateField("currency", event.target.value)} required />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
-                Owner
-                <Input value={form.owner} onChange={(event) => updateField("owner", event.target.value)} required />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
-                Notes
-                <Textarea value={form.notes ?? ""} onChange={(event) => updateField("notes", event.target.value)} />
-              </label>
-            </div>
+    <div className="space-y-6">
+      <TenderWorkflowStepper currentStep={1} tenderId={form.tenderId || undefined} />
 
-            <div className="flex items-center justify-between gap-4">
-              <div className="text-sm">
-                {message ? <p className="text-emerald-600">{message}</p> : null}
-                {error ? <p className="text-rose-600">{error}</p> : null}
-              </div>
-              <Button disabled={isSaving} type="submit">
-                {isSaving ? "Saving..." : "Create Tender"}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      <div className="space-y-6">
+      <div>
         <Card>
           <CardHeader>
             <div>
-              <CardTitle>Workflow Snapshot</CardTitle>
-              <CardDescription>Core tender stages already mapped into routed workspaces.</CardDescription>
+              <CardTitle>Tender Intake</CardTitle>
+              <CardDescription>
+                Capture the information received when Alimex is invited to participate in a tender or submit an offer.
+              </CardDescription>
             </div>
+            <Badge variant="default">{form.status}</Badge>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {[
-              "Product Configuration",
-              "Material Roll Calculation",
-              "Material Sourcing",
-              "Cost Build-Up",
-              "Alternatives",
-              "Pricing Approval",
-            ].map((item) => (
-              <div key={item} className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                {item}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+          <CardContent>
+            <form className="grid gap-6" onSubmit={handleSubmit}>
+              <div className="grid gap-6">
+                <div className="grid gap-6 xl:grid-cols-2">
+                  <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
+                    <div className="mb-4 flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-base font-semibold text-slate-900">{sectionCards[0].title}</h3>
+                        <p className="mt-1 text-sm text-muted-foreground">{sectionCards[0].description}</p>
+                      </div>
+                      <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+                        <BriefcaseBusiness className="h-5 w-5" />
+                      </div>
+                    </div>
+                    <div className="grid gap-5 md:grid-cols-2">
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Customer Name *
+                        <Select
+                          value={form.customerName}
+                          onChange={(event) => updateField("customerName", event.target.value)}
+                        >
+                          <option value="">Select a customer</option>
+                          {customers.map((customer) => (
+                            <option key={customer.customerId} value={customer.customerName}>
+                              {customer.customerName}
+                            </option>
+                          ))}
+                        </Select>
+                        {renderFieldMessage("customerName")}
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Tender Number *
+                        <Input
+                          value={form.tenderNumber}
+                          onChange={(event) => updateField("tenderNumber", event.target.value)}
+                        />
+                        {renderFieldMessage("tenderNumber")}
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Internal Inquiry Number *
+                        <Input
+                          value={form.internalInquiryNumber}
+                          onChange={(event) => updateField("internalInquiryNumber", event.target.value)}
+                        />
+                        {renderFieldMessage("internalInquiryNumber")}
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Tender Due Date *
+                        <Input
+                          type="date"
+                          value={form.tenderDueDate}
+                          onChange={(event) => updateField("tenderDueDate", event.target.value)}
+                        />
+                        {renderFieldMessage("tenderDueDate")}
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
+                        Request Type *
+                        <Select
+                          value={form.requestType}
+                          onChange={(event) => updateField("requestType", event.target.value as TenderRequestType)}
+                        >
+                          {requestTypeOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </Select>
+                        {renderFieldMessage("requestType")}
+                      </label>
+                    </div>
+                  </section>
 
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>API Notes</CardTitle>
-              <CardDescription>Frontend requests post to the Lambda API client layer in `src/lib/api.ts`.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm text-muted-foreground">
-            <p>`POST /tenders` stores the base tender request.</p>
-            <p>All business sample records stay out of the UI bundle.</p>
-            <p>Development seeding is isolated to backend-only endpoints.</p>
+                  <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
+                    <div className="mb-4 flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-base font-semibold text-slate-900">{sectionCards[1].title}</h3>
+                        <p className="mt-1 text-sm text-muted-foreground">{sectionCards[1].description}</p>
+                      </div>
+                      <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+                        <Package className="h-5 w-5" />
+                      </div>
+                    </div>
+                    <div className="grid gap-5 md:grid-cols-2">
+                      <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
+                        Requested Material *
+                        <Select
+                          value={form.requestedMaterial}
+                          onChange={(event) => updateField("requestedMaterial", event.target.value)}
+                        >
+                          <option value="">Select a material</option>
+                          {materials.map((material) => (
+                            <option key={material.materialId} value={material.materialName}>
+                              {material.materialName}
+                            </option>
+                          ))}
+                        </Select>
+                        {renderFieldMessage("requestedMaterial")}
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Bag Diameter (mm)
+                        <Input
+                          inputMode="decimal"
+                          value={form.bagDiameterMm}
+                          onChange={(event) => updateField("bagDiameterMm", event.target.value)}
+                        />
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Bag Length (mm)
+                        <Input
+                          inputMode="decimal"
+                          value={form.bagLengthMm}
+                          onChange={(event) => updateField("bagLengthMm", event.target.value)}
+                        />
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Top Design
+                        <Input value={form.topDesign} onChange={(event) => updateField("topDesign", event.target.value)} />
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Bottom Design
+                        <Input
+                          value={form.bottomDesign}
+                          onChange={(event) => updateField("bottomDesign", event.target.value)}
+                        />
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Accessories Material
+                        <Select
+                          value={form.accessoriesMaterial}
+                          onChange={(event) => updateField("accessoriesMaterial", event.target.value)}
+                        >
+                          <option value="">Select an accessory</option>
+                          {accessories.map((accessory) => (
+                            <option key={accessory.accessoryId} value={accessory.accessoryName}>
+                              {accessory.accessoryName}
+                            </option>
+                          ))}
+                        </Select>
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
+                        Requested Material Notes
+                        <Textarea
+                          value={form.requestedMaterialNotes ?? ""}
+                          onChange={(event) => updateField("requestedMaterialNotes", event.target.value)}
+                        />
+                      </label>
+                    </div>
+                  </section>
+                </div>
+
+                <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
+                  <div className="mb-4 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-900">{sectionCards[2].title}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">{sectionCards[2].description}</p>
+                    </div>
+                    <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+                      <CircleDollarSign className="h-5 w-5" />
+                    </div>
+                  </div>
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <label className="space-y-2 text-sm font-medium text-slate-700">
+                      Known Required Price
+                      <Input
+                        inputMode="decimal"
+                        value={form.knownRequiredPrice}
+                        onChange={(event) => updateField("knownRequiredPrice", event.target.value)}
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm font-medium text-slate-700">
+                      Known Competitor Price
+                      <Input
+                        inputMode="decimal"
+                        value={form.knownCompetitorPrice}
+                        onChange={(event) => updateField("knownCompetitorPrice", event.target.value)}
+                      />
+                    </label>
+                    <label className="space-y-2 text-sm font-medium text-slate-700">
+                      Customer Commission %
+                      <Input
+                        inputMode="decimal"
+                        value={form.customerCommissionPercent}
+                        onChange={(event) => updateField("customerCommissionPercent", event.target.value)}
+                      />
+                    </label>
+                    <label className="flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3 text-sm font-medium text-slate-700">
+                      <Checkbox
+                        checked={form.priceNegotiationExpected}
+                        onChange={(event) =>
+                          updateField("priceNegotiationExpected", event.target.checked)
+                        }
+                      />
+                      Price negotiation expected
+                    </label>
+                  </div>
+                </section>
+
+                <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
+                  <div className="mb-4 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-900">{sectionCards[3].title}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">{sectionCards[3].description}</p>
+                    </div>
+                    <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+                      <Truck className="h-5 w-5" />
+                    </div>
+                  </div>
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <label className="space-y-2 text-sm font-medium text-slate-700">
+                      Requested Delivery Time *
+                      <Input
+                        value={form.requestedDeliveryTime}
+                        onChange={(event) => updateField("requestedDeliveryTime", event.target.value)}
+                      />
+                      {renderFieldMessage("requestedDeliveryTime")}
+                    </label>
+                    <label className="space-y-2 text-sm font-medium text-slate-700">
+                      Delivery Place *
+                      <Select
+                        value={form.deliveryPlace}
+                        onChange={(event) =>
+                          updateField("deliveryPlace", event.target.value as TenderRequest["deliveryPlace"])
+                        }
+                      >
+                        <option value="factory">factory</option>
+                        <option value="customer facility">customer facility</option>
+                      </Select>
+                      {renderFieldMessage("deliveryPlace")}
+                    </label>
+                    <label className="flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3 text-sm font-medium text-slate-700">
+                      <Checkbox
+                        checked={form.transportationRequired}
+                        onChange={(event) => updateField("transportationRequired", event.target.checked)}
+                      />
+                      Transportation required
+                    </label>
+                    <label className="flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3 text-sm font-medium text-slate-700">
+                      <Checkbox
+                        checked={form.installationRequired}
+                        onChange={(event) => updateField("installationRequired", event.target.checked)}
+                      />
+                      Installation required
+                    </label>
+                  </div>
+                </section>
+
+                <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
+                  <div className="mb-4 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-900">{sectionCards[4].title}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">{sectionCards[4].description}</p>
+                    </div>
+                    <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+                      <FileText className="h-5 w-5" />
+                    </div>
+                  </div>
+                  <label className="space-y-2 text-sm font-medium text-slate-700">
+                    Notes
+                    <Textarea value={form.notes ?? ""} onChange={(event) => updateField("notes", event.target.value)} />
+                  </label>
+                </section>
+              </div>
+
+              <div className="flex flex-col gap-4 rounded-[1.2rem] border border-border bg-white p-4 md:flex-row md:items-center md:justify-between">
+                <div className="text-sm">
+                  <p className="font-medium text-slate-900">Required fields are validated before moving forward.</p>
+                  <p className="text-muted-foreground">
+                    Save Draft preserves partial work. Save &amp; Next moves the tender to product configuration.
+                  </p>
+                  {message ? <p className="mt-2 text-emerald-600">{message}</p> : null}
+                  {error ? <p className="mt-2 text-rose-600">{error}</p> : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    disabled={saveMode !== null}
+                    onClick={() => void persistTender("draft")}
+                    type="button"
+                    variant="outline"
+                  >
+                    {saveMode === "draft" ? "Saving Draft..." : "Save Draft"}
+                  </Button>
+                  <Button disabled={saveMode !== null} type="submit">
+                    {saveMode === "next" ? "Saving..." : "Save & Next"}
+                  </Button>
+                </div>
+              </div>
+            </form>
           </CardContent>
         </Card>
       </div>
+
     </div>
   );
 };

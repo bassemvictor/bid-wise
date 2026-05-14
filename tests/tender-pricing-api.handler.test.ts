@@ -41,8 +41,8 @@ test("returns dashboard summary counts", async () => {
 
       return {
         Items: [
-          { entityType: "TenderRequest" },
-          { entityType: "TenderRequest" },
+          { entityType: "TENDER_REQUEST" },
+          { entityType: "TENDER_REQUEST" },
           { entityType: "PricingScenario" },
           { entityType: "PricingApproval" },
           { entityType: "MaterialSourceSelection" },
@@ -98,4 +98,770 @@ test("blocks dev seed endpoint when disabled", async () => {
 
   assert.equal(response?.statusCode, 403);
   assert.match(response?.body ?? "", /Development-only endpoint disabled/);
+});
+
+test("creates a tender with clean JSON and tender GSI attributes", async () => {
+  const seenCommands: MockCommand[] = [];
+
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      seenCommands.push(command);
+
+      if (command.constructor.name === "GetCommand") {
+        return {};
+      }
+
+      assert.equal(command.constructor.name, "PutCommand");
+      assert.equal(command.input?.TableName, "TenderPricingTable");
+
+      const item = command.input?.Item as Record<string, unknown>;
+      assert.equal(item.PK, "TENANT#tenant-a");
+      assert.equal(item.SK, "TENDER#TDR-2001");
+      assert.equal(item.GSI1PK, "TENANT#tenant-a#TENDERS");
+      assert.match(String(item.GSI1SK), /^UPDATED#/);
+      assert.equal(item.entityType, "TENDER_REQUEST");
+      assert.equal(item.status, "DRAFT_INTAKE");
+
+      return {};
+    }) as DynamoDBDocumentClient,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/tenders",
+        requestContext: { http: { method: "POST" } },
+        queryStringParameters: { tenantId: "tenant-a" },
+        body: JSON.stringify({
+          tenderId: "TDR-2001",
+          customerName: "Acme Plastics",
+          tenderNumber: "TEN-44",
+          internalInquiryNumber: "INQ-44",
+          tenderDueDate: "2026-07-01",
+          requestType: "inquiry",
+          requestedMaterial: "Foil",
+          bagDiameterMm: 250,
+          bagLengthMm: 800,
+          topDesign: "Open top",
+          bottomDesign: "Flat bottom",
+          accessoriesMaterial: "Liner",
+          knownRequiredPrice: 1500,
+          knownCompetitorPrice: 1480,
+          customerCommissionPercent: 2,
+          priceNegotiationExpected: true,
+          requestedDeliveryTime: "14 days",
+          deliveryPlace: "factory",
+          transportationRequired: false,
+          installationRequired: false,
+          notes: "New request",
+          status: "DRAFT_INTAKE",
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 201);
+  assert.deepEqual(seenCommands.map((entry) => entry.constructor.name), ["GetCommand", "PutCommand"]);
+  assert.ok(response.body);
+
+  const body = JSON.parse(response.body) as Record<string, unknown>;
+  assert.equal(body.PK, undefined);
+  assert.equal(body.SK, undefined);
+  assert.equal(body.GSI1PK, undefined);
+  assert.equal(body.entityType, "TENDER_REQUEST");
+  assert.equal(body.customerName, "Acme Plastics");
+});
+
+test("saves product configuration with tender-based keys and updates tender status", async () => {
+  const seenCommands: MockCommand[] = [];
+
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      seenCommands.push(command);
+
+      if (command.constructor.name === "GetCommand") {
+        const key = command.input?.Key as Record<string, string>;
+
+        if (key.PK === "TENDER#TDR-3001") {
+          return {};
+        }
+
+        return {
+          Item: {
+            PK: "TENANT#tenant-a",
+            SK: "TENDER#TDR-3001",
+            GSI1PK: "TENANT#tenant-a#TENDERS",
+            GSI1SK: "UPDATED#2026-05-13T10:00:00.000Z",
+            entityType: "TENDER_REQUEST",
+            tenderId: "TDR-3001",
+            tenantId: "tenant-a",
+            customerName: "Acme",
+            tenderNumber: "TEN-1",
+            internalInquiryNumber: "INQ-1",
+            tenderDueDate: "2026-06-01",
+            requestType: "inquiry",
+            requestedMaterial: "Foil",
+            bagDiameterMm: 220,
+            bagLengthMm: 700,
+            topDesign: "Top A",
+            bottomDesign: "Bottom A",
+            accessoriesMaterial: "ACC",
+            requestedMaterialNotes: "",
+            knownRequiredPrice: null,
+            knownCompetitorPrice: null,
+            customerCommissionPercent: null,
+            priceNegotiationExpected: false,
+            requestedDeliveryTime: "14 days",
+            deliveryPlace: "factory",
+            transportationRequired: false,
+            installationRequired: false,
+            notes: "",
+            status: "TECHNICAL_REVIEW",
+            createdAt: "2026-05-13T10:00:00.000Z",
+            updatedAt: "2026-05-13T10:00:00.000Z",
+          },
+        };
+      }
+
+      assert.equal(command.constructor.name, "PutCommand");
+      return {};
+    }) as DynamoDBDocumentClient,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/tenders/TDR-3001/product-configuration",
+        pathParameters: { tenderId: "TDR-3001", section: "product-configuration" },
+        queryStringParameters: { tenantId: "tenant-a" },
+        requestContext: { http: { method: "PUT" } },
+        body: JSON.stringify({
+          productType: "Filter Bag",
+          quantity: 100,
+          bagDiameterMm: 220,
+          bagLengthMm: 700,
+          seamAllowanceMm: 10,
+          topBottomAllowanceMm: 16,
+          topDesign: "Top A",
+          bottomDesign: "Bottom A",
+          seamType: "Overlock",
+          includeWearStrip: true,
+          wearStripHeightMm: 80,
+          mainFabricMaterialId: "FAB-1",
+          accessoriesMaterialId: "ACC-1",
+          threadMaterialId: "THR-1",
+          packagingType: "carton",
+          bagsPerCarton: 20,
+          packagingNotes: "Handle carefully",
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(response.body);
+
+  const putCommands = seenCommands.filter((command) => command.constructor.name === "PutCommand");
+  assert.equal(putCommands.length, 2);
+
+  const configItem = putCommands[0]?.input?.Item as Record<string, unknown>;
+  assert.equal(configItem.PK, "TENDER#TDR-3001");
+  assert.equal(configItem.SK, "PRODUCT_CONFIG#base");
+  assert.equal(configItem.entityType, "PRODUCT_CONFIGURATION");
+
+  const tenderItem = putCommands[1]?.input?.Item as Record<string, unknown>;
+  assert.equal(tenderItem.PK, "TENANT#tenant-a");
+  assert.equal(tenderItem.status, "PRODUCT_CONFIGURATION");
+
+  const body = JSON.parse(response.body) as Record<string, unknown>;
+  assert.equal(body.PK, undefined);
+  assert.equal(body.SK, undefined);
+  assert.equal(body.entityType, "PRODUCT_CONFIGURATION");
+  assert.equal(body.packagingType, "carton");
+});
+
+test("saves roll calculation with tender-based keys and updates tender status", async () => {
+  const seenCommands: MockCommand[] = [];
+
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      seenCommands.push(command);
+
+      if (command.constructor.name === "GetCommand") {
+        const key = command.input?.Key as Record<string, string>;
+
+        if (key.PK === "TENDER#TDR-4001") {
+          return {};
+        }
+
+        return {
+          Item: {
+            PK: "TENANT#tenant-a",
+            SK: "TENDER#TDR-4001",
+            GSI1PK: "TENANT#tenant-a#TENDERS",
+            GSI1SK: "UPDATED#2026-05-13T10:00:00.000Z",
+            entityType: "TENDER_REQUEST",
+            tenderId: "TDR-4001",
+            tenantId: "tenant-a",
+            customerName: "Acme",
+            tenderNumber: "TEN-1",
+            internalInquiryNumber: "INQ-1",
+            tenderDueDate: "2026-06-01",
+            requestType: "inquiry",
+            requestedMaterial: "Foil",
+            bagDiameterMm: 220,
+            bagLengthMm: 700,
+            topDesign: "Top A",
+            bottomDesign: "Bottom A",
+            accessoriesMaterial: "ACC",
+            requestedMaterialNotes: "",
+            knownRequiredPrice: null,
+            knownCompetitorPrice: null,
+            customerCommissionPercent: null,
+            priceNegotiationExpected: false,
+            requestedDeliveryTime: "14 days",
+            deliveryPlace: "factory",
+            transportationRequired: false,
+            installationRequired: false,
+            notes: "",
+            status: "PRODUCT_CONFIGURATION",
+            createdAt: "2026-05-13T10:00:00.000Z",
+            updatedAt: "2026-05-13T10:00:00.000Z",
+          },
+        };
+      }
+
+      assert.equal(command.constructor.name, "PutCommand");
+      return {};
+    }) as DynamoDBDocumentClient,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/tenders/TDR-4001/roll-calculation",
+        pathParameters: { tenderId: "TDR-4001" },
+        queryStringParameters: { tenantId: "tenant-a" },
+        requestContext: { http: { method: "PUT" } },
+        body: JSON.stringify({
+          productConfigId: "base",
+          bagDiameterMm: 220,
+          bagLengthMm: 700,
+          seamAllowanceMm: 10,
+          topBottomAllowanceMm: 18,
+          bagWidthMm: 701.15,
+          bagCuttingAreaM2: 0.503,
+          rollWidthM: 1.5,
+          rollLengthM: 100,
+          rollAreaM2: 150,
+          wastePercent: 5,
+          usableRollAreaM2: 142.5,
+          theoreticalBagsPerRoll: 283.3,
+          actualBagsPerRoll: 283,
+          actualAreaPerBagM2: 0.53,
+          totalFabricRequiredM2: 53,
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(response.body);
+
+  const putCommands = seenCommands.filter((command) => command.constructor.name === "PutCommand");
+  assert.equal(putCommands.length, 2);
+
+  const rollItem = putCommands[0]?.input?.Item as Record<string, unknown>;
+  assert.equal(rollItem.PK, "TENDER#TDR-4001");
+  assert.equal(rollItem.SK, "ROLL_CALC#base");
+  assert.equal(rollItem.entityType, "ROLL_CALCULATION");
+
+  const tenderItem = putCommands[1]?.input?.Item as Record<string, unknown>;
+  assert.equal(tenderItem.PK, "TENANT#tenant-a");
+  assert.equal(tenderItem.status, "MATERIAL_ROLL_CALCULATION");
+
+  const body = JSON.parse(response.body) as Record<string, unknown>;
+  assert.equal(body.PK, undefined);
+  assert.equal(body.SK, undefined);
+  assert.equal(body.entityType, "ROLL_CALCULATION");
+  assert.equal(body.productConfigId, "base");
+});
+
+test("saves material sourcing with tender-based keys and updates tender status", async () => {
+  const seenCommands: MockCommand[] = [];
+
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      seenCommands.push(command);
+
+      if (command.constructor.name === "GetCommand") {
+        const key = command.input?.Key as Record<string, string>;
+
+        if (key.PK === "TENDER#TDR-5001") {
+          return {};
+        }
+
+        return {
+          Item: {
+            PK: "TENANT#tenant-a",
+            SK: "TENDER#TDR-5001",
+            GSI1PK: "TENANT#tenant-a#TENDERS",
+            GSI1SK: "UPDATED#2026-05-13T10:00:00.000Z",
+            entityType: "TENDER_REQUEST",
+            tenderId: "TDR-5001",
+            tenantId: "tenant-a",
+            customerName: "Acme",
+            tenderNumber: "TEN-3",
+            internalInquiryNumber: "INQ-3",
+            tenderDueDate: "2026-06-03",
+            requestType: "inquiry",
+            requestedMaterial: "Foil",
+            bagDiameterMm: 220,
+            bagLengthMm: 700,
+            topDesign: "Top A",
+            bottomDesign: "Bottom A",
+            accessoriesMaterial: "ACC",
+            requestedMaterialNotes: "",
+            knownRequiredPrice: null,
+            knownCompetitorPrice: null,
+            customerCommissionPercent: null,
+            priceNegotiationExpected: false,
+            requestedDeliveryTime: "14 days",
+            deliveryPlace: "factory",
+            transportationRequired: false,
+            installationRequired: false,
+            notes: "",
+            status: "MATERIAL_ROLL_CALCULATION",
+            createdAt: "2026-05-13T10:00:00.000Z",
+            updatedAt: "2026-05-13T10:00:00.000Z",
+          },
+        };
+      }
+
+      assert.equal(command.constructor.name, "PutCommand");
+      return {};
+    }) as DynamoDBDocumentClient,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/tenders/TDR-5001/material-sourcing",
+        pathParameters: { tenderId: "TDR-5001", section: "material-sourcing" },
+        queryStringParameters: { tenantId: "tenant-a" },
+        requestContext: { http: { method: "PUT" } },
+        body: JSON.stringify({
+          productConfigId: "base",
+          materialId: "FAB-1",
+          sourcingStrategy: "combine-sources",
+          selectedSources: [
+            {
+              sourceId: "stock-FAB-1",
+              sourceName: "Stock Lot POL-001",
+              sourceType: "stock",
+              qtyUsedM2: 500,
+              unitCostUsdPerM2: 1.2,
+              totalCostUsd: 600,
+              leadTimeDays: 0,
+            },
+            {
+              sourceId: "offer-1",
+              sourceName: "Supplier A",
+              sourceType: "import",
+              qtyUsedM2: 15125,
+              unitCostUsdPerM2: 1.45,
+              totalCostUsd: 21931.25,
+              leadTimeDays: 21,
+            },
+          ],
+          totalAllocatedQtyM2: 15625,
+          weightedAverageUnitCostUsdPerM2: 1.442,
+          exchangeRate: 49.5,
+          currencySafetyFactorPercent: 3,
+          effectiveExchangeRate: 50.985,
+          freightCostPerM2Egp: 4.2,
+          customsCostPerM2Egp: 1.8,
+          otherChargesPerM2Egp: 0.5,
+          landedCostEgpPerM2: 80.01,
+          materialCostPerBagEgp: 14.2,
+          totalMaterialCostEgp: 14200,
+          totalLeadTimeDays: 21,
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(response.body);
+
+  const putCommands = seenCommands.filter((command) => command.constructor.name === "PutCommand");
+  assert.equal(putCommands.length, 2);
+
+  const sourcingItem = putCommands[0]?.input?.Item as Record<string, unknown>;
+  assert.equal(sourcingItem.PK, "TENDER#TDR-5001");
+  assert.equal(sourcingItem.SK, "MATERIAL_SOURCE#base");
+  assert.equal(sourcingItem.entityType, "MATERIAL_SOURCE_SELECTION");
+
+  const tenderItem = putCommands[1]?.input?.Item as Record<string, unknown>;
+  assert.equal(tenderItem.PK, "TENANT#tenant-a");
+  assert.equal(tenderItem.status, "MATERIAL_SOURCING");
+
+  const body = JSON.parse(response.body) as Record<string, unknown>;
+  assert.equal(body.PK, undefined);
+  assert.equal(body.SK, undefined);
+  assert.equal(body.entityType, "MATERIAL_SOURCE_SELECTION");
+});
+
+test("saves cost build-up with tender-based keys and updates tender status", async () => {
+  const seenCommands: MockCommand[] = [];
+
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      seenCommands.push(command);
+
+      if (command.constructor.name === "GetCommand") {
+        const key = command.input?.Key as Record<string, string>;
+
+        if (key.PK === "TENDER#TDR-6001") {
+          return {};
+        }
+
+        return {
+          Item: {
+            PK: "TENANT#tenant-a",
+            SK: "TENDER#TDR-6001",
+            GSI1PK: "TENANT#tenant-a#TENDERS",
+            GSI1SK: "UPDATED#2026-05-13T10:00:00.000Z",
+            entityType: "TENDER_REQUEST",
+            tenderId: "TDR-6001",
+            tenantId: "tenant-a",
+            customerName: "Acme",
+            tenderNumber: "TEN-6",
+            internalInquiryNumber: "INQ-6",
+            tenderDueDate: "2026-06-05",
+            requestType: "inquiry",
+            requestedMaterial: "Foil",
+            bagDiameterMm: 220,
+            bagLengthMm: 700,
+            topDesign: "Top A",
+            bottomDesign: "Bottom A",
+            accessoriesMaterial: "ACC",
+            requestedMaterialNotes: "",
+            knownRequiredPrice: null,
+            knownCompetitorPrice: null,
+            customerCommissionPercent: null,
+            priceNegotiationExpected: false,
+            requestedDeliveryTime: "14 days",
+            deliveryPlace: "factory",
+            transportationRequired: false,
+            installationRequired: false,
+            notes: "",
+            status: "MATERIAL_SOURCING",
+            createdAt: "2026-05-13T10:00:00.000Z",
+            updatedAt: "2026-05-13T10:00:00.000Z",
+          },
+        };
+      }
+
+      assert.equal(command.constructor.name, "PutCommand");
+      return {};
+    }) as DynamoDBDocumentClient,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/tenders/TDR-6001/cost-build-up",
+        pathParameters: { tenderId: "TDR-6001", section: "cost-build-up" },
+        queryStringParameters: { tenantId: "tenant-a" },
+        requestContext: { http: { method: "PUT" } },
+        body: JSON.stringify({
+          productConfigId: "base",
+          alternativeId: "base",
+          quantity: 1000,
+          currency: "EGP",
+          costLines: [
+            {
+              code: "A",
+              category: "Material - Fabric",
+              description: "Loaded from sourcing",
+              calculationBasis: "Material sourcing material cost per bag",
+              costPerBag: 14.2,
+              editable: false,
+            },
+          ],
+          totalMaterialCostPerBag: 18.4,
+          totalOperatingCostPerBag: 5.1,
+          totalAdditionalCostPerBag: 1.6,
+          totalCostPricePerBag: 25.1,
+          totalCostPriceForOrder: 25100,
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(response.body);
+
+  const putCommands = seenCommands.filter((command) => command.constructor.name === "PutCommand");
+  assert.equal(putCommands.length, 2);
+
+  const costItem = putCommands[0]?.input?.Item as Record<string, unknown>;
+  assert.equal(costItem.PK, "TENDER#TDR-6001");
+  assert.equal(costItem.SK, "COST_BUILDUP#base");
+  assert.equal(costItem.entityType, "COST_BUILDUP");
+
+  const tenderItem = putCommands[1]?.input?.Item as Record<string, unknown>;
+  assert.equal(tenderItem.PK, "TENANT#tenant-a");
+  assert.equal(tenderItem.status, "COST_BUILDUP");
+
+  const body = JSON.parse(response.body) as Record<string, unknown>;
+  assert.equal(body.PK, undefined);
+  assert.equal(body.SK, undefined);
+  assert.equal(body.entityType, "COST_BUILDUP");
+});
+
+test("creates customer with tenant keys and clean json response", async () => {
+  const seenCommands: MockCommand[] = [];
+
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      seenCommands.push(command);
+      if (command.constructor.name === "GetCommand") {
+        return {};
+      }
+      return {};
+    }) as DynamoDBDocumentClient,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/customers",
+        requestContext: { http: { method: "POST" } },
+        queryStringParameters: { tenantId: "tenant-a" },
+        body: JSON.stringify({
+          customerId: "CUS-1",
+          customerName: "Acme Industries",
+          country: "Egypt",
+          contactName: "Nadia Hassan",
+          email: "nadia@acme.test",
+          phone: "+20-100-000-0000",
+          active: true,
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 201);
+  const putCommand = seenCommands.find((entry) => entry.constructor.name === "PutCommand");
+  assert.ok(putCommand);
+  const item = putCommand?.input?.Item as Record<string, unknown>;
+  assert.equal(item.PK, "TENANT#tenant-a");
+  assert.equal(item.SK, "CUSTOMER#CUS-1");
+  assert.equal(item.entityType, "CUSTOMER");
+  const body = JSON.parse(response.body ?? "{}") as Record<string, unknown>;
+  assert.equal(body.PK, undefined);
+  assert.equal(body.customerName, "Acme Industries");
+});
+
+test("creates material with tenant keys and clean json response", async () => {
+  const seenCommands: MockCommand[] = [];
+
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      seenCommands.push(command);
+      if (command.constructor.name === "GetCommand") {
+        return {};
+      }
+      return {};
+    }) as DynamoDBDocumentClient,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/materials",
+        requestContext: { http: { method: "POST" } },
+        queryStringParameters: { tenantId: "tenant-a" },
+        body: JSON.stringify({
+          materialId: "MAT-1",
+          materialName: "PTFE",
+          category: "FabricMaterial",
+          temperatureLimit: "260C",
+          chemicalResistance: "High",
+          defaultWastePercent: 5,
+          rollWidthM: 1.6,
+          rollLengthM: 100,
+          active: true,
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 201);
+  const putCommand = seenCommands.find((entry) => entry.constructor.name === "PutCommand");
+  assert.ok(putCommand);
+  const item = putCommand?.input?.Item as Record<string, unknown>;
+  assert.equal(item.PK, "TENANT#tenant-a");
+  assert.equal(item.SK, "MATERIAL#MAT-1");
+  assert.equal(item.entityType, "MATERIAL");
+  assert.equal(item.category, "FabricMaterial");
+  assert.equal(item.rollWidthM, 1.6);
+  assert.equal(item.rollLengthM, 100);
+  const body = JSON.parse(response.body ?? "{}") as Record<string, unknown>;
+  assert.equal(body.PK, undefined);
+  assert.equal(body.materialName, "PTFE");
+});
+
+test("creates stock item with tenant keys and clean json response", async () => {
+  const seenCommands: MockCommand[] = [];
+
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      seenCommands.push(command);
+      if (command.constructor.name === "GetCommand") {
+        return {};
+      }
+      return {};
+    }) as DynamoDBDocumentClient,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/stock",
+        requestContext: { http: { method: "POST" } },
+        queryStringParameters: { tenantId: "tenant-a" },
+        body: JSON.stringify({
+          stockId: "STK-1",
+          supplierId: "SUP-1",
+          materialId: "MAT-1",
+          unitCount: 500,
+          active: true,
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 201);
+  const putCommand = seenCommands.find((entry) => entry.constructor.name === "PutCommand");
+  assert.ok(putCommand);
+  const item = putCommand?.input?.Item as Record<string, unknown>;
+  assert.equal(item.PK, "TENANT#tenant-a");
+  assert.equal(item.SK, "STOCK#STK-1");
+  assert.equal(item.entityType, "STOCK_ITEM");
+  assert.equal(item.unitCount, 500);
+  const body = JSON.parse(response.body ?? "{}") as Record<string, unknown>;
+  assert.equal(body.PK, undefined);
+  assert.equal(body.stockId, "STK-1");
+});
+
+test("creates import preset with tenant keys and clean json response", async () => {
+  const seenCommands: MockCommand[] = [];
+
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      seenCommands.push(command);
+      if (command.constructor.name === "GetCommand") {
+        return {};
+      }
+      return {};
+    }) as DynamoDBDocumentClient,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/import-presets",
+        requestContext: { http: { method: "POST" } },
+        queryStringParameters: { tenantId: "tenant-a" },
+        body: JSON.stringify({
+          importPresetId: "IMP-1",
+          supplierId: "SUP-1",
+          materialId: "MAT-1",
+          leadTimeDays: 21,
+          unitCostUsdPerM2: 4.75,
+          active: true,
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 201);
+  const putCommand = seenCommands.find((entry) => entry.constructor.name === "PutCommand");
+  assert.ok(putCommand);
+  const item = putCommand?.input?.Item as Record<string, unknown>;
+  assert.equal(item.PK, "TENANT#tenant-a");
+  assert.equal(item.SK, "IMPORT_PRESET#IMP-1");
+  assert.equal(item.entityType, "IMPORT_PRESET");
+  assert.equal(item.unitCostUsdPerM2, 4.75);
+  const body = JSON.parse(response.body ?? "{}") as Record<string, unknown>;
+  assert.equal(body.PK, undefined);
+  assert.equal(body.importPresetId, "IMP-1");
+});
+
+test("creates supplier offer with material partition and supplier offer gsi", async () => {
+  const seenCommands: MockCommand[] = [];
+
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      seenCommands.push(command);
+      if (command.constructor.name === "QueryCommand") {
+        return { Items: [] };
+      }
+      return {};
+    }) as DynamoDBDocumentClient,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/suppliers/SUP-1/offers",
+        pathParameters: { supplierId: "SUP-1" },
+        requestContext: { http: { method: "POST" } },
+        queryStringParameters: { tenantId: "tenant-a" },
+        body: JSON.stringify({
+          offerId: "OFF-1",
+          materialId: "MAT-1",
+          unitCostUsdPerM2: 4.5,
+          minOrderQty: 100,
+          leadTimeDays: 21,
+          freightCost: 45,
+          customsEstimate: 12,
+          validUntil: "2026-12-31",
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 201);
+  const putCommand = seenCommands.find((entry) => entry.constructor.name === "PutCommand");
+  assert.ok(putCommand);
+  const item = putCommand?.input?.Item as Record<string, unknown>;
+  assert.equal(item.PK, "MATERIAL#MAT-1");
+  assert.equal(item.SK, "SUPPLIER#SUP-1#OFFER#OFF-1");
+  assert.equal(item.GSI3PK, "SUPPLIER#SUP-1#OFFERS");
+  assert.equal(item.GSI3SK, "OFFER#OFF-1");
+  assert.equal(item.entityType, "SUPPLIER_OFFER");
 });

@@ -5,57 +5,200 @@ export type EntityEnvelope = {
   updatedAt: string;
 };
 
+export type TenderRequestType =
+  | "inquiry"
+  | "public tender"
+  | "budget offer"
+  | "limited tender"
+  | "direct order";
+
+export type DeliveryPlace = "factory" | "customer facility";
+
+export type TenderStatus =
+  | "DRAFT_INTAKE"
+  | "MISSING_INFORMATION"
+  | "TECHNICAL_REVIEW"
+  | "READY_FOR_PRICING"
+  | "PRODUCT_CONFIGURATION"
+  | "MATERIAL_ROLL_CALCULATION"
+  | "MATERIAL_SOURCING"
+  | "COST_BUILDUP"
+  | "ALTERNATIVES"
+  | "PENDING_APPROVAL"
+  | "APPROVED"
+  | "OFFER_SUBMITTED"
+  | "NEGOTIATION"
+  | "WON"
+  | "LOST"
+  | "CANCELLED"
+  | "PRICING_IN_PROGRESS"
+  | "SOURCING_REVIEW"
+  | "PRICE_READY";
+
 export type TenderRequest = EntityEnvelope & {
   tenderId: string;
-  title: string;
   customerName: string;
-  status: "draft" | "in-review" | "costing" | "approved";
-  dueDate: string;
-  currency: string;
-  owner: string;
+  tenderNumber: string;
+  internalInquiryNumber: string;
+  tenderDueDate: string;
+  requestType: TenderRequestType;
+  requestedMaterial: string;
+  bagDiameterMm: number | null;
+  bagLengthMm: number | null;
+  topDesign: string;
+  bottomDesign: string;
+  accessoriesMaterial: string;
+  requestedMaterialNotes?: string;
+  knownRequiredPrice: number | null;
+  knownCompetitorPrice: number | null;
+  customerCommissionPercent: number | null;
+  priceNegotiationExpected: boolean;
+  requestedDeliveryTime: string;
+  deliveryPlace: DeliveryPlace;
+  assignedTo?: string;
+  archived?: boolean;
+  transportationRequired: boolean;
+  installationRequired: boolean;
   notes?: string;
+  status: TenderStatus;
+};
+
+export type TenderSummary = {
+  tenderId: string;
+  tenderNumber: string;
+  internalInquiryNumber: string;
+  customerName: string;
+  requestType: TenderRequestType;
+  requestedMaterial: string;
+  tenderDueDate: string;
+  requestedDeliveryTime: string;
+  deliveryPlace: DeliveryPlace;
+  assignedTo?: string;
+  status: TenderStatus;
+  archived?: boolean;
+  updatedAt: string;
+};
+
+export type TenderListSummary = {
+  total: number;
+  inProgress: number;
+  pendingApproval: number;
+  approved: number;
+  overdue: number;
+};
+
+export type TenderListResponse = {
+  items: TenderSummary[];
+  nextToken: string | null;
+  summary: TenderListSummary;
+};
+
+export type TenderActivity = EntityEnvelope & {
+  tenderId: string;
+  activityId: string;
+  activityType: "ARCHIVED" | "DUPLICATED" | "DELETED";
+  message: string;
 };
 
 export type ProductConfiguration = EntityEnvelope & {
   tenderId: string;
-  configurationId: string;
-  productFamily: string;
-  productCode: string;
-  quantity: number;
-  uom: string;
-  assumptions: string[];
+  productConfigId: string;
+  productType: string;
+  quantity: number | null;
+  bagDiameterMm: number | null;
+  bagLengthMm: number | null;
+  seamAllowanceMm: number | null;
+  topBottomAllowanceMm: number | null;
+  topDesign: string;
+  bottomDesign: string;
+  seamType: string;
+  includeWearStrip: boolean;
+  wearStripHeightMm: number | null;
+  mainFabricMaterialId: string;
+  accessoriesMaterialId: string;
+  threadMaterialId: string;
+  packagingType: string;
+  bagsPerCarton: number | null;
+  packagingNotes?: string;
 };
 
 export type RollCalculation = EntityEnvelope & {
   tenderId: string;
-  calculationId: string;
-  materialCode: string;
-  rollWidthMm: number;
-  rollLengthM: number;
-  utilizationPercent: number;
-  wastePercent: number;
+  productConfigId: string;
+  bagDiameterMm: number | null;
+  bagLengthMm: number | null;
+  seamAllowanceMm: number | null;
+  topBottomAllowanceMm: number | null;
+  bagWidthMm: number | null;
+  bagCuttingAreaM2: number | null;
+  rollWidthM: number | null;
+  rollLengthM: number | null;
+  rollAreaM2: number | null;
+  wastePercent: number | null;
+  usableRollAreaM2: number | null;
+  theoreticalBagsPerRoll: number | null;
+  actualBagsPerRoll: number | null;
+  actualAreaPerBagM2: number | null;
+  totalFabricRequiredM2: number | null;
+};
+
+export type MaterialSourceType = "stock" | "import";
+
+export type MaterialCategory = "FabricMaterial" | "accessoriesMaterial" | "threadMaterial";
+
+export type SourcingStrategy = "single-source" | "combine-sources";
+
+export type SelectedMaterialSource = {
+  sourceId: string;
+  sourceName: string;
+  sourceType: MaterialSourceType;
+  qtyUsedM2: number | null;
+  unitCostUsdPerM2: number | null;
+  totalCostUsd: number | null;
+  leadTimeDays: number | null;
 };
 
 export type MaterialSourceSelection = EntityEnvelope & {
   tenderId: string;
-  selectionId: string;
-  materialCode: string;
-  supplierId: string;
-  leadTimeDays: number;
-  pricePerUnit: number;
-  currency: string;
-  rationale?: string;
+  productConfigId: string;
+  materialId: string;
+  sourcingStrategy: SourcingStrategy;
+  selectedSources: SelectedMaterialSource[];
+  totalAllocatedQtyM2: number | null;
+  weightedAverageUnitCostUsdPerM2: number | null;
+  exchangeRate: number | null;
+  currencySafetyFactorPercent: number | null;
+  effectiveExchangeRate: number | null;
+  freightCostPerM2Egp: number | null;
+  customsCostPerM2Egp: number | null;
+  otherChargesPerM2Egp: number | null;
+  landedCostEgpPerM2: number | null;
+  materialCostPerBagEgp: number | null;
+  totalMaterialCostEgp: number | null;
+  totalLeadTimeDays: number | null;
+};
+
+export type CostLine = {
+  code: string;
+  category: string;
+  description: string;
+  calculationBasis: string;
+  costPerBag: number | null;
+  editable: boolean;
 };
 
 export type CostBuildUp = EntityEnvelope & {
   tenderId: string;
-  costBuildUpId: string;
-  materialCost: number;
-  conversionCost: number;
-  logisticsCost: number;
-  overheadCost: number;
-  marginTargetPercent: number;
-  totalCost: number;
+  productConfigId: string;
+  alternativeId: string;
+  quantity: number | null;
+  currency: "EGP";
+  costLines: CostLine[];
+  totalMaterialCostPerBag: number | null;
+  totalOperatingCostPerBag: number | null;
+  totalAdditionalCostPerBag: number | null;
+  totalCostPricePerBag: number | null;
+  totalCostPriceForOrder: number | null;
 };
 
 export type ScenarioAlternative = EntityEnvelope & {
@@ -85,4 +228,86 @@ export type PricingScenario = EntityEnvelope & {
   status: "draft" | "under-review" | "approved" | "rejected";
   selectedAlternativeId?: string;
   versions: PriceVersion[];
+};
+
+export type Customer = EntityEnvelope & {
+  customerId: string;
+  customerName: string;
+  country: string;
+  contactName: string;
+  email: string;
+  phone: string;
+  active: boolean;
+};
+
+export type Material = EntityEnvelope & {
+  materialId: string;
+  materialName: string;
+  category: MaterialCategory;
+  temperatureLimit: string;
+  chemicalResistance: string;
+  defaultWastePercent: number | null;
+  rollWidthM: number | null;
+  rollLengthM: number | null;
+  active: boolean;
+};
+
+export type StockItem = EntityEnvelope & {
+  stockId: string;
+  supplierId: string;
+  materialId: string;
+  unitCount: number | null;
+  active: boolean;
+};
+
+export type ImportPreset = EntityEnvelope & {
+  importPresetId: string;
+  supplierId: string;
+  materialId: string;
+  leadTimeDays: number | null;
+  unitCostUsdPerM2: number | null;
+  active: boolean;
+};
+
+export type Supplier = EntityEnvelope & {
+  supplierId: string;
+  supplierName: string;
+  country: string;
+  contactName: string;
+  email: string;
+  phone: string;
+  preferred: boolean;
+  active: boolean;
+};
+
+export type SupplierOffer = EntityEnvelope & {
+  offerId: string;
+  supplierId: string;
+  materialId: string;
+  unitCostUsdPerM2: number | null;
+  minOrderQty: number | null;
+  leadTimeDays: number | null;
+  freightCost: number | null;
+  customsEstimate: number | null;
+  validUntil: string;
+};
+
+export type Product = EntityEnvelope & {
+  productId: string;
+  productName: string;
+  productType: string;
+  defaultTopDesign: string;
+  defaultBottomDesign: string;
+  defaultSeamAllowanceMm: number | null;
+  defaultTopBottomAllowanceMm: number | null;
+  active: boolean;
+};
+
+export type Accessory = EntityEnvelope & {
+  accessoryId: string;
+  accessoryName: string;
+  material: string;
+  unit: string;
+  defaultCost: number | null;
+  active: boolean;
 };
