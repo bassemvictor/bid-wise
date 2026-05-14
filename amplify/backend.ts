@@ -1,92 +1,120 @@
 import { defineBackend } from "@aws-amplify/backend";
 import { Stack } from "aws-cdk-lib";
-import {
-  CorsHttpMethod,
-  HttpApi,
-  HttpMethod,
-} from "aws-cdk-lib/aws-apigatewayv2";
-import { HttpUserPoolAuthorizer } from "aws-cdk-lib/aws-apigatewayv2-authorizers";
+import { CorsHttpMethod, HttpApi, HttpMethod } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
-import {
-  AttributeType,
-  BillingMode,
-  Table,
-} from "aws-cdk-lib/aws-dynamodb";
+import { AttributeType, BillingMode, Table } from "aws-cdk-lib/aws-dynamodb";
 
-import { auth } from "./auth/resource.js";
-import { congregationMessage } from "./functions/congregation-message/resource.js";
+import { tenderPricingApi } from "./functions/tender-pricing-api/resource.js";
 
 const backend = defineBackend({
-  auth,
-  congregationMessage,
+  tenderPricingApi,
 });
 
-const storageStack = backend.createStack("hello-storage");
-const apiStack = backend.createStack("hello-api");
+const apiStack = backend.createStack("alimex-api");
+const dataStack = backend.createStack("alimex-data");
 
-const helloTable = new Table(storageStack, "HelloTable", {
+const tableName = process.env.TENDER_PRICING_TABLE ?? "alimex-tender-pricing";
+
+const tenderPricingTable = new Table(dataStack, "TenderPricingTable", {
+  tableName,
   partitionKey: {
-    name: "pk",
+    name: "PK",
     type: AttributeType.STRING,
   },
   sortKey: {
-    name: "sk",
+    name: "SK",
     type: AttributeType.STRING,
   },
   billingMode: BillingMode.PAY_PER_REQUEST,
 });
 
-backend.congregationMessage.addEnvironment("HELLO_TABLE_NAME", helloTable.tableName);
-backend.congregationMessage.addEnvironment("HELLO_ITEM_PK", "CONFIG");
-backend.congregationMessage.addEnvironment("HELLO_ITEM_SK", "HELLO");
-backend.congregationMessage.addEnvironment(
-  "HELLO_STATIC_VALUE",
-  "Stored in DynamoDB",
-);
+backend.tenderPricingApi.addEnvironment("TENDER_PRICING_TABLE", tenderPricingTable.tableName);
+backend.tenderPricingApi.addEnvironment("ENABLE_DEV_ENDPOINTS", "true");
 
-helloTable.grantReadWriteData(backend.congregationMessage.resources.lambda);
+tenderPricingTable.grantReadWriteData(backend.tenderPricingApi.resources.lambda);
 
-const userPoolAuthorizer = new HttpUserPoolAuthorizer(
-  "HelloUserPoolAuthorizer",
-  backend.auth.resources.userPool,
-  {
-    userPoolClients: [backend.auth.resources.userPoolClient],
-  },
-);
-
-const helloApi = new HttpApi(apiStack, "HelloApi", {
-  apiName: "congregationApi",
+const httpApi = new HttpApi(apiStack, "TenderPricingHttpApi", {
+  apiName: "alimexTenderPricingApi",
   corsPreflight: {
     allowOrigins: ["*"],
-    allowHeaders: ["*"],
-    allowMethods: [CorsHttpMethod.GET],
+    allowHeaders: ["content-type", "authorization"],
+    allowMethods: [
+      CorsHttpMethod.GET,
+      CorsHttpMethod.POST,
+      CorsHttpMethod.PUT,
+      CorsHttpMethod.DELETE,
+      CorsHttpMethod.OPTIONS,
+    ],
   },
   createDefaultStage: true,
-  defaultAuthorizer: userPoolAuthorizer,
 });
 
-helloApi.addRoutes({
-  path: "/hello",
+const integration = new HttpLambdaIntegration(
+  "TenderPricingApiIntegration",
+  backend.tenderPricingApi.resources.lambda,
+);
+
+httpApi.addRoutes({
+  path: "/dashboard/summary",
   methods: [HttpMethod.GET],
-  integration: new HttpLambdaIntegration(
-    "HelloWorldIntegration",
-    backend.congregationMessage.resources.lambda,
-  ),
+  integration,
+});
+
+httpApi.addRoutes({
+  path: "/tenders",
+  methods: [HttpMethod.GET, HttpMethod.POST],
+  integration,
+});
+
+httpApi.addRoutes({
+  path: "/tenders/{tenderId}",
+  methods: [HttpMethod.GET, HttpMethod.PUT],
+  integration,
+});
+
+httpApi.addRoutes({
+  path: "/tenders/{tenderId}/{section}",
+  methods: [HttpMethod.GET, HttpMethod.PUT],
+  integration,
+});
+
+httpApi.addRoutes({
+  path: "/price-scenarios",
+  methods: [HttpMethod.GET, HttpMethod.POST],
+  integration,
+});
+
+httpApi.addRoutes({
+  path: "/price-scenarios/{scenarioId}",
+  methods: [HttpMethod.GET, HttpMethod.PUT],
+  integration,
+});
+
+httpApi.addRoutes({
+  path: "/dev/seed",
+  methods: [HttpMethod.POST],
+  integration,
+});
+
+httpApi.addRoutes({
+  path: "/dev/tenant/{tenantId}/clear",
+  methods: [HttpMethod.DELETE],
+  integration,
 });
 
 backend.addOutput({
   custom: {
     API: {
-      [helloApi.httpApiName!]: {
-        endpoint: helloApi.url,
-        region: Stack.of(helloApi).region,
-        apiName: helloApi.httpApiName,
+      [httpApi.httpApiName!]: {
+        endpoint: httpApi.url,
+        region: Stack.of(httpApi).region,
+        apiName: httpApi.httpApiName,
       },
     },
     storage: {
-      helloTable: {
-        tableName: helloTable.tableName,
-        region: Stack.of(helloTable).region,
+      tenderPricingTable: {
+        tableName: tenderPricingTable.tableName,
+        region: Stack.of(tenderPricingTable).region,
       },
     },
   },

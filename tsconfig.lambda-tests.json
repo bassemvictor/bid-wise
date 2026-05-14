@@ -12,5 +12,5 @@
     "outDir": ".test-dist",
     "rootDir": "."
   },
-  "include": ["amplify/**/*.ts", "tests/**/*.ts"]
+  "include": ["amplify/**/*.ts", "tests/**/*.ts", "shared/**/*.ts"]
 }
