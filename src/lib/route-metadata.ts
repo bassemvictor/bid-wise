@@ -33,6 +33,10 @@ export const getPageTitle = (pathname: string) => {
     return "Import Rolls";
   }
 
+  if (pathname === "/development") {
+    return "Development";
+  }
+
   const segments = pathname.split("/").filter(Boolean);
 
   if (segments[0] === "price-scenarios" && segments[1]) {
@@ -97,6 +101,11 @@ export const getBreadcrumbs = (pathname: string) => {
   if (segments[0] === "stock" || segments[0] === "import-presets") {
     crumbs.push({ label: "Master Data", href: "/materials" });
     crumbs.push({ label: segments[0] === "stock" ? "In Stock Rolls" : "Import Rolls" });
+    return crumbs;
+  }
+
+  if (segments[0] === "development") {
+    crumbs.push({ label: "Development" });
     return crumbs;
   }
 

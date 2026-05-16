@@ -123,7 +123,7 @@ export const PricingApprovalPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [saveMode, setSaveMode] = useState<"draft" | "final" | null>(null);
+  const [saveMode, setSaveMode] = useState<"draft" | "final" | "approve" | null>(null);
 
   useEffect(() => {
     if (!isApiConfigured || !tenderId) {
@@ -200,6 +200,8 @@ export const PricingApprovalPage = () => {
     [form],
   );
 
+  const hasApprovedScenario = decisionCounts.approved > 0;
+
   const updateDecision = (scenarioId: string, patch: Partial<DecisionForm>) => {
     setForm((current) =>
       current
@@ -213,7 +215,7 @@ export const PricingApprovalPage = () => {
     );
   };
 
-  const payload = useMemo<PricingApproval | null>(() => {
+  const buildPayload = (mode: "draft" | "final" | "approve"): PricingApproval | null => {
     if (!form) {
       return null;
     }
@@ -222,6 +224,9 @@ export const PricingApprovalPage = () => {
     const approvedCount = form.decisions.filter((decision) => decision.status === "approved").length;
     const deniedCount = form.decisions.filter((decision) => decision.status === "denied").length;
     const status: PricingApproval["status"] =
+      mode === "approve"
+        ? "approved"
+        :
       approvalsOpen === 0 && approvedCount > 0 && deniedCount === 0
         ? "approved"
         : approvedCount > 0 && (approvalsOpen > 0 || deniedCount > 0)
@@ -250,9 +255,11 @@ export const PricingApprovalPage = () => {
       createdAt: "",
       updatedAt: "",
     };
-  }, [form, tenderId]);
+  };
 
-  const save = async (mode: "draft" | "final") => {
+  const save = async (mode: "draft" | "final" | "approve") => {
+    const payload = buildPayload(mode);
+
     if (!payload) {
       return;
     }
@@ -267,16 +274,32 @@ export const PricingApprovalPage = () => {
       return;
     }
 
+    if (mode === "approve" && !hasApprovedScenario) {
+      setError("Approve at least one scenario before approving the whole tender.");
+      setSaveMode(null);
+      return;
+    }
+
     try {
       const response = await api.put<PricingApproval>(`/tenders/${tenderId}/pricing-approval`, payload);
       if (alternatives) {
         setForm(buildInitialForm(tenderId, alternatives, response));
       }
+      setTender((current) =>
+        current
+          ? {
+              ...current,
+              status: response.status === "approved" ? "APPROVED" : "PENDING_APPROVAL",
+            }
+          : current,
+      );
 
       setMessage(
         mode === "draft"
           ? "Pricing approval saved."
-          : "Pricing approval saved. Scenario decisions are now reflected on the tender.",
+          : mode === "approve"
+            ? "Tender approved. At least one approved scenario is now locked in for this tender."
+            : "Pricing approval saved. Scenario decisions are now reflected on the tender.",
       );
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to save pricing approval.");
@@ -287,7 +310,11 @@ export const PricingApprovalPage = () => {
 
   return (
     <div className="space-y-6">
-      <TenderWorkflowStepper currentStep={6} tenderId={tenderId} />
+      <TenderWorkflowStepper
+        currentStep={6}
+        currentStepCompleted={tender?.status === "APPROVED"}
+        tenderId={tenderId}
+      />
 
       <Card>
         <CardHeader>
@@ -465,6 +492,14 @@ export const PricingApprovalPage = () => {
                   <Button onClick={() => void save("final")} type="button">
                     <CheckCircle2 className="h-4 w-4" />
                     {saveMode === "final" ? "Saving..." : "Save Approval"}
+                  </Button>
+                  <Button
+                    disabled={!hasApprovedScenario || saveMode === "approve"}
+                    onClick={() => void save("approve")}
+                    type="button"
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    {saveMode === "approve" ? "Approving..." : "Approve Tender"}
                   </Button>
                 </div>
               </div>

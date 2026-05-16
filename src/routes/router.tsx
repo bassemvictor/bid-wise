@@ -7,6 +7,7 @@ import { AlternativesPage } from "../pages/alternatives-page";
 import { AccessoriesPage } from "../pages/accessories-page";
 import { AuthPage } from "../pages/auth-page";
 import { CustomersPage } from "../pages/customers-page";
+import { DevelopmentPage } from "../pages/development-page";
 import { ImportPresetsPage } from "../pages/import-presets-page";
 import { CostBuildUpPage } from "../pages/cost-build-up-page";
 import { MaterialSourcingPage } from "../pages/material-sourcing-page";
@@ -72,6 +73,10 @@ export const router = createBrowserRouter([
       {
         path: "import-presets",
         element: <ImportPresetsPage />,
+      },
+      {
+        path: "development",
+        element: <DevelopmentPage />,
       },
       {
         path: "tenders/intake",

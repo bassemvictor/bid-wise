@@ -163,6 +163,8 @@ addProtectedRoutes("/price-scenarios/{scenarioId}", [HttpMethod.GET, HttpMethod.
 
 addProtectedRoutes("/dev/seed", [HttpMethod.POST]);
 
+addProtectedRoutes("/dev/seed-master-data", [HttpMethod.POST]);
+
 addProtectedRoutes("/dev/tenant/{tenantId}/clear", [HttpMethod.DELETE]);
 
 backend.addOutput({

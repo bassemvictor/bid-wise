@@ -10,6 +10,7 @@ type Step = {
 
 type TenderWorkflowStepperProps = {
   currentStep: number;
+  currentStepCompleted?: boolean;
   tenderId?: string;
 };
 
@@ -27,6 +28,7 @@ const getSteps = (tenderId?: string): Step[] => [
 
 export const TenderWorkflowStepper = ({
   currentStep,
+  currentStepCompleted = false,
   tenderId,
 }: TenderWorkflowStepperProps) => {
   const steps = getSteps(tenderId);
@@ -39,8 +41,9 @@ export const TenderWorkflowStepper = ({
       <div className="flex min-w-max items-center">
         {steps.map((step, index) => {
           const stepNumber = index + 1;
-          const isActive = stepNumber === currentStep;
-          const isComplete = stepNumber < currentStep;
+          const isCurrentStep = stepNumber === currentStep;
+          const isComplete = stepNumber < currentStep || (isCurrentStep && currentStepCompleted);
+          const isActive = isCurrentStep && !currentStepCompleted;
           const content = (
             <div className="flex items-center gap-4">
               <div

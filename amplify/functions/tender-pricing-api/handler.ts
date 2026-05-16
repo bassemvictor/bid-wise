@@ -2203,8 +2203,15 @@ const savePricingApproval = async (
   const approvalsOpen = payload.decisions.filter((decision) => decision.status === "pending").length;
   const approvedCount = payload.decisions.filter((decision) => decision.status === "approved").length;
   const deniedCount = payload.decisions.filter((decision) => decision.status === "denied").length;
-  const overallStatus: PricingApproval["status"] =
-    approvalsOpen === 0 && approvedCount > 0 && deniedCount === 0
+  const requestedApproval = payload.status === "approved";
+
+  if (requestedApproval && approvedCount === 0) {
+    throw new Error("At least one scenario must be approved before approving the tender.");
+  }
+
+  const overallStatus: PricingApproval["status"] = requestedApproval
+    ? "approved"
+    : approvalsOpen === 0 && approvedCount > 0 && deniedCount === 0
       ? "approved"
       : approvedCount > 0 && (approvalsOpen > 0 || deniedCount > 0)
         ? "partial"
@@ -2428,6 +2435,227 @@ const seedDevData = async (context: RequestContext) => {
   return json(201, {
     message: "Development-only seed completed.",
     tenantId: context.tenantId,
+  });
+};
+
+const seedDevMasterData = async (context: RequestContext) => {
+  if (!isDevEnabled()) {
+    return json(403, { message: "Development-only endpoint disabled." });
+  }
+
+  const customerCountries = [
+    "Canada",
+    "United States",
+    "Germany",
+    "France",
+    "Italy",
+    "Spain",
+    "United Kingdom",
+    "Egypt",
+    "Saudi Arabia",
+    "UAE",
+  ];
+  const materialNames = [
+    "PPS Felt 500",
+    "PTFE Membrane 420",
+    "Polyester Needle Felt",
+    "Acrylic Blend 450",
+    "Nomex HeatShield",
+    "Fiberglass Woven 800",
+    "Aramid Prime 320",
+    "Polypropylene Flow 280",
+    "ePTFE UltraClean",
+    "Cotton Support Mesh",
+  ];
+  const supplierCountries = [
+    "Canada",
+    "United States",
+    "Germany",
+    "Italy",
+    "India",
+    "China",
+    "Turkey",
+    "Egypt",
+    "Saudi Arabia",
+    "UAE",
+  ];
+  const accessoryUnits = ["piece", "set", "pack", "piece", "roll", "set", "pack", "piece", "set", "pack"];
+
+  const customers = await Promise.all(
+    Array.from({ length: 10 }, (_, index) =>
+      saveCustomer(context, {
+        customerId: `CUS-${String(index + 1).padStart(3, "0")}`,
+        tenantId: context.tenantId,
+        customerName: `Customer ${index + 1}`,
+        country: customerCountries[index],
+        contactName: `Contact ${index + 1}`,
+        email: `customer${index + 1}@alimex.dev`,
+        phone: `+1-555-010${index}`,
+        active: true,
+      }),
+    ),
+  );
+
+  const materials = await Promise.all(
+    Array.from({ length: 10 }, (_, index) =>
+      saveMaterial(context, {
+        materialId: `MAT-${String(index + 1).padStart(3, "0")}`,
+        tenantId: context.tenantId,
+        materialName: materialNames[index],
+        category:
+          index < 6 ? "FabricMaterial" : index < 8 ? "accessoriesMaterial" : "threadMaterial",
+        temperatureLimit: `${160 + index * 10} C`,
+        chemicalResistance: ["Low", "Medium", "High"][index % 3],
+        defaultWastePercent: 3 + index,
+        rollWidthM: index < 6 ? Number((1.2 + index * 0.05).toFixed(2)) : null,
+        rollLengthM: index < 6 ? 80 + index * 10 : null,
+        active: true,
+      }),
+    ),
+  );
+
+  const suppliers = await Promise.all(
+    Array.from({ length: 10 }, (_, index) =>
+      saveSupplier(context, {
+        supplierId: `SUP-${String(index + 1).padStart(3, "0")}`,
+        tenantId: context.tenantId,
+        supplierName: `Supplier ${index + 1}`,
+        country: supplierCountries[index],
+        contactName: `Sales ${index + 1}`,
+        email: `supplier${index + 1}@alimex.dev`,
+        phone: `+20-100-000-${String(index + 1).padStart(4, "0")}`,
+        preferred: index < 3,
+        active: true,
+      }),
+    ),
+  );
+
+  const accessories = await Promise.all(
+    Array.from({ length: 10 }, (_, index) =>
+      saveAccessory(context, {
+        accessoryId: `ACC-${String(index + 1).padStart(3, "0")}`,
+        tenantId: context.tenantId,
+        accessoryName: `Accessory ${index + 1}`,
+        material: materials[(index + 6) % materials.length]?.materialName ?? `Material ${index + 1}`,
+        unit: accessoryUnits[index],
+        defaultCost: Number((0.25 + index * 0.12).toFixed(2)),
+        active: true,
+      }),
+    ),
+  );
+
+  const products = await Promise.all(
+    Array.from({ length: 10 }, (_, index) => {
+      const mainMaterial = materials[index % 6];
+      const threadMaterial = materials[8 + (index % 2)];
+      return saveProduct(context, {
+        productId: `PRD-${String(index + 1).padStart(3, "0")}`,
+        tenantId: context.tenantId,
+        productName: `Filter Bag ${index + 1}`,
+        productType: "Filter Bag",
+        factoryOverheadPerBag: Number((0.8 + index * 0.05).toFixed(2)),
+        manufacturingOverheadPerBag: Number((0.45 + index * 0.04).toFixed(2)),
+        managementOverheadPerBag: Number((0.3 + index * 0.03).toFixed(2)),
+        active: true,
+        components: [
+          {
+            componentId: crypto.randomUUID(),
+            componentName: "Main Body",
+            componentType: "Bag Body",
+            material: mainMaterial?.materialId ?? "",
+            specifications: {
+              diameter: Number((0.12 + index * 0.005).toFixed(3)),
+              length: Number((1.8 + index * 0.08).toFixed(3)),
+              seamAllowance: Number((0.015 + index * 0.001).toFixed(3)),
+              topBottomAllowance: Number((0.02 + index * 0.001).toFixed(3)),
+            },
+          },
+          {
+            componentId: crypto.randomUUID(),
+            componentName: "Ring",
+            componentType: "Ring",
+            material: materials[6]?.materialId ?? "",
+            specifications: {
+              finish: index % 2 === 0 ? "Galvanized" : "Stainless",
+            },
+          },
+          {
+            componentId: crypto.randomUUID(),
+            componentName: "Thread",
+            componentType: "Thread",
+            material: threadMaterial?.materialId ?? "",
+            specifications: {
+              ply: index % 2 === 0 ? 3 : 4,
+            },
+          },
+        ],
+      });
+    }),
+  );
+
+  const stockItems = await Promise.all(
+    Array.from({ length: 10 }, (_, index) =>
+      saveStockItem(context, {
+        stockId: `STK-${String(index + 1).padStart(3, "0")}`,
+        tenantId: context.tenantId,
+        supplierId: suppliers[index % suppliers.length]?.supplierId ?? "",
+        materialId: materials[index % 6]?.materialId ?? "",
+        unitCount: 3 + index,
+        rollWidthM: Number((1.2 + index * 0.04).toFixed(2)),
+        rollLengthM: 60 + index * 8,
+        unitCostUsdPerM2: Number((4.8 + index * 0.35).toFixed(2)),
+        active: true,
+      }),
+    ),
+  );
+
+  const importPresets = await Promise.all(
+    Array.from({ length: 10 }, (_, index) =>
+      saveImportPreset(context, {
+        importPresetId: `IMP-${String(index + 1).padStart(3, "0")}`,
+        tenantId: context.tenantId,
+        supplierId: suppliers[(index + 2) % suppliers.length]?.supplierId ?? "",
+        materialId: materials[index % 6]?.materialId ?? "",
+        rollWidthM: Number((1.35 + index * 0.03).toFixed(2)),
+        rollLengthM: 90 + index * 10,
+        leadTimeDays: 21 + index * 2,
+        unitCostUsdPerM2: Number((5.5 + index * 0.4).toFixed(2)),
+        customsEstimate: Number((0.45 + index * 0.08).toFixed(2)),
+        active: true,
+      }),
+    ),
+  );
+
+  const supplierOffers = await Promise.all(
+    Array.from({ length: 10 }, (_, index) =>
+      saveSupplierOffer(context, suppliers[index % suppliers.length]?.supplierId ?? "", {
+        offerId: `OFR-${String(index + 1).padStart(3, "0")}`,
+        tenantId: context.tenantId,
+        supplierId: suppliers[index % suppliers.length]?.supplierId ?? "",
+        materialId: materials[index % 6]?.materialId ?? "",
+        unitCostUsdPerM2: Number((5.1 + index * 0.28).toFixed(2)),
+        minOrderQty: 500 + index * 100,
+        leadTimeDays: 14 + index * 3,
+        freightCost: Number((125 + index * 15).toFixed(2)),
+        customsEstimate: Number((85 + index * 10).toFixed(2)),
+        validUntil: `2026-${String((index % 12) + 1).padStart(2, "0")}-28`,
+      }),
+    ),
+  );
+
+  return json(201, {
+    message: "Development-only master data seed completed.",
+    tenantId: context.tenantId,
+    counts: {
+      customers: customers.length,
+      materials: materials.length,
+      suppliers: suppliers.length,
+      accessories: accessories.length,
+      products: products.length,
+      stockItems: stockItems.length,
+      importPresets: importPresets.length,
+      supplierOffers: supplierOffers.length,
+    },
   });
 };
 
@@ -2927,14 +3155,25 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       }
 
       if (section === "pricing-approval") {
-        return json(
-          200,
-          await savePricingApproval(
-            context,
-            tenderId,
-            parseBody<PricingApproval>(event.body),
-          ),
-        );
+        try {
+          return json(
+            200,
+            await savePricingApproval(
+              context,
+              tenderId,
+              parseBody<PricingApproval>(event.body),
+            ),
+          );
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.message === "At least one scenario must be approved before approving the tender."
+          ) {
+            return json(400, { message: error.message });
+          }
+
+          throw error;
+        }
       }
 
       return json(
@@ -2981,6 +3220,10 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
     if (method === "POST" && path === "/dev/seed") {
       return seedDevData(context);
+    }
+
+    if (method === "POST" && path === "/dev/seed-master-data") {
+      return seedDevMasterData(context);
     }
 
     if (method === "DELETE" && event.pathParameters?.tenantId && path === `/dev/tenant/${event.pathParameters.tenantId}/clear`) {

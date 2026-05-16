@@ -36,6 +36,10 @@ const navigation = [
       { label: "Accessories", href: "/accessories" },
     ],
   },
+  {
+    label: "Development",
+    items: [{ label: "Seed Master Data", href: "/development" }],
+  },
 ];
 
 export const AppShell = () => {
