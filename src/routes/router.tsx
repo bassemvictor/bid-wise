@@ -1,10 +1,12 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 
+import { RequireAuth } from "../components/auth/require-auth";
 import { AppShell } from "../components/layout/app-shell";
 import { AllTendersPage } from "../pages/all-tenders-page";
+import { AlternativesPage } from "../pages/alternatives-page";
 import { AccessoriesPage } from "../pages/accessories-page";
+import { AuthPage } from "../pages/auth-page";
 import { CustomersPage } from "../pages/customers-page";
-import { DashboardPage } from "../pages/dashboard-page";
 import { ImportPresetsPage } from "../pages/import-presets-page";
 import { CostBuildUpPage } from "../pages/cost-build-up-page";
 import { MaterialSourcingPage } from "../pages/material-sourcing-page";
@@ -15,6 +17,7 @@ import { PriceScenarioDetailPage } from "../pages/price-scenario-detail-page";
 import { PriceScenariosPage } from "../pages/price-scenarios-page";
 import { ProductConfigurationPage } from "../pages/product-configuration-page";
 import { ProductsPage } from "../pages/products-page";
+import { PricingApprovalPage } from "../pages/pricing-approval-page";
 import { SuppliersPage } from "../pages/suppliers-page";
 import { StockPage } from "../pages/stock-page";
 import { TenderDetailPage } from "../pages/tender-detail-page";
@@ -24,16 +27,20 @@ import { TechnicalReviewPage } from "../pages/technical-review-page";
 export const router = createBrowserRouter([
   {
     path: "/",
-    element: <Navigate replace to="/dashboard" />,
+    element: <Navigate replace to="/tenders" />,
+  },
+  {
+    path: "/auth",
+    element: <AuthPage />,
   },
   {
     path: "/",
-    element: <AppShell />,
+    element: (
+      <RequireAuth>
+        <AppShell />
+      </RequireAuth>
+    ),
     children: [
-      {
-        path: "dashboard",
-        element: <DashboardPage />,
-      },
       {
         path: "tenders",
         element: <AllTendersPage />,
@@ -100,11 +107,11 @@ export const router = createBrowserRouter([
       },
       {
         path: "tenders/:tenderId/alternatives",
-        element: <TenderDetailPage />,
+        element: <AlternativesPage />,
       },
       {
         path: "tenders/:tenderId/pricing-approval",
-        element: <TenderDetailPage />,
+        element: <PricingApprovalPage />,
       },
       {
         path: "price-scenarios",

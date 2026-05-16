@@ -1,3 +1,5 @@
+import { fetchAuthSession } from "aws-amplify/auth";
+
 export class ApiError extends Error {
   status: number;
 
@@ -51,16 +53,37 @@ const getActorHeaders = () => {
   };
 };
 
+const getAuthHeaders = async () => {
+  try {
+    const session = await fetchAuthSession();
+    const idToken = session.tokens?.idToken;
+    const accessToken = session.tokens?.accessToken;
+    const authorizationToken = idToken?.toString() ?? accessToken?.toString() ?? "";
+    const payload = idToken?.payload ?? accessToken?.payload ?? {};
+
+    return {
+      ...(authorizationToken ? { authorization: `Bearer ${authorizationToken}` } : {}),
+      ...(typeof payload.sub === "string" ? { "x-user-id": payload.sub } : {}),
+      ...(typeof payload.name === "string" ? { "x-user-name": payload.name } : {}),
+      ...(typeof payload.email === "string" ? { "x-user-email": payload.email } : {}),
+    };
+  } catch {
+    return {};
+  }
+};
+
 const request = async <T>(
   method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<T> => {
+  const authHeaders = await getAuthHeaders();
   const response = await fetch(buildUrl(path), {
     method,
     headers: {
       "content-type": "application/json",
       ...getActorHeaders(),
+      ...authHeaders,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });

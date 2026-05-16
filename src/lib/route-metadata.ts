@@ -9,8 +9,8 @@ const tenderSectionLabels: Record<string, string> = {
 };
 
 export const getPageTitle = (pathname: string) => {
-  if (pathname === "/" || pathname === "/dashboard") {
-    return "Dashboard";
+  if (pathname === "/") {
+    return "All Tenders";
   }
 
   if (pathname === "/tenders/intake") {
@@ -47,22 +47,17 @@ export const getPageTitle = (pathname: string) => {
     return "Tender Workspace";
   }
 
-  return formatTitle(segments[segments.length - 1] ?? "Dashboard");
+  return formatTitle(segments[segments.length - 1] ?? "All Tenders");
 };
 
 export const getBreadcrumbs = (pathname: string) => {
   const segments = pathname.split("/").filter(Boolean);
 
   if (segments.length === 0) {
-    return [{ label: "Dashboard", href: "/dashboard" }];
+    return [{ label: "Tenders", href: "/tenders" }, { label: "All Tenders" }];
   }
 
   const crumbs: Array<{ label: string; href?: string }> = [];
-
-  if (segments[0] === "dashboard") {
-    crumbs.push({ label: "Dashboard" });
-    return crumbs;
-  }
 
   if (segments[0] === "tenders") {
     crumbs.push({ label: "Tenders", href: "/tenders" });

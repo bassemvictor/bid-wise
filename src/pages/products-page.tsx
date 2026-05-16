@@ -602,7 +602,7 @@ export const ProductsPage = () => {
                   Add one or more structured components that make up this product.
                 </p>
               </div>
-              <div className="flex gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <div className="min-w-44">
                   <Select value={newComponentType} onChange={(event) => setNewComponentType(event.target.value as ComponentTypeOption)}>
                     {componentTypeOptions.map((componentType) => (
@@ -612,7 +612,7 @@ export const ProductsPage = () => {
                     ))}
                   </Select>
                 </div>
-                <Button onClick={addComponent} type="button">
+                <Button className="shrink-0 whitespace-nowrap" onClick={addComponent} type="button">
                   <Plus className="h-4 w-4" />
                   Add Component
                 </Button>

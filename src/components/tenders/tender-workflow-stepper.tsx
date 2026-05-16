@@ -21,8 +21,8 @@ const getSteps = (tenderId?: string): Step[] => [
     href: tenderId ? `/tenders/${tenderId}/material-sourcing` : undefined,
   },
   { label: "Cost Build-Up", href: tenderId ? `/tenders/${tenderId}/cost-build-up` : undefined },
-  { label: "Alternatives" },
-  { label: "Pricing & Approval" },
+  { label: "Alternatives", href: tenderId ? `/tenders/${tenderId}/alternatives` : undefined },
+  { label: "Pricing & Approval", href: tenderId ? `/tenders/${tenderId}/pricing-approval` : undefined },
 ];
 
 export const TenderWorkflowStepper = ({

@@ -13,7 +13,7 @@ export const NotFoundPage = () => (
         </div>
       </CardHeader>
       <CardContent>
-        <NavLink to="/dashboard">
+        <NavLink to="/tenders">
           <Button>Return to Dashboard</Button>
         </NavLink>
       </CardContent>

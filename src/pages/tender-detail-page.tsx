@@ -15,9 +15,11 @@ import { RouteTabs } from "../components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { api, ApiError, isApiConfigured } from "../lib/api";
 import { getPageTitle, getTenderSectionTabs } from "../lib/route-metadata";
+import { PricingApprovalPage } from "./pricing-approval-page";
 import type {
   CostBuildUp,
   MaterialSourceSelection,
+  PricingApproval,
   ProductConfiguration,
   RollCalculation,
   ScenarioAlternative,
@@ -30,7 +32,7 @@ type SectionPayloads = {
   "material-sourcing": MaterialSourceSelection;
   "cost-build-up": CostBuildUp;
   alternatives: ScenarioAlternative;
-  "pricing-approval": { approvalsOpen: number; status: string };
+  "pricing-approval": PricingApproval;
 };
 
 type TenderOverviewData = {
@@ -128,12 +130,14 @@ const GridRow = ({
   </TableRow>
 );
 
-export const TenderDetailPage = () => {
-  const params = useParams();
+const TenderDetailContent = ({
+  section,
+  tenderId,
+}: {
+  section: keyof SectionPayloads;
+  tenderId: string;
+}) => {
   const { pathname } = useLocation();
-  const tenderId = params.tenderId ?? "";
-  const pathSegments = pathname.split("/").filter(Boolean);
-  const section = (pathSegments[2] ?? "overview") as keyof SectionPayloads;
   const [payload, setPayload] = useState<SectionPayloads[keyof SectionPayloads] | null>(null);
   const [overview, setOverview] = useState<TenderOverviewData | null>(null);
   const [error, setError] = useState("");
@@ -548,4 +552,18 @@ export const TenderDetailPage = () => {
       </Card>
     </div>
   );
+};
+
+export const TenderDetailPage = () => {
+  const params = useParams();
+  const { pathname } = useLocation();
+  const tenderId = params.tenderId ?? "";
+  const pathSegments = pathname.split("/").filter(Boolean);
+  const section = (pathSegments[2] ?? "overview") as keyof SectionPayloads;
+
+  if (section === "pricing-approval") {
+    return <PricingApprovalPage />;
+  }
+
+  return <TenderDetailContent section={section} tenderId={tenderId} />;
 };

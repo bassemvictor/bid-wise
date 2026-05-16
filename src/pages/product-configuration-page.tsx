@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -311,6 +311,7 @@ export const ProductConfigurationPage = () => {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductToAdd, setSelectedProductToAdd] = useState("");
+  const [collapsedProducts, setCollapsedProducts] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -546,6 +547,18 @@ export const ProductConfigurationPage = () => {
       const nextSnapshots = current.productSnapshots.filter((product) => product.productId !== productId);
       return applyDerivedSnapshotValues(current, nextSnapshots, materials);
     });
+    setCollapsedProducts((current) => {
+      const next = { ...current };
+      delete next[productId];
+      return next;
+    });
+  };
+
+  const toggleProductCollapse = (productId: string) => {
+    setCollapsedProducts((current) => ({
+      ...current,
+      [productId]: !current[productId],
+    }));
   };
 
   const validate = () => {
@@ -717,24 +730,40 @@ export const ProductConfigurationPage = () => {
                       form.productSnapshots.map((product, productIndex) => (
                         <div key={product.productId} className="rounded-[1.25rem] border border-border bg-white p-5">
                           <div className="mb-5 flex items-start justify-between gap-4">
-                            <div>
-                              <p className="text-base font-semibold text-slate-900">
-                                {product.productName || "Untitled product snapshot"}
-                              </p>
-                              <p className="mt-1 text-sm text-muted-foreground">
-                                Changes here are saved only on this tender snapshot.
-                              </p>
-                            </div>
-                            <Button
-                              onClick={() => removeProductFromConfiguration(product.productId)}
+                            <button
+                              className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                              onClick={() => toggleProductCollapse(product.productId)}
                               type="button"
-                              variant="ghost"
                             >
-                              <Trash2 className="h-4 w-4" />
-                              Remove Product
-                            </Button>
+                              {collapsedProducts[product.productId] ? (
+                                <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                              ) : (
+                                <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                              )}
+                              <div className="min-w-0">
+                                <p className="text-base font-semibold text-slate-900">
+                                  {product.productName || "Untitled product snapshot"}
+                                </p>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                  Changes here are saved only on this tender snapshot.
+                                </p>
+                              </div>
+                            </button>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="default">{product.components.length} component(s)</Badge>
+                              <Button
+                                onClick={() => removeProductFromConfiguration(product.productId)}
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Remove Product
+                              </Button>
+                            </div>
                           </div>
 
+                          {!collapsedProducts[product.productId] ? (
+                            <>
                           <div className="grid gap-4 md:grid-cols-2">
                             <label className="space-y-2 text-sm font-medium text-slate-700">
                               Product Name
@@ -968,6 +997,8 @@ export const ProductConfigurationPage = () => {
                               </div>
                             )}
                           </div>
+                            </>
+                          ) : null}
                         </div>
                       ))
                     ) : (

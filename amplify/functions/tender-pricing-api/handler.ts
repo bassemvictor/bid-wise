@@ -18,6 +18,7 @@ import type {
   ImportPreset,
   Material,
   MaterialSourceSelection,
+  PricingApproval,
   PricingScenario,
   Product,
   ProductComponentSpecificationValue,
@@ -55,11 +56,6 @@ type DashboardSummary = {
   scenarioCount: number;
   approvalCount: number;
   supplierCount: number;
-};
-
-type ApprovalSummary = {
-  approvalsOpen: number;
-  status: string;
 };
 
 type RequestContext = {
@@ -565,6 +561,73 @@ const sanitizeTenderActivity = (item: StoredEntity | null): TenderActivity | nul
       : [],
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
+  };
+};
+
+const sanitizeScenarioAlternative = (item: StoredEntity | null): ScenarioAlternative | null => {
+  if (!item || item.entityType !== "ScenarioAlternative") {
+    return null;
+  }
+
+  return {
+    entityType: "ScenarioAlternative",
+    tenantId: String(item.tenantId ?? ""),
+    tenderId: String(item.tenderId ?? ""),
+    alternativeId: String(item.alternativeId ?? "base"),
+    currency: (String(item.currency ?? "EGP") as "EGP"),
+    quantity: toNullableNumber(item.quantity),
+    baseCostPerBag: toNullableNumber(item.baseCostPerBag),
+    scenarios: Array.isArray(item.scenarios)
+      ? item.scenarios.map((scenario) => {
+          const record = (scenario ?? {}) as Record<string, unknown>;
+          return {
+            scenarioId: String(record.scenarioId ?? crypto.randomUUID()),
+            label: String(record.label ?? ""),
+            profitPercent: toNullableNumber(record.profitPercent),
+            factorOfSafetyPercent: toNullableNumber(record.factorOfSafetyPercent),
+            customerCommissionPercent: toNullableNumber(record.customerCommissionPercent),
+            salesPersonCommissionPercent: toNullableNumber(record.salesPersonCommissionPercent),
+            pricePerBag: toNullableNumber(record.pricePerBag),
+            totalPrice: toNullableNumber(record.totalPrice),
+            notes: String(record.notes ?? ""),
+          };
+        })
+      : [],
+    notes: String(item.notes ?? ""),
+    createdAt: String(item.createdAt ?? ""),
+    updatedAt: String(item.updatedAt ?? ""),
+  };
+};
+
+const sanitizePricingApproval = (item: StoredEntity | null): PricingApproval | null => {
+  if (!item || item.entityType !== "PricingApproval") {
+    return null;
+  }
+
+  return {
+    entityType: "PricingApproval",
+    tenantId: String(item.tenantId ?? ""),
+    tenderId: String(item.tenderId ?? ""),
+    approvalId: String(item.approvalId ?? "base"),
+    currency: "EGP",
+    approvalsOpen: Number(item.approvalsOpen ?? 0),
+    status: (String(item.status ?? "pending") as PricingApproval["status"]),
+    decisions: Array.isArray(item.decisions)
+      ? item.decisions.map((decision) => {
+          const record = (decision ?? {}) as Record<string, unknown>;
+          return {
+            scenarioId: String(record.scenarioId ?? ""),
+            label: String(record.label ?? ""),
+            status: (String(record.status ?? "pending") as PricingApproval["decisions"][number]["status"]),
+            pricePerBag: toNullableNumber(record.pricePerBag),
+            totalPrice: toNullableNumber(record.totalPrice),
+            notes: String(record.notes ?? ""),
+          };
+        })
+      : [],
+    notes: String(item.notes ?? ""),
+    createdAt: String(item.createdAt ?? ""),
+    updatedAt: String(item.updatedAt ?? ""),
   };
 };
 
@@ -2089,7 +2152,7 @@ const saveTenderSection = async (
     | MaterialSourceSelection
     | CostBuildUp
     | ScenarioAlternative
-    | ApprovalSummary,
+    | PricingApproval,
 ) => {
   const config = sectionConfig[section];
   const existing = await getRecord<StoredEntity>(context.tableName, context.tenantId, config.sk(tenderId));
@@ -2109,6 +2172,57 @@ const saveTenderSection = async (
 
   await putRecord(context.tableName, item);
   return item;
+};
+
+const saveAlternatives = async (
+  context: RequestContext,
+  tenderId: string,
+  payload: ScenarioAlternative,
+) => {
+  const existing = await getRecord<StoredEntity>(
+    context.tableName,
+    context.tenantId,
+    sectionConfig.alternatives.sk(tenderId),
+  );
+  const item = await saveTenderSection(context, tenderId, "alternatives", payload);
+  await createAuditActivity(context, tenderId, "ALTERNATIVES", existing, item);
+  await updateTenderStatus(context, tenderId, "ALTERNATIVES");
+  return sanitizeScenarioAlternative(item)!;
+};
+
+const savePricingApproval = async (
+  context: RequestContext,
+  tenderId: string,
+  payload: PricingApproval,
+) => {
+  const existing = await getRecord<StoredEntity>(
+    context.tableName,
+    context.tenantId,
+    sectionConfig["pricing-approval"].sk(tenderId),
+  );
+  const approvalsOpen = payload.decisions.filter((decision) => decision.status === "pending").length;
+  const approvedCount = payload.decisions.filter((decision) => decision.status === "approved").length;
+  const deniedCount = payload.decisions.filter((decision) => decision.status === "denied").length;
+  const overallStatus: PricingApproval["status"] =
+    approvalsOpen === 0 && approvedCount > 0 && deniedCount === 0
+      ? "approved"
+      : approvedCount > 0 && (approvalsOpen > 0 || deniedCount > 0)
+        ? "partial"
+        : deniedCount > 0 && approvedCount === 0 && approvalsOpen === 0
+          ? "denied"
+          : "pending";
+
+  const item = await saveTenderSection(context, tenderId, "pricing-approval", {
+    ...payload,
+    tenderId,
+    approvalId: payload.approvalId || "base",
+    approvalsOpen,
+    status: overallStatus,
+  });
+
+  await createAuditActivity(context, tenderId, "PRICING_APPROVAL", existing, item);
+  await updateTenderStatus(context, tenderId, overallStatus === "approved" ? "APPROVED" : "PENDING_APPROVAL");
+  return sanitizePricingApproval(item)!;
 };
 
 const getTenderSection = async (
@@ -2282,9 +2396,27 @@ const seedDevData = async (context: RequestContext) => {
     updatedAt: createdAt,
   };
 
-  const approval: ApprovalSummary = {
+  const approval: PricingApproval = {
+    entityType: "PricingApproval",
+    tenantId: context.tenantId,
+    tenderId: tender.tenderId,
+    approvalId: "base",
+    currency: "EGP",
     approvalsOpen: 1,
     status: "pending",
+    decisions: [
+      {
+        scenarioId: "base-scenario",
+        label: "Scenario 1",
+        status: "pending",
+        pricePerBag: 1675,
+        totalPrice: 167500,
+        notes: "",
+      },
+    ],
+    notes: "",
+    createdAt,
+    updatedAt: createdAt,
   };
 
   await saveTender(context, tender);
@@ -2702,6 +2834,13 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     }
 
     if (tenderId && section && method === "GET" && path === `/tenders/${tenderId}/${section}`) {
+      if (section === "alternatives") {
+        const alternatives = sanitizeScenarioAlternative(
+          await getTenderSection(context, tenderId, section),
+        );
+        return alternatives ? json(200, alternatives) : json(404, { message: "Alternatives not found." });
+      }
+
       if (section === "product-configuration") {
         const config = await getProductConfiguration(context, tenderId);
         return config ? json(200, config) : json(404, { message: "Product configuration not found." });
@@ -2715,6 +2854,11 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       if (section === "cost-build-up") {
         const costBuildUp = await getCostBuildUp(context, tenderId);
         return costBuildUp ? json(200, costBuildUp) : json(404, { message: "Cost build-up not found." });
+      }
+
+      if (section === "pricing-approval") {
+        const approval = sanitizePricingApproval(await getTenderSection(context, tenderId, section));
+        return approval ? json(200, approval) : json(404, { message: "Pricing approval not found." });
       }
 
       const payload = await getTenderSection(context, tenderId, section);
@@ -2738,6 +2882,17 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     }
 
     if (tenderId && section && method === "PUT" && path === `/tenders/${tenderId}/${section}`) {
+      if (section === "alternatives") {
+        return json(
+          200,
+          await saveAlternatives(
+            context,
+            tenderId,
+            parseBody<ScenarioAlternative>(event.body),
+          ),
+        );
+      }
+
       if (section === "product-configuration") {
         return json(
           200,
@@ -2771,6 +2926,17 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
         );
       }
 
+      if (section === "pricing-approval") {
+        return json(
+          200,
+          await savePricingApproval(
+            context,
+            tenderId,
+            parseBody<PricingApproval>(event.body),
+          ),
+        );
+      }
+
       return json(
         200,
         await saveTenderSection(
@@ -2783,7 +2949,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
             | MaterialSourceSelection
             | CostBuildUp
             | ScenarioAlternative
-            | ApprovalSummary
+            | PricingApproval
           >(event.body),
         ),
       );

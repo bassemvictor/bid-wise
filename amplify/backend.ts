@@ -1,12 +1,15 @@
 import { defineBackend } from "@aws-amplify/backend";
 import { Stack } from "aws-cdk-lib";
 import { CorsHttpMethod, HttpApi, HttpMethod } from "aws-cdk-lib/aws-apigatewayv2";
+import { HttpUserPoolAuthorizer } from "aws-cdk-lib/aws-apigatewayv2-authorizers";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { AttributeType, BillingMode, ProjectionType, Table } from "aws-cdk-lib/aws-dynamodb";
 
+import { auth } from "./auth/resource.js";
 import { tenderPricingApi } from "./functions/tender-pricing-api/resource.js";
 
 const backend = defineBackend({
+  auth,
   tenderPricingApi,
 });
 
@@ -76,7 +79,7 @@ const httpApi = new HttpApi(apiStack, "TenderPricingHttpApi", {
   apiName: "alimexTenderPricingApi",
   corsPreflight: {
     allowOrigins: ["*"],
-    allowHeaders: ["content-type", "authorization"],
+    allowHeaders: ["content-type", "authorization", "x-user-id", "x-user-name", "x-user-email"],
     allowMethods: [
       CorsHttpMethod.GET,
       CorsHttpMethod.POST,
@@ -96,167 +99,71 @@ const integration = new HttpLambdaIntegration(
   },
 );
 
-httpApi.addRoutes({
-  path: "/dashboard/summary",
-  methods: [HttpMethod.GET],
-  integration,
+const authorizer = new HttpUserPoolAuthorizer("TenderPricingAuthorizer", backend.auth.resources.userPool, {
+  userPoolClients: [backend.auth.resources.userPoolClient],
 });
 
-httpApi.addRoutes({
-  path: "/tenders",
-  methods: [HttpMethod.GET, HttpMethod.POST],
-  integration,
-});
+const addProtectedRoutes = (path: string, methods: HttpMethod[]) =>
+  httpApi.addRoutes({
+    path,
+    methods,
+    integration,
+    authorizer,
+  });
 
-httpApi.addRoutes({
-  path: "/tenders/{tenderId}",
-  methods: [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE],
-  integration,
-});
+addProtectedRoutes("/dashboard/summary", [HttpMethod.GET]);
 
-httpApi.addRoutes({
-  path: "/tenders/{tenderId}/duplicate",
-  methods: [HttpMethod.POST],
-  integration,
-});
+addProtectedRoutes("/tenders", [HttpMethod.GET, HttpMethod.POST]);
 
-httpApi.addRoutes({
-  path: "/tenders/{tenderId}/archive",
-  methods: [HttpMethod.POST],
-  integration,
-});
+addProtectedRoutes("/tenders/{tenderId}", [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE]);
 
-httpApi.addRoutes({
-  path: "/tenders/{tenderId}/{section}",
-  methods: [HttpMethod.GET, HttpMethod.PUT],
-  integration,
-});
+addProtectedRoutes("/tenders/{tenderId}/duplicate", [HttpMethod.POST]);
 
-httpApi.addRoutes({
-  path: "/tenders/{tenderId}/roll-calculation",
-  methods: [HttpMethod.GET, HttpMethod.PUT],
-  integration,
-});
+addProtectedRoutes("/tenders/{tenderId}/archive", [HttpMethod.POST]);
 
-httpApi.addRoutes({
-  path: "/customers",
-  methods: [HttpMethod.GET, HttpMethod.POST],
-  integration,
-});
+addProtectedRoutes("/tenders/{tenderId}/{section}", [HttpMethod.GET, HttpMethod.PUT]);
 
-httpApi.addRoutes({
-  path: "/customers/{customerId}",
-  methods: [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE],
-  integration,
-});
+addProtectedRoutes("/tenders/{tenderId}/roll-calculation", [HttpMethod.GET, HttpMethod.PUT]);
 
-httpApi.addRoutes({
-  path: "/materials",
-  methods: [HttpMethod.GET, HttpMethod.POST],
-  integration,
-});
+addProtectedRoutes("/customers", [HttpMethod.GET, HttpMethod.POST]);
 
-httpApi.addRoutes({
-  path: "/materials/{materialId}",
-  methods: [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE],
-  integration,
-});
+addProtectedRoutes("/customers/{customerId}", [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE]);
 
-httpApi.addRoutes({
-  path: "/stock",
-  methods: [HttpMethod.GET, HttpMethod.POST],
-  integration,
-});
+addProtectedRoutes("/materials", [HttpMethod.GET, HttpMethod.POST]);
 
-httpApi.addRoutes({
-  path: "/stock/{stockId}",
-  methods: [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE],
-  integration,
-});
+addProtectedRoutes("/materials/{materialId}", [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE]);
 
-httpApi.addRoutes({
-  path: "/import-presets",
-  methods: [HttpMethod.GET, HttpMethod.POST],
-  integration,
-});
+addProtectedRoutes("/stock", [HttpMethod.GET, HttpMethod.POST]);
 
-httpApi.addRoutes({
-  path: "/import-presets/{importPresetId}",
-  methods: [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE],
-  integration,
-});
+addProtectedRoutes("/stock/{stockId}", [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE]);
 
-httpApi.addRoutes({
-  path: "/suppliers",
-  methods: [HttpMethod.GET, HttpMethod.POST],
-  integration,
-});
+addProtectedRoutes("/import-presets", [HttpMethod.GET, HttpMethod.POST]);
 
-httpApi.addRoutes({
-  path: "/suppliers/{supplierId}",
-  methods: [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE],
-  integration,
-});
+addProtectedRoutes("/import-presets/{importPresetId}", [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE]);
 
-httpApi.addRoutes({
-  path: "/suppliers/{supplierId}/offers",
-  methods: [HttpMethod.GET, HttpMethod.POST],
-  integration,
-});
+addProtectedRoutes("/suppliers", [HttpMethod.GET, HttpMethod.POST]);
 
-httpApi.addRoutes({
-  path: "/suppliers/{supplierId}/offers/{offerId}",
-  methods: [HttpMethod.PUT, HttpMethod.DELETE],
-  integration,
-});
+addProtectedRoutes("/suppliers/{supplierId}", [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE]);
 
-httpApi.addRoutes({
-  path: "/products",
-  methods: [HttpMethod.GET, HttpMethod.POST],
-  integration,
-});
+addProtectedRoutes("/suppliers/{supplierId}/offers", [HttpMethod.GET, HttpMethod.POST]);
 
-httpApi.addRoutes({
-  path: "/products/{productId}",
-  methods: [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE],
-  integration,
-});
+addProtectedRoutes("/suppliers/{supplierId}/offers/{offerId}", [HttpMethod.PUT, HttpMethod.DELETE]);
 
-httpApi.addRoutes({
-  path: "/accessories",
-  methods: [HttpMethod.GET, HttpMethod.POST],
-  integration,
-});
+addProtectedRoutes("/products", [HttpMethod.GET, HttpMethod.POST]);
 
-httpApi.addRoutes({
-  path: "/accessories/{accessoryId}",
-  methods: [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE],
-  integration,
-});
+addProtectedRoutes("/products/{productId}", [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE]);
 
-httpApi.addRoutes({
-  path: "/price-scenarios",
-  methods: [HttpMethod.GET, HttpMethod.POST],
-  integration,
-});
+addProtectedRoutes("/accessories", [HttpMethod.GET, HttpMethod.POST]);
 
-httpApi.addRoutes({
-  path: "/price-scenarios/{scenarioId}",
-  methods: [HttpMethod.GET, HttpMethod.PUT],
-  integration,
-});
+addProtectedRoutes("/accessories/{accessoryId}", [HttpMethod.GET, HttpMethod.PUT, HttpMethod.DELETE]);
 
-httpApi.addRoutes({
-  path: "/dev/seed",
-  methods: [HttpMethod.POST],
-  integration,
-});
+addProtectedRoutes("/price-scenarios", [HttpMethod.GET, HttpMethod.POST]);
 
-httpApi.addRoutes({
-  path: "/dev/tenant/{tenantId}/clear",
-  methods: [HttpMethod.DELETE],
-  integration,
-});
+addProtectedRoutes("/price-scenarios/{scenarioId}", [HttpMethod.GET, HttpMethod.PUT]);
+
+addProtectedRoutes("/dev/seed", [HttpMethod.POST]);
+
+addProtectedRoutes("/dev/tenant/{tenantId}/clear", [HttpMethod.DELETE]);
 
 backend.addOutput({
   custom: {

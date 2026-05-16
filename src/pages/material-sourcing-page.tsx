@@ -2,6 +2,8 @@ import {
   ArrowLeft,
   ArrowRight,
   Calculator,
+  ChevronDown,
+  ChevronRight,
   Factory,
   PackageSearch,
   Plane,
@@ -498,6 +500,7 @@ export const MaterialSourcingPage = () => {
   const [form, setForm] = useState<MaterialSourcingForm>(() => initialForm(tenderId));
   const [tender, setTender] = useState<TenderRequest | null>(null);
   const [productConfiguration, setProductConfiguration] = useState<ProductConfiguration | null>(null);
+  const [collapsedProducts, setCollapsedProducts] = useState<Record<string, boolean>>({});
   const [materials, setMaterials] = useState<Material[]>([]);
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [importPresets, setImportPresets] = useState<ImportPreset[]>([]);
@@ -804,6 +807,34 @@ export const MaterialSourcingPage = () => {
     return summary;
   }, [componentMetrics, form.componentSelections]);
 
+  const componentGroups = useMemo(
+    () =>
+      form.componentSelections.reduce<
+        Array<{
+          productId: string;
+          productName: string;
+          requestedQuantity: string;
+          items: Array<{ component: ComponentSourcingForm; componentIndex: number }>;
+        }>
+      >((groups, component, componentIndex) => {
+        const existing = groups.find((group) => group.productId === component.productId);
+
+        if (existing) {
+          existing.items.push({ component, componentIndex });
+          return groups;
+        }
+
+        groups.push({
+          productId: component.productId,
+          productName: component.productName,
+          requestedQuantity: component.requestedQuantity,
+          items: [{ component, componentIndex }],
+        });
+        return groups;
+      }, []),
+    [form.componentSelections],
+  );
+
   const aggregate = useMemo(() => {
     const totalRequiredBags = componentMetrics.reduce(
       (total, metrics) => total + (metrics.requestedQuantity ?? 0),
@@ -991,6 +1022,13 @@ export const MaterialSourcingPage = () => {
             }
           : component,
       ),
+    }));
+  };
+
+  const toggleProductCollapse = (productId: string) => {
+    setCollapsedProducts((current) => ({
+      ...current,
+      [productId]: !current[productId],
     }));
   };
 
@@ -1336,7 +1374,63 @@ export const MaterialSourcingPage = () => {
                 </div>
 
                 <div className="space-y-6">
-                  {form.componentSelections.map((component, componentIndex) => {
+                  {componentGroups.map((group) => {
+                    const productAllocatedQuantity = group.items.reduce((total, item) => {
+                      const metrics = componentMetrics[item.componentIndex];
+                      return (
+                        total +
+                        (metrics?.sourceMetrics.reduce(
+                          (lineTotal, line) => lineTotal + (line.allocatedBags ?? 0),
+                          0,
+                        ) ?? 0)
+                      );
+                    }, 0);
+                    const productRequestedQuantity = group.items.reduce((total, item) => {
+                      const metrics = componentMetrics[item.componentIndex];
+                      return total + (metrics?.requestedQuantity ?? 0);
+                    }, 0);
+                    const productTotalCost = group.items.reduce(
+                      (total, item) => total + (componentMetrics[item.componentIndex]?.totalMaterialCostEgp ?? 0),
+                      0,
+                    );
+                    const productCoverageBadge = getQuantityCoverageBadge(
+                      productRequestedQuantity > 0 ? productRequestedQuantity : null,
+                      productAllocatedQuantity,
+                    );
+                    const productCostBadge = getTotalCostBadge(
+                      productTotalCost > 0 ? productTotalCost : null,
+                      productAllocatedQuantity,
+                    );
+
+                    return (
+                      <div key={group.productId} className="rounded-[1.25rem] border border-border bg-white p-5">
+                        <div className="mb-5 flex items-start justify-between gap-4">
+                          <button
+                            className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                            onClick={() => toggleProductCollapse(group.productId)}
+                            type="button"
+                          >
+                            {collapsedProducts[group.productId] ? (
+                              <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                            ) : (
+                              <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                            )}
+                            <div className="min-w-0">
+                              <p className="text-base font-semibold text-slate-900">{group.productName}</p>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                {group.items.length} Bag Body component(s) · Requested quantity: {group.requestedQuantity || "Not set"}
+                              </p>
+                            </div>
+                          </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={productCostBadge.variant}>{productCostBadge.label}</Badge>
+                            <Badge variant={productCoverageBadge.variant}>{productCoverageBadge.label}</Badge>
+                          </div>
+                        </div>
+
+                        {!collapsedProducts[group.productId] ? (
+                          <div className="space-y-6">
+                            {group.items.map(({ component, componentIndex }) => {
                     const metrics = componentMetrics[componentIndex];
                     const allocatedQuantity = metrics?.sourceMetrics.reduce(
                       (total, line) => total + (line.allocatedBags ?? 0),
@@ -1368,7 +1462,7 @@ export const MaterialSourcingPage = () => {
                     );
 
                     return (
-                      <div key={component.componentId} className="rounded-[1.25rem] border border-border bg-white p-5">
+                      <div key={component.componentId} className="rounded-[1.25rem] border border-border bg-slate-50/60 p-5">
                         <div className="mb-5 flex items-start justify-between gap-4">
                           <div>
                             <p className="text-base font-semibold text-slate-900">
@@ -1757,6 +1851,11 @@ export const MaterialSourcingPage = () => {
                             </p>
                           </div>
                         </div>
+                      </div>
+                    );
+                  })}
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}

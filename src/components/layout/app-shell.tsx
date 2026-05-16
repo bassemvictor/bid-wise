@@ -1,28 +1,22 @@
-import { Bell, ChevronRight, Menu, Search } from "lucide-react";
+import { Bell, ChevronRight, LogOut, Menu, Search, Shield } from "lucide-react";
 import { useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
+import { Button } from "../ui/button";
+import { formatGroupLabel, useAuth } from "../../lib/auth";
 import { getBreadcrumbs, getPageTitle } from "../../lib/route-metadata";
 import { cn } from "../../lib/utils";
 
 const navigation = [
   {
-    label: "Main",
-    items: [{ label: "Dashboard", href: "/dashboard" }],
-  },
-  {
     label: "Tenders",
-    items: [
-      { label: "All Tenders", href: "/tenders" },
-      { label: "Activities", href: "/tenders/TDR-1001/material-sourcing" },
-    ],
+    items: [{ label: "All Tenders", href: "/tenders" }],
   },
   {
     label: "Pricing",
     items: [
       { label: "Price Scenarios", href: "/price-scenarios" },
       { label: "Price Comparisons", href: "/price-scenarios/SCN-1001" },
-      { label: "Approvals", href: "/tenders/TDR-1001/pricing-approval" },
     ],
   },
   {
@@ -30,27 +24,36 @@ const navigation = [
     items: [
       { label: "Customers", href: "/customers" },
       { label: "Products", href: "/products" },
-      { label: "Materials", href: "/materials" },
+      {
+        label: "Materials",
+        href: "/materials",
+        children: [
+          { label: "In Stock Rolls", href: "/stock" },
+          { label: "Import Rolls", href: "/import-presets" },
+        ],
+      },
       { label: "Suppliers", href: "/suppliers" },
       { label: "Accessories", href: "/accessories" },
-      { label: "In Stock Rolls", href: "/stock" },
-      { label: "Import Rolls", href: "/import-presets" },
-    ],
-  },
-  {
-    label: "Reports",
-    items: [
-      { label: "Reports", href: "/dashboard" },
-      { label: "Analytics", href: "/dashboard" },
     ],
   },
 ];
 
 export const AppShell = () => {
   const { pathname } = useLocation();
+  const { user, signOutUser } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const breadcrumbs = useMemo(() => getBreadcrumbs(pathname), [pathname]);
   const title = useMemo(() => getPageTitle(pathname), [pathname]);
+  const primaryGroup = user?.groups[0] ? formatGroupLabel(user.groups[0]) : "Authenticated User";
+  const initials = useMemo(() => {
+    const source = user?.name || user?.email || "AU";
+    return source
+      .split(" ")
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+  }, [user?.email, user?.name]);
 
   return (
     <div className="min-h-screen bg-transparent">
@@ -84,19 +87,39 @@ export const AppShell = () => {
                   </p>
                   <div className="space-y-1.5">
                     {section.items.map((item) => (
-                      <NavLink
-                        key={item.label}
-                        to={item.href}
-                        className={({ isActive }) =>
-                          cn(
-                            "flex items-center rounded-xl px-3 py-2.5 text-sm text-blue-100/80 transition-colors hover:bg-white/8 hover:text-white",
-                            isActive && "bg-primary text-white shadow-lg shadow-blue-950/20",
-                          )
-                        }
-                        onClick={() => setSidebarOpen(false)}
-                      >
-                        {item.label}
-                      </NavLink>
+                      <div className="space-y-1.5" key={item.label}>
+                        <NavLink
+                          to={item.href}
+                          className={({ isActive }) =>
+                            cn(
+                              "flex items-center rounded-xl px-3 py-2.5 text-sm text-blue-100/80 transition-colors hover:bg-white/8 hover:text-white",
+                              isActive && "bg-primary text-white shadow-lg shadow-blue-950/20",
+                            )
+                          }
+                          onClick={() => setSidebarOpen(false)}
+                        >
+                          {item.label}
+                        </NavLink>
+                        {item.children?.length ? (
+                          <div className="ml-4 space-y-1 border-l border-white/10 pl-3">
+                            {item.children.map((child) => (
+                              <NavLink
+                                key={child.label}
+                                to={child.href}
+                                className={({ isActive }) =>
+                                  cn(
+                                    "flex items-center rounded-lg px-3 py-2 text-sm text-blue-100/70 transition-colors hover:bg-white/8 hover:text-white",
+                                    isActive && "bg-white/10 text-white",
+                                  )
+                                }
+                                onClick={() => setSidebarOpen(false)}
+                              >
+                                {child.label}
+                              </NavLink>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -155,12 +178,18 @@ export const AppShell = () => {
                 </button>
                 <div className="flex items-center gap-3 rounded-2xl border border-border bg-white px-3 py-2">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-sm font-semibold text-white">
-                    AL
+                    {initials}
                   </div>
-                  <div className="hidden text-left sm:block">
-                    <p className="text-sm font-medium text-slate-900">Alimex User</p>
-                    <p className="text-xs text-muted-foreground">Pricing Manager</p>
+                  <div className="hidden min-w-0 text-left sm:block">
+                    <p className="truncate text-sm font-medium text-slate-900">{user?.name || user?.email || "Alimex User"}</p>
+                    <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                      <Shield className="h-3.5 w-3.5" />
+                      <span className="truncate">{primaryGroup}</span>
+                    </div>
                   </div>
+                  <Button className="h-9 px-3" onClick={() => void signOutUser()} type="button" variant="ghost">
+                    <LogOut className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
             </div>

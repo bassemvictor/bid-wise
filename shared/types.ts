@@ -110,6 +110,8 @@ export type TenderActivity = EntityEnvelope & {
     | "ROLL_CALCULATION"
     | "MATERIAL_SOURCE_SELECTION"
     | "COST_BUILDUP"
+    | "ALTERNATIVES"
+    | "PRICING_APPROVAL"
     | "SYSTEM";
   actorId: string;
   actorName: string;
@@ -263,13 +265,46 @@ export type CostBuildUp = EntityEnvelope & {
   totalCostPriceForOrder: number | null;
 };
 
+export type AlternativeScenario = {
+  scenarioId: string;
+  label: string;
+  profitPercent: number | null;
+  factorOfSafetyPercent: number | null;
+  customerCommissionPercent: number | null;
+  salesPersonCommissionPercent: number | null;
+  pricePerBag: number | null;
+  totalPrice: number | null;
+  notes?: string;
+};
+
 export type ScenarioAlternative = EntityEnvelope & {
   tenderId: string;
-  scenarioId: string;
   alternativeId: string;
+  currency: "EGP";
+  quantity: number | null;
+  baseCostPerBag: number | null;
+  scenarios: AlternativeScenario[];
+  notes?: string;
+};
+
+export type PricingApprovalDecisionStatus = "pending" | "approved" | "denied";
+
+export type PricingApprovalDecision = {
+  scenarioId: string;
   label: string;
-  summary: string;
-  deltaPercent: number;
+  status: PricingApprovalDecisionStatus;
+  pricePerBag: number | null;
+  totalPrice: number | null;
+  notes?: string;
+};
+
+export type PricingApproval = EntityEnvelope & {
+  tenderId: string;
+  approvalId: string;
+  currency: "EGP";
+  approvalsOpen: number;
+  status: "pending" | "approved" | "partial" | "denied";
+  decisions: PricingApprovalDecision[];
   notes?: string;
 };
 
