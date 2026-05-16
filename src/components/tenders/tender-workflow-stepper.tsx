@@ -17,10 +17,9 @@ const getSteps = (tenderId?: string): Step[] => [
   { label: "Tender Info", href: tenderId ? `/tenders/intake/${tenderId}` : "/tenders/intake" },
   { label: "Product Configuration", href: tenderId ? `/tenders/${tenderId}/product-configuration` : undefined },
   {
-    label: "Material & Roll Calculation",
-    href: tenderId ? `/tenders/${tenderId}/material-roll-calculation` : undefined,
+    label: "Material Sourcing & Costing",
+    href: tenderId ? `/tenders/${tenderId}/material-sourcing` : undefined,
   },
-  { label: "Material Sourcing", href: tenderId ? `/tenders/${tenderId}/material-sourcing` : undefined },
   { label: "Cost Build-Up", href: tenderId ? `/tenders/${tenderId}/cost-build-up` : undefined },
   { label: "Alternatives" },
   { label: "Pricing & Approval" },

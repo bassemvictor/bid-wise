@@ -64,7 +64,7 @@ const continuePath = (record: TenderSummary) => {
     case "READY_FOR_PRICING":
       return `/tenders/${record.tenderId}/product-configuration`;
     case "PRODUCT_CONFIGURATION":
-      return `/tenders/${record.tenderId}/material-roll-calculation`;
+      return `/tenders/${record.tenderId}/material-sourcing`;
     case "MATERIAL_ROLL_CALCULATION":
       return `/tenders/${record.tenderId}/material-sourcing`;
     case "MATERIAL_SOURCING":

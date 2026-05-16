@@ -26,6 +26,31 @@ const buildUrl = (path: string) => {
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 };
 
+const getActorHeaders = () => {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  const actorId =
+    window.localStorage.getItem("alimex.actorId") ??
+    window.localStorage.getItem("alimexActorId") ??
+    "";
+  const actorName =
+    window.localStorage.getItem("alimex.actorName") ??
+    window.localStorage.getItem("alimexActorName") ??
+    "";
+  const actorEmail =
+    window.localStorage.getItem("alimex.actorEmail") ??
+    window.localStorage.getItem("alimexActorEmail") ??
+    "";
+
+  return {
+    ...(actorId ? { "x-user-id": actorId } : {}),
+    ...(actorName ? { "x-user-name": actorName } : {}),
+    ...(actorEmail ? { "x-user-email": actorEmail } : {}),
+  };
+};
+
 const request = async <T>(
   method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
@@ -35,6 +60,7 @@ const request = async <T>(
     method,
     headers: {
       "content-type": "application/json",
+      ...getActorHeaders(),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });

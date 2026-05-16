@@ -39,7 +39,7 @@ export const TenderRowActions = ({
       }
 
       const menuWidth = 176;
-      const estimatedMenuHeight = record.status === "DRAFT_INTAKE" ? 220 : 176;
+      const estimatedMenuHeight = record.status !== "APPROVED" ? 220 : 176;
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
 
@@ -128,7 +128,7 @@ export const TenderRowActions = ({
               >
                 Archive Tender
               </button>
-              {record.status === "DRAFT_INTAKE" ? (
+              {record.status !== "APPROVED" ? (
                 <button
                   className="block w-full rounded-xl px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"
                   onClick={() => {

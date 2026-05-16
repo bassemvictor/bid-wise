@@ -14,10 +14,20 @@ import type { ImportPreset, Material, Supplier } from "../../shared/types";
 
 type ImportPresetForm = Omit<
   ImportPreset,
-  "entityType" | "createdAt" | "updatedAt" | "leadTimeDays" | "unitCostUsdPerM2"
+  | "entityType"
+  | "createdAt"
+  | "updatedAt"
+  | "rollWidthM"
+  | "rollLengthM"
+  | "leadTimeDays"
+  | "unitCostUsdPerM2"
+  | "customsEstimate"
 > & {
+  rollWidthM: string;
+  rollLengthM: string;
   leadTimeDays: string;
   unitCostUsdPerM2: string;
+  customsEstimate: string;
 };
 
 const initialForm: ImportPresetForm = {
@@ -25,8 +35,11 @@ const initialForm: ImportPresetForm = {
   tenantId: "alimex-demo",
   supplierId: "",
   materialId: "",
+  rollWidthM: "",
+  rollLengthM: "",
   leadTimeDays: "",
   unitCostUsdPerM2: "",
+  customsEstimate: "",
   active: true,
 };
 
@@ -35,8 +48,11 @@ const toForm = (record: ImportPreset): ImportPresetForm => ({
   tenantId: record.tenantId,
   supplierId: record.supplierId,
   materialId: record.materialId,
+  rollWidthM: record.rollWidthM?.toString() ?? "",
+  rollLengthM: record.rollLengthM?.toString() ?? "",
   leadTimeDays: record.leadTimeDays?.toString() ?? "",
   unitCostUsdPerM2: record.unitCostUsdPerM2?.toString() ?? "",
+  customsEstimate: record.customsEstimate?.toString() ?? "",
   active: record.active,
 });
 
@@ -93,8 +109,11 @@ export const ImportPresetsPage = () => {
           record.importPresetId,
           supplierName,
           materialName,
+          record.rollWidthM?.toString() ?? "",
+          record.rollLengthM?.toString() ?? "",
           record.leadTimeDays?.toString() ?? "",
           record.unitCostUsdPerM2?.toString() ?? "",
+          record.customsEstimate?.toString() ?? "",
         ]
           .join(" ")
           .toLowerCase()
@@ -119,8 +138,11 @@ export const ImportPresetsPage = () => {
       importPresetId: form.importPresetId || crypto.randomUUID(),
       supplierId: form.supplierId,
       materialId: form.materialId,
+      rollWidthM: form.rollWidthM.trim() === "" ? null : Number(form.rollWidthM),
+      rollLengthM: form.rollLengthM.trim() === "" ? null : Number(form.rollLengthM),
       leadTimeDays: form.leadTimeDays.trim() === "" ? null : Number(form.leadTimeDays),
       unitCostUsdPerM2: form.unitCostUsdPerM2.trim() === "" ? null : Number(form.unitCostUsdPerM2),
+      customsEstimate: form.customsEstimate.trim() === "" ? null : Number(form.customsEstimate),
       active: form.active,
       createdAt: "",
       updatedAt: "",
@@ -166,8 +188,10 @@ export const ImportPresetsPage = () => {
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>Import Presets</CardTitle>
-            <CardDescription>Define supplier-material import defaults that can be loaded into material sourcing.</CardDescription>
+            <CardTitle>Import Rolls</CardTitle>
+            <CardDescription>
+              Define import roll presets by supplier, material, roll width, roll length, lead time, unit cost, and customs.
+            </CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -180,11 +204,14 @@ export const ImportPresetsPage = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Preset</TableHead>
+                  <TableHead>Import Roll</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead>Material</TableHead>
+                  <TableHead>Roll Width (m)</TableHead>
+                  <TableHead>Roll Length (m)</TableHead>
                   <TableHead>Lead Time</TableHead>
                   <TableHead>Unit Cost USD/m²</TableHead>
+                  <TableHead>Customs</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -194,12 +221,15 @@ export const ImportPresetsPage = () => {
                   <TableRow key={record.importPresetId}>
                     <TableCell>
                       <p className="font-medium text-slate-900">{record.importPresetId}</p>
-                      <p className="text-xs text-muted-foreground">Import sourcing preset</p>
+                      <p className="text-xs text-muted-foreground">Import roll preset</p>
                     </TableCell>
                     <TableCell>{supplierMap[record.supplierId] ?? record.supplierId ?? "-"}</TableCell>
                     <TableCell>{materialMap[record.materialId] ?? record.materialId ?? "-"}</TableCell>
+                    <TableCell>{record.rollWidthM ?? "-"}</TableCell>
+                    <TableCell>{record.rollLengthM ?? "-"}</TableCell>
                     <TableCell>{record.leadTimeDays !== null ? `${record.leadTimeDays} days` : "-"}</TableCell>
                     <TableCell>{record.unitCostUsdPerM2 !== null ? record.unitCostUsdPerM2.toFixed(3) : "-"}</TableCell>
+                    <TableCell>{record.customsEstimate !== null ? record.customsEstimate.toFixed(2) : "-"}</TableCell>
                     <TableCell><StatusBadge active={record.active} /></TableCell>
                     <TableCell className="space-x-2">
                       <Button
@@ -229,8 +259,8 @@ export const ImportPresetsPage = () => {
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title={editing ? "Edit Import Preset" : "Add Import Preset"}
-        description="Choose the material and supplier, then store the default lead time and unit cost."
+        title={editing ? "Edit Import Roll" : "Add Import Roll"}
+        description="Select the supplier and material, then capture roll width, roll length, lead time, unit cost, and customs."
       >
         <form className="grid gap-5 md:grid-cols-2" onSubmit={submit}>
           <label className="space-y-2 text-sm font-medium text-slate-700">
@@ -260,12 +290,24 @@ export const ImportPresetsPage = () => {
             </Select>
           </label>
           <label className="space-y-2 text-sm font-medium text-slate-700">
+            Roll Width (m)
+            <Input inputMode="decimal" value={form.rollWidthM} onChange={(event) => setForm((current) => ({ ...current, rollWidthM: event.target.value }))} />
+          </label>
+          <label className="space-y-2 text-sm font-medium text-slate-700">
+            Roll Length (m)
+            <Input inputMode="decimal" value={form.rollLengthM} onChange={(event) => setForm((current) => ({ ...current, rollLengthM: event.target.value }))} />
+          </label>
+          <label className="space-y-2 text-sm font-medium text-slate-700">
             Lead Time (days)
             <Input inputMode="decimal" value={form.leadTimeDays} onChange={(event) => setForm((current) => ({ ...current, leadTimeDays: event.target.value }))} />
           </label>
           <label className="space-y-2 text-sm font-medium text-slate-700">
             Unit Cost USD / m²
             <Input inputMode="decimal" value={form.unitCostUsdPerM2} onChange={(event) => setForm((current) => ({ ...current, unitCostUsdPerM2: event.target.value }))} />
+          </label>
+          <label className="space-y-2 text-sm font-medium text-slate-700">
+            Customs
+            <Input inputMode="decimal" value={form.customsEstimate} onChange={(event) => setForm((current) => ({ ...current, customsEstimate: event.target.value }))} />
           </label>
           <label className="flex items-center gap-3 rounded-2xl border border-border bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
             <input checked={form.active} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />

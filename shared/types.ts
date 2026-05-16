@@ -38,6 +38,8 @@ export type TenderStatus =
 export type TenderRequest = EntityEnvelope & {
   tenderId: string;
   customerName: string;
+  selectedProductIds: string[];
+  productSnapshots: Product[];
   tenderNumber: string;
   internalInquiryNumber: string;
   tenderDueDate: string;
@@ -96,13 +98,36 @@ export type TenderListResponse = {
 export type TenderActivity = EntityEnvelope & {
   tenderId: string;
   activityId: string;
-  activityType: "ARCHIVED" | "DUPLICATED" | "DELETED";
+  activityType:
+    | "CREATED"
+    | "UPDATED"
+    | "ARCHIVED"
+    | "DUPLICATED"
+    | "DELETED";
+  section:
+    | "TENDER"
+    | "PRODUCT_CONFIGURATION"
+    | "ROLL_CALCULATION"
+    | "MATERIAL_SOURCE_SELECTION"
+    | "COST_BUILDUP"
+    | "SYSTEM";
+  actorId: string;
+  actorName: string;
+  actorEmail?: string;
   message: string;
+  changeCount: number;
+  changes: Array<{
+    fieldPath: string;
+    previousValue: string | number | boolean | null;
+    nextValue: string | number | boolean | null;
+  }>;
 };
 
 export type ProductConfiguration = EntityEnvelope & {
   tenderId: string;
   productConfigId: string;
+  selectedProductIds: string[];
+  productSnapshots: Product[];
   productType: string;
   quantity: number | null;
   bagDiameterMm: number | null;
@@ -152,10 +177,44 @@ export type SelectedMaterialSource = {
   sourceId: string;
   sourceName: string;
   sourceType: MaterialSourceType;
+  componentId?: string;
+  componentName?: string;
+  productId?: string;
+  productName?: string;
+  supplierId?: string;
+  materialId?: string;
+  rollWidthM?: number | null;
+  rollLengthM?: number | null;
+  rollCount?: number | null;
+  customsEstimate?: number | null;
+  bagsAcrossRollWidth?: number | null;
+  bagsAlongRollLength?: number | null;
+  bagsPerRoll?: number | null;
+  allocatedBags?: number | null;
+  actualAreaPerBagM2?: number | null;
   qtyUsedM2: number | null;
   unitCostUsdPerM2: number | null;
   totalCostUsd: number | null;
   leadTimeDays: number | null;
+};
+
+export type BagBodySourcingSelection = {
+  componentId: string;
+  componentName: string;
+  productId: string;
+  productName: string;
+  materialId: string;
+  requestedQuantity: number | null;
+  bagDiameterMm: number | null;
+  bagLengthMm: number | null;
+  seamAllowanceMm: number | null;
+  topBottomAllowanceMm: number | null;
+  bagWidthMm: number | null;
+  bagLengthWithAllowanceMm: number | null;
+  actualAreaPerBagM2: number | null;
+  materialCostPerBagEgp: number | null;
+  totalMaterialCostEgp: number | null;
+  selectedSources: SelectedMaterialSource[];
 };
 
 export type MaterialSourceSelection = EntityEnvelope & {
@@ -164,6 +223,9 @@ export type MaterialSourceSelection = EntityEnvelope & {
   materialId: string;
   sourcingStrategy: SourcingStrategy;
   selectedSources: SelectedMaterialSource[];
+  componentSelections?: BagBodySourcingSelection[];
+  actualAreaPerBagM2?: number | null;
+  totalRequiredBags?: number | null;
   totalAllocatedQtyM2: number | null;
   weightedAverageUnitCostUsdPerM2: number | null;
   exchangeRate: number | null;
@@ -257,6 +319,9 @@ export type StockItem = EntityEnvelope & {
   supplierId: string;
   materialId: string;
   unitCount: number | null;
+  rollWidthM: number | null;
+  rollLengthM: number | null;
+  unitCostUsdPerM2: number | null;
   active: boolean;
 };
 
@@ -264,9 +329,24 @@ export type ImportPreset = EntityEnvelope & {
   importPresetId: string;
   supplierId: string;
   materialId: string;
+  rollWidthM: number | null;
+  rollLengthM: number | null;
   leadTimeDays: number | null;
   unitCostUsdPerM2: number | null;
+  customsEstimate: number | null;
   active: boolean;
+};
+
+export type ProductType = "Filter Bag" | "Other";
+
+export type ProductComponentSpecificationValue = string | number | boolean | null;
+
+export type ProductComponent = {
+  componentId: string;
+  componentName: string;
+  componentType: string;
+  material: string;
+  specifications: Record<string, ProductComponentSpecificationValue>;
 };
 
 export type Supplier = EntityEnvelope & {
@@ -295,11 +375,12 @@ export type SupplierOffer = EntityEnvelope & {
 export type Product = EntityEnvelope & {
   productId: string;
   productName: string;
-  productType: string;
-  defaultTopDesign: string;
-  defaultBottomDesign: string;
-  defaultSeamAllowanceMm: number | null;
-  defaultTopBottomAllowanceMm: number | null;
+  productType: ProductType;
+  requestedQuantity?: number | null;
+  factoryOverheadPerBag?: number | null;
+  manufacturingOverheadPerBag?: number | null;
+  managementOverheadPerBag?: number | null;
+  components: ProductComponent[];
   active: boolean;
 };
 

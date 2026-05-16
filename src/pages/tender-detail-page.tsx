@@ -21,6 +21,7 @@ import type {
   ProductConfiguration,
   RollCalculation,
   ScenarioAlternative,
+  TenderActivity,
   TenderRequest,
 } from "../../shared/types";
 
@@ -38,13 +39,48 @@ type TenderOverviewData = {
   rollCalculation: RollCalculation | null;
   materialSourcing: MaterialSourceSelection | null;
   costBuildUp: CostBuildUp | null;
+  activities: TenderActivity[];
 };
 
 const formatNumber = (value: number | null | undefined, digits = 2) =>
-  value === null || value === undefined || !Number.isFinite(value) ? "-" : value.toFixed(digits);
+  value === null || value === undefined || !Number.isFinite(value) ? "-" : value.toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
 
 const formatCurrency = (value: number | null | undefined, digits = 2, suffix = "EGP") =>
-  value === null || value === undefined || !Number.isFinite(value) ? "-" : `${value.toFixed(digits)} ${suffix}`;
+  value === null || value === undefined || !Number.isFinite(value) ? "-" : `${value.toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })} ${suffix}`;
+
+const formatDateTime = (value: string | null | undefined) => {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+};
+
+const formatAuditValue = (value: string | number | boolean | null) => {
+  if (typeof value === "number") {
+    return value.toLocaleString(undefined, {
+      minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+      maximumFractionDigits: 4,
+    });
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+
+  if (value === null || value === "") {
+    return "Empty";
+  }
+
+  return String(value);
+};
 
 const formatStatusVariant = (status: string) => {
   if (["APPROVED", "WON"].includes(status)) {
@@ -102,6 +138,7 @@ export const TenderDetailPage = () => {
   const [overview, setOverview] = useState<TenderOverviewData | null>(null);
   const [error, setError] = useState("");
   const [expandedRow, setExpandedRow] = useState<string | null>("material-sourcing");
+  const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
   const title = useMemo(
     () => getPageTitle(section === "overview" ? `/tenders/${tenderId}` : `/tenders/${tenderId}/${section}`),
     [section, tenderId],
@@ -133,14 +170,16 @@ export const TenderDetailPage = () => {
         getOptional<RollCalculation>(`/tenders/${tenderId}/roll-calculation?tenantId=alimex-demo`),
         getOptional<MaterialSourceSelection>(`/tenders/${tenderId}/material-sourcing?tenantId=alimex-demo`),
         getOptional<CostBuildUp>(`/tenders/${tenderId}/cost-build-up?tenantId=alimex-demo`),
+        getOptional<TenderActivity[]>(`/tenders/${tenderId}/activities?tenantId=alimex-demo`),
       ])
-        .then(([tender, productConfiguration, rollCalculation, materialSourcing, costBuildUp]) =>
+        .then(([tender, productConfiguration, rollCalculation, materialSourcing, costBuildUp, activities]) =>
           setOverview({
             tender,
             productConfiguration,
             rollCalculation,
             materialSourcing,
             costBuildUp,
+            activities: activities ?? [],
           }),
         )
         .catch((reason: Error) => setError(reason.message));
@@ -207,10 +246,10 @@ export const TenderDetailPage = () => {
         id: "product-configuration",
         label: "Product Configuration",
         summary: `${overview.productConfiguration?.productType ?? "-"} · ${overview.productConfiguration?.topDesign ?? "-"}`,
-        keyValue: `${formatNumber(overview.productConfiguration?.bagDiameterMm, 0)} mm x ${formatNumber(
+        keyValue: `${formatNumber(overview.productConfiguration?.bagDiameterMm, 4)} m x ${formatNumber(
           overview.productConfiguration?.bagLengthMm,
-          0,
-        )} mm`,
+          4,
+        )} m`,
         status: overview.productConfiguration ? "Loaded" : "Missing",
       },
       {
@@ -401,6 +440,110 @@ export const TenderDetailPage = () => {
             </TableBody>
           </Table>
           {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle>Activity Log</CardTitle>
+            <CardDescription>
+              Fine-grained audit trail for tender changes, including actor, section, and field-level diffs.
+            </CardDescription>
+          </div>
+          <Badge variant="default">{overview?.activities.length ?? 0} event(s)</Badge>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto rounded-2xl border border-border">
+            <table className="min-w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">When</th>
+                  <th className="px-4 py-3">Who</th>
+                  <th className="px-4 py-3">Activity</th>
+                  <th className="px-4 py-3">Section</th>
+                  <th className="px-4 py-3">Summary</th>
+                  <th className="px-4 py-3">Changes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {overview?.activities.length ? (
+                  overview.activities.map((activity) => {
+                    const isExpanded = expandedActivityId === activity.activityId;
+
+                    return (
+                      <Fragment key={activity.activityId}>
+                        <tr
+                          className="cursor-pointer border-t border-border hover:bg-slate-50"
+                          onClick={() =>
+                            setExpandedActivityId((current) => (current === activity.activityId ? null : activity.activityId))
+                          }
+                        >
+                          <td className="px-4 py-3 text-slate-700">{formatDateTime(activity.createdAt)}</td>
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-slate-900">{activity.actorName || activity.actorId}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {activity.actorEmail || activity.actorId || "Unknown"}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant={activity.activityType === "UPDATED" ? "warning" : "success"}>
+                              {activity.activityType}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3">{activity.section}</td>
+                          <td className="px-4 py-3 text-slate-700">{activity.message}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="default">{activity.changeCount}</Badge>
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                        {isExpanded ? (
+                          <tr className="border-t border-border bg-slate-50/70">
+                            <td className="px-4 py-4" colSpan={6}>
+                              {activity.changes.length ? (
+                                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                  {activity.changes.map((change, index) => (
+                                    <div className="rounded-2xl border border-border bg-white p-3" key={`${activity.activityId}-${index}`}>
+                                      <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{change.fieldPath}</p>
+                                      <div className="mt-2 grid gap-2">
+                                        <div className="rounded-xl bg-slate-50 p-2">
+                                          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Previous</p>
+                                          <p className="mt-1 text-sm text-slate-700">{formatAuditValue(change.previousValue)}</p>
+                                        </div>
+                                        <div className="rounded-xl bg-blue-50 p-2">
+                                          <p className="text-[11px] uppercase tracking-[0.16em] text-blue-700">New</p>
+                                          <p className="mt-1 text-sm font-medium text-slate-900">{formatAuditValue(change.nextValue)}</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-muted-foreground">No field-level changes captured for this event.</p>
+                              )}
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td className="px-4 py-8 text-center text-muted-foreground" colSpan={6}>
+                      No activity captured for this tender yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
     </div>

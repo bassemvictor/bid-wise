@@ -2,7 +2,6 @@ import { formatTitle } from "./utils";
 
 const tenderSectionLabels: Record<string, string> = {
   "product-configuration": "Product Configuration",
-  "material-roll-calculation": "Material Roll Calculation",
   "material-sourcing": "Material Sourcing & Costing",
   "cost-build-up": "Cost Build-Up Per Bag",
   alternatives: "Alternatives",
@@ -27,11 +26,11 @@ export const getPageTitle = (pathname: string) => {
   }
 
   if (pathname === "/stock") {
-    return "Current Stock";
+    return "In Stock Rolls";
   }
 
   if (pathname === "/import-presets") {
-    return "Import Presets";
+    return "Import Rolls";
   }
 
   const segments = pathname.split("/").filter(Boolean);
@@ -101,8 +100,8 @@ export const getBreadcrumbs = (pathname: string) => {
   }
 
   if (segments[0] === "stock" || segments[0] === "import-presets") {
-    crumbs.push({ label: "Material Sourcing", href: "/stock" });
-    crumbs.push({ label: segments[0] === "stock" ? "Current Stock" : "Import Presets" });
+    crumbs.push({ label: "Master Data", href: "/materials" });
+    crumbs.push({ label: segments[0] === "stock" ? "In Stock Rolls" : "Import Rolls" });
     return crumbs;
   }
 
@@ -117,10 +116,6 @@ export const getTenderSectionTabs = (tenderId: string) => [
   {
     label: "Product Configuration",
     href: `/tenders/${tenderId}/product-configuration`,
-  },
-  {
-    label: "Material Roll Calculation",
-    href: `/tenders/${tenderId}/material-roll-calculation`,
   },
   {
     label: "Material Sourcing",

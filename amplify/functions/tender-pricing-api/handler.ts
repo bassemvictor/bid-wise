@@ -10,6 +10,7 @@ import {
 import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
 
 import type {
+  BagBodySourcingSelection,
   Accessory,
   CostBuildUp,
   Customer,
@@ -19,6 +20,7 @@ import type {
   MaterialSourceSelection,
   PricingScenario,
   Product,
+  ProductComponentSpecificationValue,
   ProductConfiguration,
   RollCalculation,
   ScenarioAlternative,
@@ -63,7 +65,12 @@ type ApprovalSummary = {
 type RequestContext = {
   tenantId: string;
   tableName: string;
+  actorId: string;
+  actorName: string;
+  actorEmail?: string;
 };
+
+type TenderActivitySection = TenderActivity["section"];
 
 let documentClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
@@ -114,6 +121,12 @@ const normalizeTenderPayload = (payload: Partial<TenderRequest>, tenantId: strin
   tenderId: payload.tenderId ?? crypto.randomUUID(),
   tenantId,
   customerName: payload.customerName?.trim() ?? "",
+  selectedProductIds: Array.isArray(payload.selectedProductIds)
+    ? payload.selectedProductIds.map((productId) => String(productId).trim()).filter(Boolean)
+    : [],
+  productSnapshots: Array.isArray(payload.productSnapshots)
+    ? payload.productSnapshots.map((product) => normalizeProductPayload(product, tenantId))
+    : [],
   tenderNumber: payload.tenderNumber?.trim() ?? "",
   internalInquiryNumber: payload.internalInquiryNumber?.trim() ?? "",
   tenderDueDate: payload.tenderDueDate ?? "",
@@ -150,6 +163,12 @@ const normalizeProductConfigurationPayload = (
   tenantId,
   tenderId,
   productConfigId: payload.productConfigId ?? "base",
+  selectedProductIds: Array.isArray(payload.selectedProductIds)
+    ? payload.selectedProductIds.map((productId) => String(productId).trim()).filter(Boolean)
+    : [],
+  productSnapshots: Array.isArray(payload.productSnapshots)
+    ? payload.productSnapshots.map((product) => normalizeProductPayload(product, tenantId))
+    : [],
   productType: payload.productType?.trim() || "Filter Bag",
   quantity: toNullableNumber(payload.quantity),
   bagDiameterMm: toNullableNumber(payload.bagDiameterMm),
@@ -215,12 +234,74 @@ const normalizeMaterialSourceSelectionPayload = (
         sourceId: source.sourceId?.trim() ?? "",
         sourceName: source.sourceName?.trim() ?? "",
         sourceType: source.sourceType === "import" ? "import" : "stock",
+        componentId: source.componentId?.trim() ?? "",
+        componentName: source.componentName?.trim() ?? "",
+        productId: source.productId?.trim() ?? "",
+        productName: source.productName?.trim() ?? "",
+        supplierId: source.supplierId?.trim() ?? "",
+        materialId: source.materialId?.trim() ?? "",
+        rollWidthM: toNullableNumber(source.rollWidthM),
+        rollLengthM: toNullableNumber(source.rollLengthM),
+        rollCount: toNullableNumber(source.rollCount),
+        customsEstimate: toNullableNumber(source.customsEstimate),
+        bagsAcrossRollWidth: toNullableNumber(source.bagsAcrossRollWidth),
+        bagsAlongRollLength: toNullableNumber(source.bagsAlongRollLength),
+        bagsPerRoll: toNullableNumber(source.bagsPerRoll),
+        allocatedBags: toNullableNumber(source.allocatedBags),
+        actualAreaPerBagM2: toNullableNumber(source.actualAreaPerBagM2),
         qtyUsedM2: toNullableNumber(source.qtyUsedM2),
         unitCostUsdPerM2: toNullableNumber(source.unitCostUsdPerM2),
         totalCostUsd: toNullableNumber(source.totalCostUsd),
         leadTimeDays: toNullableNumber(source.leadTimeDays),
       }))
     : [],
+  componentSelections: Array.isArray(payload.componentSelections)
+    ? payload.componentSelections.map((selection) => ({
+        componentId: selection.componentId?.trim() ?? "",
+        componentName: selection.componentName?.trim() ?? "",
+        productId: selection.productId?.trim() ?? "",
+        productName: selection.productName?.trim() ?? "",
+        materialId: selection.materialId?.trim() ?? "",
+        requestedQuantity: toNullableNumber(selection.requestedQuantity),
+        bagDiameterMm: toNullableNumber(selection.bagDiameterMm),
+        bagLengthMm: toNullableNumber(selection.bagLengthMm),
+        seamAllowanceMm: toNullableNumber(selection.seamAllowanceMm),
+        topBottomAllowanceMm: toNullableNumber(selection.topBottomAllowanceMm),
+        bagWidthMm: toNullableNumber(selection.bagWidthMm),
+        bagLengthWithAllowanceMm: toNullableNumber(selection.bagLengthWithAllowanceMm),
+        actualAreaPerBagM2: toNullableNumber(selection.actualAreaPerBagM2),
+        materialCostPerBagEgp: toNullableNumber(selection.materialCostPerBagEgp),
+        totalMaterialCostEgp: toNullableNumber(selection.totalMaterialCostEgp),
+        selectedSources: Array.isArray(selection.selectedSources)
+          ? selection.selectedSources.map((source) => ({
+              sourceId: source.sourceId?.trim() ?? "",
+              sourceName: source.sourceName?.trim() ?? "",
+              sourceType: source.sourceType === "import" ? "import" : "stock",
+              componentId: source.componentId?.trim() ?? "",
+              componentName: source.componentName?.trim() ?? "",
+              productId: source.productId?.trim() ?? "",
+              productName: source.productName?.trim() ?? "",
+              supplierId: source.supplierId?.trim() ?? "",
+              materialId: source.materialId?.trim() ?? "",
+              rollWidthM: toNullableNumber(source.rollWidthM),
+              rollLengthM: toNullableNumber(source.rollLengthM),
+              rollCount: toNullableNumber(source.rollCount),
+              customsEstimate: toNullableNumber(source.customsEstimate),
+              bagsAcrossRollWidth: toNullableNumber(source.bagsAcrossRollWidth),
+              bagsAlongRollLength: toNullableNumber(source.bagsAlongRollLength),
+              bagsPerRoll: toNullableNumber(source.bagsPerRoll),
+              allocatedBags: toNullableNumber(source.allocatedBags),
+              actualAreaPerBagM2: toNullableNumber(source.actualAreaPerBagM2),
+              qtyUsedM2: toNullableNumber(source.qtyUsedM2),
+              unitCostUsdPerM2: toNullableNumber(source.unitCostUsdPerM2),
+              totalCostUsd: toNullableNumber(source.totalCostUsd),
+              leadTimeDays: toNullableNumber(source.leadTimeDays),
+            }))
+          : [],
+      }))
+    : [],
+  actualAreaPerBagM2: toNullableNumber(payload.actualAreaPerBagM2),
+  totalRequiredBags: toNullableNumber(payload.totalRequiredBags),
   totalAllocatedQtyM2: toNullableNumber(payload.totalAllocatedQtyM2),
   weightedAverageUnitCostUsdPerM2: toNullableNumber(payload.weightedAverageUnitCostUsdPerM2),
   exchangeRate: toNullableNumber(payload.exchangeRate),
@@ -305,6 +386,9 @@ const normalizeStockItemPayload = (payload: Partial<StockItem>, tenantId: string
   supplierId: payload.supplierId?.trim() ?? "",
   materialId: payload.materialId?.trim() ?? "",
   unitCount: toNullableNumber(payload.unitCount),
+  rollWidthM: toNullableNumber(payload.rollWidthM),
+  rollLengthM: toNullableNumber(payload.rollLengthM),
+  unitCostUsdPerM2: toNullableNumber(payload.unitCostUsdPerM2),
   active: payload.active ?? true,
   createdAt: payload.createdAt ?? "",
   updatedAt: payload.updatedAt ?? "",
@@ -316,8 +400,11 @@ const normalizeImportPresetPayload = (payload: Partial<ImportPreset>, tenantId: 
   importPresetId: payload.importPresetId ?? crypto.randomUUID(),
   supplierId: payload.supplierId?.trim() ?? "",
   materialId: payload.materialId?.trim() ?? "",
+  rollWidthM: toNullableNumber(payload.rollWidthM),
+  rollLengthM: toNullableNumber(payload.rollLengthM),
   leadTimeDays: toNullableNumber(payload.leadTimeDays),
   unitCostUsdPerM2: toNullableNumber(payload.unitCostUsdPerM2),
+  customsEstimate: toNullableNumber(payload.customsEstimate),
   active: payload.active ?? true,
   createdAt: payload.createdAt ?? "",
   updatedAt: payload.updatedAt ?? "",
@@ -343,11 +430,28 @@ const normalizeProductPayload = (payload: Partial<Product>, tenantId: string): P
   tenantId,
   productId: payload.productId ?? crypto.randomUUID(),
   productName: payload.productName?.trim() ?? "",
-  productType: payload.productType?.trim() ?? "",
-  defaultTopDesign: payload.defaultTopDesign?.trim() ?? "",
-  defaultBottomDesign: payload.defaultBottomDesign?.trim() ?? "",
-  defaultSeamAllowanceMm: toNullableNumber(payload.defaultSeamAllowanceMm),
-  defaultTopBottomAllowanceMm: toNullableNumber(payload.defaultTopBottomAllowanceMm),
+  productType: payload.productType === "Other" ? "Other" : "Filter Bag",
+  requestedQuantity: toNullableNumber(payload.requestedQuantity),
+  factoryOverheadPerBag: toNullableNumber(payload.factoryOverheadPerBag),
+  manufacturingOverheadPerBag: toNullableNumber(payload.manufacturingOverheadPerBag),
+  managementOverheadPerBag: toNullableNumber(payload.managementOverheadPerBag),
+  components: Array.isArray(payload.components)
+    ? payload.components.map((component) => ({
+        componentId: component.componentId ?? crypto.randomUUID(),
+        componentName: component.componentName?.trim() ?? "",
+        componentType: component.componentType?.trim() ?? "",
+        material: component.material?.trim() ?? "",
+        specifications:
+          component.specifications && typeof component.specifications === "object"
+            ? Object.fromEntries(
+                Object.entries(component.specifications).map(([key, value]) => [
+                  key,
+                  typeof value === "number" ? value : typeof value === "boolean" ? value : value ?? null,
+                ]),
+              )
+            : {},
+      }))
+    : [],
   active: payload.active ?? true,
   createdAt: payload.createdAt ?? "",
   updatedAt: payload.updatedAt ?? "",
@@ -396,6 +500,14 @@ const sanitizeTender = (item: StoredEntity | null): TenderRequest | null => {
     tenderId: String(item.tenderId ?? ""),
     tenantId: item.tenantId,
     customerName: String(item.customerName ?? ""),
+    selectedProductIds: Array.isArray(item.selectedProductIds)
+      ? item.selectedProductIds.map((productId) => String(productId))
+      : [],
+    productSnapshots: Array.isArray(item.productSnapshots)
+      ? item.productSnapshots
+          .map((product) => sanitizeProduct(product as StoredEntity))
+          .filter((product): product is Product => Boolean(product))
+      : [],
     tenderNumber: String(item.tenderNumber ?? ""),
     internalInquiryNumber: String(item.internalInquiryNumber ?? ""),
     tenderDueDate: String(item.tenderDueDate ?? ""),
@@ -424,6 +536,38 @@ const sanitizeTender = (item: StoredEntity | null): TenderRequest | null => {
   };
 };
 
+const sanitizeTenderActivity = (item: StoredEntity | null): TenderActivity | null => {
+  if (!item) {
+    return null;
+  }
+
+  return {
+    entityType: item.entityType,
+    tenantId: item.tenantId,
+    tenderId: String(item.tenderId ?? ""),
+    activityId: String(item.activityId ?? ""),
+    activityType: (String(item.activityType ?? "UPDATED") as TenderActivity["activityType"]),
+    section: (String(item.section ?? "SYSTEM") as TenderActivity["section"]),
+    actorId: String(item.actorId ?? "anonymous"),
+    actorName: String(item.actorName ?? item.actorId ?? "anonymous"),
+    actorEmail: String(item.actorEmail ?? ""),
+    message: String(item.message ?? ""),
+    changeCount: toNullableNumber(item.changeCount) ?? 0,
+    changes: Array.isArray(item.changes)
+      ? item.changes.map((change) => {
+          const record = change as Record<string, unknown>;
+          return {
+            fieldPath: String(record.fieldPath ?? ""),
+            previousValue: toActivityValue(record.previousValue),
+            nextValue: toActivityValue(record.nextValue),
+          };
+        })
+      : [],
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+};
+
 const sanitizeProductConfiguration = (item: StoredEntity | null): ProductConfiguration | null => {
   if (!item) {
     return null;
@@ -434,6 +578,14 @@ const sanitizeProductConfiguration = (item: StoredEntity | null): ProductConfigu
     tenantId: item.tenantId,
     tenderId: String(item.tenderId ?? ""),
     productConfigId: String(item.productConfigId ?? "base"),
+    selectedProductIds: Array.isArray(item.selectedProductIds)
+      ? item.selectedProductIds.map((productId) => String(productId))
+      : [],
+    productSnapshots: Array.isArray(item.productSnapshots)
+      ? item.productSnapshots
+          .map((product) => sanitizeProduct(product as StoredEntity))
+          .filter((product): product is Product => Boolean(product))
+      : [],
     productType: String(item.productType ?? "Filter Bag"),
     quantity: toNullableNumber(item.quantity),
     bagDiameterMm: toNullableNumber(item.bagDiameterMm),
@@ -505,6 +657,21 @@ const sanitizeMaterialSourceSelection = (item: StoredEntity | null): MaterialSou
             sourceId: String(record.sourceId ?? ""),
             sourceName: String(record.sourceName ?? ""),
             sourceType: record.sourceType === "import" ? "import" : "stock",
+            componentId: String(record.componentId ?? ""),
+            componentName: String(record.componentName ?? ""),
+            productId: String(record.productId ?? ""),
+            productName: String(record.productName ?? ""),
+            supplierId: String(record.supplierId ?? ""),
+            materialId: String(record.materialId ?? ""),
+            rollWidthM: toNullableNumber(record.rollWidthM),
+            rollLengthM: toNullableNumber(record.rollLengthM),
+            rollCount: toNullableNumber(record.rollCount),
+            customsEstimate: toNullableNumber(record.customsEstimate),
+            bagsAcrossRollWidth: toNullableNumber(record.bagsAcrossRollWidth),
+            bagsAlongRollLength: toNullableNumber(record.bagsAlongRollLength),
+            bagsPerRoll: toNullableNumber(record.bagsPerRoll),
+            allocatedBags: toNullableNumber(record.allocatedBags),
+            actualAreaPerBagM2: toNullableNumber(record.actualAreaPerBagM2),
             qtyUsedM2: toNullableNumber(record.qtyUsedM2),
             unitCostUsdPerM2: toNullableNumber(record.unitCostUsdPerM2),
             totalCostUsd: toNullableNumber(record.totalCostUsd),
@@ -512,6 +679,59 @@ const sanitizeMaterialSourceSelection = (item: StoredEntity | null): MaterialSou
           };
         })
       : [],
+    componentSelections: Array.isArray(item.componentSelections)
+      ? item.componentSelections.map((selection) => {
+          const record = selection as Record<string, unknown>;
+          return {
+            componentId: String(record.componentId ?? ""),
+            componentName: String(record.componentName ?? ""),
+            productId: String(record.productId ?? ""),
+            productName: String(record.productName ?? ""),
+            materialId: String(record.materialId ?? ""),
+            requestedQuantity: toNullableNumber(record.requestedQuantity),
+            bagDiameterMm: toNullableNumber(record.bagDiameterMm),
+            bagLengthMm: toNullableNumber(record.bagLengthMm),
+            seamAllowanceMm: toNullableNumber(record.seamAllowanceMm),
+            topBottomAllowanceMm: toNullableNumber(record.topBottomAllowanceMm),
+            bagWidthMm: toNullableNumber(record.bagWidthMm),
+            bagLengthWithAllowanceMm: toNullableNumber(record.bagLengthWithAllowanceMm),
+            actualAreaPerBagM2: toNullableNumber(record.actualAreaPerBagM2),
+            materialCostPerBagEgp: toNullableNumber(record.materialCostPerBagEgp),
+            totalMaterialCostEgp: toNullableNumber(record.totalMaterialCostEgp),
+            selectedSources: Array.isArray(record.selectedSources)
+              ? record.selectedSources.map((source) => {
+                  const sourceRecord = source as Record<string, unknown>;
+                  return {
+                    sourceId: String(sourceRecord.sourceId ?? ""),
+                    sourceName: String(sourceRecord.sourceName ?? ""),
+                    sourceType: sourceRecord.sourceType === "import" ? "import" : "stock",
+                    componentId: String(sourceRecord.componentId ?? ""),
+                    componentName: String(sourceRecord.componentName ?? ""),
+                    productId: String(sourceRecord.productId ?? ""),
+                    productName: String(sourceRecord.productName ?? ""),
+                    supplierId: String(sourceRecord.supplierId ?? ""),
+                    materialId: String(sourceRecord.materialId ?? ""),
+                    rollWidthM: toNullableNumber(sourceRecord.rollWidthM),
+                    rollLengthM: toNullableNumber(sourceRecord.rollLengthM),
+                    rollCount: toNullableNumber(sourceRecord.rollCount),
+                    customsEstimate: toNullableNumber(sourceRecord.customsEstimate),
+                    bagsAcrossRollWidth: toNullableNumber(sourceRecord.bagsAcrossRollWidth),
+                    bagsAlongRollLength: toNullableNumber(sourceRecord.bagsAlongRollLength),
+                    bagsPerRoll: toNullableNumber(sourceRecord.bagsPerRoll),
+                    allocatedBags: toNullableNumber(sourceRecord.allocatedBags),
+                    actualAreaPerBagM2: toNullableNumber(sourceRecord.actualAreaPerBagM2),
+                    qtyUsedM2: toNullableNumber(sourceRecord.qtyUsedM2),
+                    unitCostUsdPerM2: toNullableNumber(sourceRecord.unitCostUsdPerM2),
+                    totalCostUsd: toNullableNumber(sourceRecord.totalCostUsd),
+                    leadTimeDays: toNullableNumber(sourceRecord.leadTimeDays),
+                  };
+                })
+              : [],
+          } satisfies BagBodySourcingSelection;
+        })
+      : [],
+    actualAreaPerBagM2: toNullableNumber(item.actualAreaPerBagM2),
+    totalRequiredBags: toNullableNumber(item.totalRequiredBags),
     totalAllocatedQtyM2: toNullableNumber(item.totalAllocatedQtyM2),
     weightedAverageUnitCostUsdPerM2: toNullableNumber(item.weightedAverageUnitCostUsdPerM2),
     exchangeRate: toNullableNumber(item.exchangeRate),
@@ -619,6 +839,9 @@ const sanitizeStockItem = (item: StoredEntity | null): StockItem | null => {
     supplierId: String(item.supplierId ?? ""),
     materialId: String(item.materialId ?? ""),
     unitCount: toNullableNumber(item.unitCount),
+    rollWidthM: toNullableNumber(item.rollWidthM),
+    rollLengthM: toNullableNumber(item.rollLengthM),
+    unitCostUsdPerM2: toNullableNumber(item.unitCostUsdPerM2),
     active: Boolean(item.active),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -636,8 +859,11 @@ const sanitizeImportPreset = (item: StoredEntity | null): ImportPreset | null =>
     importPresetId: String(item.importPresetId ?? ""),
     supplierId: String(item.supplierId ?? ""),
     materialId: String(item.materialId ?? ""),
+    rollWidthM: toNullableNumber(item.rollWidthM),
+    rollLengthM: toNullableNumber(item.rollLengthM),
     leadTimeDays: toNullableNumber(item.leadTimeDays),
     unitCostUsdPerM2: toNullableNumber(item.unitCostUsdPerM2),
+    customsEstimate: toNullableNumber(item.customsEstimate),
     active: Boolean(item.active),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -675,11 +901,36 @@ const sanitizeProduct = (item: StoredEntity | null): Product | null => {
     tenantId: item.tenantId,
     productId: String(item.productId ?? ""),
     productName: String(item.productName ?? ""),
-    productType: String(item.productType ?? ""),
-    defaultTopDesign: String(item.defaultTopDesign ?? ""),
-    defaultBottomDesign: String(item.defaultBottomDesign ?? ""),
-    defaultSeamAllowanceMm: toNullableNumber(item.defaultSeamAllowanceMm),
-    defaultTopBottomAllowanceMm: toNullableNumber(item.defaultTopBottomAllowanceMm),
+    productType: item.productType === "Other" ? "Other" : "Filter Bag",
+    requestedQuantity: toNullableNumber(item.requestedQuantity),
+    factoryOverheadPerBag: toNullableNumber(item.factoryOverheadPerBag),
+    manufacturingOverheadPerBag: toNullableNumber(item.manufacturingOverheadPerBag),
+    managementOverheadPerBag: toNullableNumber(item.managementOverheadPerBag),
+    components: Array.isArray(item.components)
+      ? item.components.map((component) => {
+          const record = component as Record<string, unknown>;
+          return {
+            componentId: String(record.componentId ?? ""),
+            componentName: String(record.componentName ?? ""),
+            componentType: String(record.componentType ?? ""),
+            material: String(record.material ?? ""),
+            specifications:
+              record.specifications && typeof record.specifications === "object"
+                ? Object.fromEntries(
+                    Object.entries(record.specifications as Record<string, unknown>).map(([key, value]) => [
+                      key,
+                      (typeof value === "string" ||
+                      typeof value === "number" ||
+                      typeof value === "boolean" ||
+                      value === null
+                        ? value
+                        : String(value)) as ProductComponentSpecificationValue,
+                    ]),
+                  )
+                : {},
+          };
+        })
+      : [],
     active: Boolean(item.active),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -733,6 +984,71 @@ const getTenantId = (event: Parameters<APIGatewayProxyHandlerV2>[0]) =>
   parseBody<{ tenantId?: string }>(event.body).tenantId ??
   "alimex-demo";
 
+const getHeader = (
+  headers: Parameters<APIGatewayProxyHandlerV2>[0]["headers"] | undefined,
+  key: string,
+) => {
+  const target = key.toLowerCase();
+  const match = Object.entries(headers ?? {}).find(([headerKey]) => headerKey.toLowerCase() === target);
+  return match?.[1];
+};
+
+const toActivityValue = (value: unknown): string | number | boolean | null => {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  return JSON.stringify(value);
+};
+
+const getActorIdentity = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
+  const requestContext = event.requestContext as Parameters<APIGatewayProxyHandlerV2>[0]["requestContext"] & {
+    authorizer?: { jwt?: { claims?: Record<string, unknown> } };
+  };
+  const claims = (
+    requestContext.authorizer as
+      | { jwt?: { claims?: Record<string, unknown> } }
+      | undefined
+  )?.jwt?.claims;
+  const bodyActor = parseBody<{ actorId?: string; actorName?: string; actorEmail?: string }>(event.body);
+
+  const actorId =
+    event.queryStringParameters?.actorId ??
+    getHeader(event.headers, "x-user-id") ??
+    bodyActor.actorId ??
+    (typeof claims?.sub === "string" ? claims.sub : undefined) ??
+    (typeof claims?.["cognito:username"] === "string" ? claims["cognito:username"] : undefined) ??
+    "anonymous";
+  const actorEmail =
+    event.queryStringParameters?.actorEmail ??
+    getHeader(event.headers, "x-user-email") ??
+    bodyActor.actorEmail ??
+    (typeof claims?.email === "string" ? claims.email : undefined) ??
+    undefined;
+  const actorName =
+    event.queryStringParameters?.actorName ??
+    getHeader(event.headers, "x-user-name") ??
+    bodyActor.actorName ??
+    (typeof claims?.name === "string" ? claims.name : undefined) ??
+    actorEmail ??
+    actorId;
+
+  return {
+    actorId,
+    actorName,
+    actorEmail,
+  };
+};
+
 const baseEnvelope = <T extends { tenantId: string; entityType?: string }>(
   payload: T,
   entityType: string,
@@ -769,6 +1085,59 @@ const getRecord = async <T>(
   );
 
   return (response.Item as T | undefined) ?? null;
+};
+
+const flattenForAudit = (
+  value: unknown,
+  prefix = "",
+  entries: Array<[string, string | number | boolean | null]> = [],
+) => {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      flattenForAudit(item, prefix ? `${prefix}[${index}]` : `[${index}]`, entries);
+    });
+    return entries;
+  }
+
+  if (value && typeof value === "object") {
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .forEach(([key, nestedValue]) => {
+        flattenForAudit(nestedValue, prefix ? `${prefix}.${key}` : key, entries);
+      });
+    return entries;
+  }
+
+  entries.push([prefix, toActivityValue(value)]);
+  return entries;
+};
+
+const buildAuditChanges = (previous: Record<string, unknown> | null, next: Record<string, unknown>) => {
+  const ignored = new Set(["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK", "GSI3PK", "GSI3SK", "createdAt", "updatedAt"]);
+  const previousEntries = new Map(
+    flattenForAudit(previous ?? {}).filter(([key]) => key && !ignored.has(key)),
+  );
+  const nextEntries = new Map(
+    flattenForAudit(next).filter(([key]) => key && !ignored.has(key)),
+  );
+  const fieldPaths = Array.from(new Set([...previousEntries.keys(), ...nextEntries.keys()])).sort();
+
+  return fieldPaths
+    .map((fieldPath) => {
+      const previousValue = previousEntries.get(fieldPath) ?? null;
+      const nextValue = nextEntries.get(fieldPath) ?? null;
+
+      if (previousValue === nextValue) {
+        return null;
+      }
+
+      return {
+        fieldPath,
+        previousValue,
+        nextValue,
+      };
+    })
+    .filter((change): change is NonNullable<typeof change> => Boolean(change));
 };
 
 const queryTenant = async <T>(
@@ -846,9 +1215,14 @@ const getRequestContext = (event: Parameters<APIGatewayProxyHandlerV2>[0]): Requ
     throw new Error("Missing TENDER_PRICING_TABLE environment variable.");
   }
 
+  const actor = getActorIdentity(event);
+
   return {
     tableName,
     tenantId: getTenantId(event),
+    actorId: actor.actorId,
+    actorName: actor.actorName,
+    actorEmail: actor.actorEmail,
   };
 };
 
@@ -991,6 +1365,7 @@ const saveTender = async (context: RequestContext, payload: Partial<TenderReques
   } satisfies StoredEntity;
 
   await putRecord(context.tableName, item);
+  await createAuditActivity(context, normalized.tenderId, "TENDER", existing, item);
   return sanitizeTender(item)!;
 };
 
@@ -1030,11 +1405,12 @@ const updateTenderStatus = async (
 };
 
 const createTenderActivity = async (
-  tableName: string,
+  context: RequestContext,
   tenderId: string,
-  tenantId: string,
   activityType: TenderActivity["activityType"],
+  section: TenderActivitySection,
   message: string,
+  changes: TenderActivity["changes"] = [],
 ) => {
   const createdAt = isoNow();
   const activityId = crypto.randomUUID();
@@ -1043,18 +1419,50 @@ const createTenderActivity = async (
     SK: `ACTIVITY#${createdAt}#${activityId}`,
     ...baseEnvelope(
       {
-        tenantId,
+        tenantId: context.tenantId,
         tenderId,
         activityId,
         activityType,
+        section,
+        actorId: context.actorId,
+        actorName: context.actorName,
+        actorEmail: context.actorEmail ?? "",
         message,
+        changeCount: changes.length,
+        changes,
       },
       "TENDER_ACTIVITY",
       createdAt,
     ),
   } satisfies StoredEntity;
 
-  await putRecord(tableName, item);
+  await putRecord(context.tableName, item);
+};
+
+const createAuditActivity = async (
+  context: RequestContext,
+  tenderId: string,
+  section: TenderActivitySection,
+  previous: Record<string, unknown> | null,
+  next: Record<string, unknown>,
+) => {
+  const changes = buildAuditChanges(previous, next);
+  const activityType = previous ? "UPDATED" : "CREATED";
+  const message =
+    previous
+      ? `${section} updated by ${context.actorName}.`
+      : `${section} created by ${context.actorName}.`;
+
+  await createTenderActivity(context, tenderId, activityType, section, message, changes);
+};
+
+const listTenderActivities = async (context: RequestContext, tenderId: string) => {
+  const items = await queryTenderEntityRecords(context.tableName, tenderId);
+  return items
+    .filter((item) => item.entityType === "TENDER_ACTIVITY")
+    .map(sanitizeTenderActivity)
+    .filter((item): item is TenderActivity => Boolean(item))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 };
 
 const archiveTender = async (context: RequestContext, tenderId: string) => {
@@ -1069,14 +1477,48 @@ const archiveTender = async (context: RequestContext, tenderId: string) => {
   });
 
   await createTenderActivity(
-    context.tableName,
+    context,
     tenderId,
-    context.tenantId,
     "ARCHIVED",
+    "SYSTEM",
     `Tender ${existing.tenderNumber || tenderId} archived.`,
   );
 
   return archived;
+};
+
+const queryTenderEntityRecords = async (tableName: string, tenderId: string) => {
+  const response = await documentClient.send(
+    new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: "PK = :pk",
+      ExpressionAttributeValues: {
+        ":pk": tenderEntityPk(tenderId),
+      },
+    }),
+  );
+
+  return (response.Items as StoredEntity[] | undefined) ?? [];
+};
+
+const deleteRecordsInBatches = async (tableName: string, items: Array<Pick<StoredEntity, "PK" | "SK">>) => {
+  for (let index = 0; index < items.length; index += 25) {
+    const chunk = items.slice(index, index + 25);
+    await documentClient.send(
+      new BatchWriteCommand({
+        RequestItems: {
+          [tableName]: chunk.map((item) => ({
+            DeleteRequest: {
+              Key: {
+                PK: item.PK,
+                SK: item.SK,
+              },
+            },
+          })),
+        },
+      }),
+    );
+  }
 };
 
 const deleteTender = async (context: RequestContext, tenderId: string) => {
@@ -1085,9 +1527,12 @@ const deleteTender = async (context: RequestContext, tenderId: string) => {
     return null;
   }
 
-  if (existing.status !== "DRAFT_INTAKE") {
-    throw new Error("Only draft tenders can be deleted.");
+  if (existing.status === "APPROVED") {
+    throw new Error("Approved tenders cannot be deleted.");
   }
+
+  const tenderEntityItems = await queryTenderEntityRecords(context.tableName, tenderId);
+  await deleteRecordsInBatches(context.tableName, tenderEntityItems);
 
   await documentClient.send(
     new DeleteCommand({
@@ -1099,14 +1544,6 @@ const deleteTender = async (context: RequestContext, tenderId: string) => {
     }),
   );
 
-  await createTenderActivity(
-    context.tableName,
-    tenderId,
-    context.tenantId,
-    "DELETED",
-    `Tender ${existing.tenderNumber || tenderId} deleted.`,
-  );
-
   return existing;
 };
 
@@ -1116,19 +1553,61 @@ const duplicateTender = async (context: RequestContext, tenderId: string) => {
     return null;
   }
 
+  const duplicatedTenderId = crypto.randomUUID();
   const duplicated = await saveTender(context, {
     ...existing,
-    tenderId: crypto.randomUUID(),
-    status: "DRAFT_INTAKE",
+    tenderId: duplicatedTenderId,
     archived: false,
     notes: `Copy of ${existing.tenderNumber}. ${existing.notes ?? ""}`.trim(),
   });
 
+  const [productConfiguration, rollCalculation, materialSourcing, costBuildUp] = await Promise.all([
+    getProductConfiguration(context, tenderId),
+    getRollCalculation(context, tenderId),
+    getMaterialSourcing(context, tenderId),
+    getCostBuildUp(context, tenderId),
+  ]);
+
+  if (productConfiguration) {
+    await saveProductConfiguration(context, duplicatedTenderId, {
+      ...productConfiguration,
+      tenderId: duplicatedTenderId,
+    });
+  }
+
+  if (rollCalculation) {
+    await saveRollCalculation(context, duplicatedTenderId, {
+      ...rollCalculation,
+      tenderId: duplicatedTenderId,
+    });
+  }
+
+  if (materialSourcing) {
+    await saveMaterialSourcing(context, duplicatedTenderId, {
+      ...materialSourcing,
+      tenderId: duplicatedTenderId,
+    });
+  }
+
+  if (costBuildUp) {
+    await saveCostBuildUp(context, duplicatedTenderId, {
+      ...costBuildUp,
+      tenderId: duplicatedTenderId,
+    });
+  }
+
+  if (duplicated.status !== existing.status) {
+    await saveTender(context, {
+      ...duplicated,
+      status: existing.status,
+    });
+  }
+
   await createTenderActivity(
-    context.tableName,
+    context,
     duplicated.tenderId,
-    context.tenantId,
     "DUPLICATED",
+    "SYSTEM",
     `Tender duplicated from ${existing.tenderNumber || tenderId}.`,
   );
 
@@ -1155,6 +1634,22 @@ const getProductConfigurationRecord = async (
 const getProductConfiguration = async (context: RequestContext, tenderId: string) =>
   sanitizeProductConfiguration(await getProductConfigurationRecord(context.tableName, tenderId));
 
+const clearTenderWorkflowStage = async (
+  tableName: string,
+  tenderId: string,
+  sk: string,
+) => {
+  await documentClient.send(
+    new DeleteCommand({
+      TableName: tableName,
+      Key: {
+        PK: tenderEntityPk(tenderId),
+        SK: sk,
+      },
+    }),
+  );
+};
+
 const saveProductConfiguration = async (
   context: RequestContext,
   tenderId: string,
@@ -1175,6 +1670,7 @@ const saveProductConfiguration = async (
   } satisfies StoredEntity;
 
   await putRecord(context.tableName, item);
+  await createAuditActivity(context, tenderId, "PRODUCT_CONFIGURATION", existing, item);
   await updateTenderStatus(context, tenderId, "PRODUCT_CONFIGURATION");
   return sanitizeProductConfiguration(item)!;
 };
@@ -1216,6 +1712,7 @@ const saveRollCalculation = async (
   } satisfies StoredEntity;
 
   await putRecord(context.tableName, item);
+  await createAuditActivity(context, tenderId, "ROLL_CALCULATION", existing, item);
   await updateTenderStatus(context, tenderId, "MATERIAL_ROLL_CALCULATION");
   return sanitizeRollCalculation(item)!;
 };
@@ -1257,6 +1754,8 @@ const saveMaterialSourcing = async (
   } satisfies StoredEntity;
 
   await putRecord(context.tableName, item);
+  await createAuditActivity(context, tenderId, "MATERIAL_SOURCE_SELECTION", existing, item);
+  await clearTenderWorkflowStage(context.tableName, tenderId, "COST_BUILDUP#base");
   await updateTenderStatus(context, tenderId, "MATERIAL_SOURCING");
   return sanitizeMaterialSourceSelection(item)!;
 };
@@ -1298,6 +1797,7 @@ const saveCostBuildUp = async (
   } satisfies StoredEntity;
 
   await putRecord(context.tableName, item);
+  await createAuditActivity(context, tenderId, "COST_BUILDUP", existing, item);
   await updateTenderStatus(context, tenderId, "COST_BUILDUP");
   return sanitizeCostBuildUp(item)!;
 };
@@ -1677,6 +2177,8 @@ const seedDevData = async (context: RequestContext) => {
     tenderId: "TDR-1001",
     tenantId: context.tenantId,
     customerName: "Sample Customer",
+    selectedProductIds: [],
+    productSnapshots: [],
     tenderNumber: "TEN-2026-1001",
     internalInquiryNumber: "INQ-1001",
     tenderDueDate: "2026-06-15",
@@ -1733,6 +2235,8 @@ const seedDevData = async (context: RequestContext) => {
     tenantId: context.tenantId,
     tenderId: tender.tenderId,
     productConfigId: "base",
+    selectedProductIds: [],
+    productSnapshots: [],
     productType: "Filter Bag",
     quantity: 1000,
     bagDiameterMm: 300,
@@ -2169,6 +2673,10 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       return archived ? json(200, archived) : json(404, { message: "Tender not found." });
     }
 
+    if (tenderId && method === "GET" && path === `/tenders/${tenderId}/activities`) {
+      return json(200, await listTenderActivities(context, tenderId));
+    }
+
     if (tenderId && method === "PUT" && path === `/tenders/${tenderId}`) {
       return json(
         200,
@@ -2181,8 +2689,16 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     }
 
     if (tenderId && method === "DELETE" && path === `/tenders/${tenderId}`) {
-      const deleted = await deleteTender(context, tenderId);
-      return deleted ? json(200, deleted) : json(404, { message: "Tender not found." });
+      try {
+        const deleted = await deleteTender(context, tenderId);
+        return deleted ? json(200, deleted) : json(404, { message: "Tender not found." });
+      } catch (error) {
+        if (error instanceof Error && error.message === "Approved tenders cannot be deleted.") {
+          return json(400, { message: error.message });
+        }
+
+        throw error;
+      }
     }
 
     if (tenderId && section && method === "GET" && path === `/tenders/${tenderId}/${section}`) {

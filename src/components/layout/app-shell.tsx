@@ -33,13 +33,8 @@ const navigation = [
       { label: "Materials", href: "/materials" },
       { label: "Suppliers", href: "/suppliers" },
       { label: "Accessories", href: "/accessories" },
-    ],
-  },
-  {
-    label: "Material Sourcing",
-    items: [
-      { label: "Current Stock", href: "/stock" },
-      { label: "Import Presets", href: "/import-presets" },
+      { label: "In Stock Rolls", href: "/stock" },
+      { label: "Import Rolls", href: "/import-presets" },
     ],
   },
   {

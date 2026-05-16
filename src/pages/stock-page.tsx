@@ -12,8 +12,20 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { api, isApiConfigured } from "../lib/api";
 import type { Material, StockItem, Supplier } from "../../shared/types";
 
-type StockForm = Omit<StockItem, "entityType" | "createdAt" | "updatedAt" | "unitCount"> & {
+type StockForm = Omit<
+  StockItem,
+  | "entityType"
+  | "createdAt"
+  | "updatedAt"
+  | "unitCount"
+  | "rollWidthM"
+  | "rollLengthM"
+  | "unitCostUsdPerM2"
+> & {
   unitCount: string;
+  rollWidthM: string;
+  rollLengthM: string;
+  unitCostUsdPerM2: string;
 };
 
 const initialForm: StockForm = {
@@ -22,6 +34,9 @@ const initialForm: StockForm = {
   supplierId: "",
   materialId: "",
   unitCount: "",
+  rollWidthM: "",
+  rollLengthM: "",
+  unitCostUsdPerM2: "",
   active: true,
 };
 
@@ -31,6 +46,9 @@ const toForm = (record: StockItem): StockForm => ({
   supplierId: record.supplierId,
   materialId: record.materialId,
   unitCount: record.unitCount?.toString() ?? "",
+  rollWidthM: record.rollWidthM?.toString() ?? "",
+  rollLengthM: record.rollLengthM?.toString() ?? "",
+  unitCostUsdPerM2: record.unitCostUsdPerM2?.toString() ?? "",
   active: record.active,
 });
 
@@ -83,7 +101,15 @@ export const StockPage = () => {
       records.filter((record) => {
         const supplierName = supplierMap[record.supplierId] ?? "";
         const materialName = materialMap[record.materialId] ?? "";
-        const matchesSearch = [record.stockId, supplierName, materialName, record.unitCount?.toString() ?? ""]
+        const matchesSearch = [
+          record.stockId,
+          supplierName,
+          materialName,
+          record.unitCount?.toString() ?? "",
+          record.rollWidthM?.toString() ?? "",
+          record.rollLengthM?.toString() ?? "",
+          record.unitCostUsdPerM2?.toString() ?? "",
+        ]
           .join(" ")
           .toLowerCase()
           .includes(search.toLowerCase());
@@ -108,6 +134,10 @@ export const StockPage = () => {
       supplierId: form.supplierId,
       materialId: form.materialId,
       unitCount: form.unitCount.trim() === "" ? null : Number(form.unitCount),
+      rollWidthM: form.rollWidthM.trim() === "" ? null : Number(form.rollWidthM),
+      rollLengthM: form.rollLengthM.trim() === "" ? null : Number(form.rollLengthM),
+      unitCostUsdPerM2:
+        form.unitCostUsdPerM2.trim() === "" ? null : Number(form.unitCostUsdPerM2),
       active: form.active,
       createdAt: "",
       updatedAt: "",
@@ -153,8 +183,10 @@ export const StockPage = () => {
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>Current Stock</CardTitle>
-            <CardDescription>Track available stock by supplier, material, and unit count.</CardDescription>
+            <CardTitle>In Stock Rolls</CardTitle>
+            <CardDescription>
+              Track reusable in-stock roll records by supplier, material, roll width, roll length, and unit cost.
+            </CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -167,10 +199,12 @@ export const StockPage = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Stock Item</TableHead>
+                  <TableHead>Stock Roll</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead>Material</TableHead>
-                  <TableHead>Unit Count</TableHead>
+                  <TableHead>Roll Width (m)</TableHead>
+                  <TableHead>Roll Length (m)</TableHead>
+                  <TableHead>Unit Cost USD/m²</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -180,11 +214,15 @@ export const StockPage = () => {
                   <TableRow key={record.stockId}>
                     <TableCell>
                       <p className="font-medium text-slate-900">{record.stockId}</p>
-                      <p className="text-xs text-muted-foreground">Current stock record</p>
+                      <p className="text-xs text-muted-foreground">In-stock roll record</p>
                     </TableCell>
                     <TableCell>{supplierMap[record.supplierId] ?? record.supplierId ?? "-"}</TableCell>
                     <TableCell>{materialMap[record.materialId] ?? record.materialId ?? "-"}</TableCell>
-                    <TableCell>{record.unitCount ?? "-"}</TableCell>
+                    <TableCell>{record.rollWidthM ?? "-"}</TableCell>
+                    <TableCell>{record.rollLengthM ?? "-"}</TableCell>
+                    <TableCell>
+                      {record.unitCostUsdPerM2 !== null ? record.unitCostUsdPerM2.toFixed(3) : "-"}
+                    </TableCell>
                     <TableCell><StatusBadge active={record.active} /></TableCell>
                     <TableCell className="space-x-2">
                       <Button
@@ -214,8 +252,8 @@ export const StockPage = () => {
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title={editing ? "Edit Stock Item" : "Add Stock Item"}
-        description="Choose a supplier and material, then record the available unit count."
+        title={editing ? "Edit In Stock Roll" : "Add In Stock Roll"}
+        description="Select the supplier and material, then capture the roll width, roll length, and unit cost."
       >
         <form className="grid gap-5 md:grid-cols-2" onSubmit={submit}>
           <label className="space-y-2 text-sm font-medium text-slate-700">
@@ -245,8 +283,22 @@ export const StockPage = () => {
             </Select>
           </label>
           <label className="space-y-2 text-sm font-medium text-slate-700">
-            Unit Count
-            <Input required inputMode="decimal" value={form.unitCount} onChange={(event) => setForm((current) => ({ ...current, unitCount: event.target.value }))} />
+            Roll Width (m)
+            <Input required inputMode="decimal" value={form.rollWidthM} onChange={(event) => setForm((current) => ({ ...current, rollWidthM: event.target.value }))} />
+          </label>
+          <label className="space-y-2 text-sm font-medium text-slate-700">
+            Roll Length (m)
+            <Input required inputMode="decimal" value={form.rollLengthM} onChange={(event) => setForm((current) => ({ ...current, rollLengthM: event.target.value }))} />
+          </label>
+          <label className="space-y-2 text-sm font-medium text-slate-700">
+            Unit Cost USD / m²
+            <Input
+              inputMode="decimal"
+              value={form.unitCostUsdPerM2}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, unitCostUsdPerM2: event.target.value }))
+              }
+            />
           </label>
           <label className="flex items-center gap-3 rounded-2xl border border-border bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
             <input checked={form.active} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />

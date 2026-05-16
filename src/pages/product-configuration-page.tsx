@@ -1,12 +1,4 @@
-import {
-  ArrowLeft,
-  ArrowRight,
-  Box,
-  Package,
-  PencilRuler,
-  Rows3,
-  Save,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -14,12 +6,40 @@ import { TenderWorkflowStepper } from "../components/tenders/tender-workflow-ste
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
-import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { api, ApiError, isApiConfigured } from "../lib/api";
-import { cn } from "../lib/utils";
-import type { Material, ProductConfiguration, TenderRequest } from "../../shared/types";
+import type { Material, Product, ProductConfiguration, TenderRequest } from "../../shared/types";
+
+type SpecificationFormRow = {
+  key: string;
+  value: string;
+};
+
+type ProductSnapshotComponentForm = {
+  componentId: string;
+  componentName: string;
+  componentType: string;
+  material: string;
+  diameter: string;
+  length: string;
+  seamAllowanceMm: string;
+  topBottomAllowanceMm: string;
+  specificationRows: SpecificationFormRow[];
+};
+
+type ProductSnapshotForm = {
+  productId: string;
+  tenantId: string;
+  productName: string;
+  productType: Product["productType"];
+  requestedQuantity: string;
+  factoryOverheadPerBag: string;
+  manufacturingOverheadPerBag: string;
+  managementOverheadPerBag: string;
+  active: boolean;
+  components: ProductSnapshotComponentForm[];
+};
 
 type ProductConfigurationForm = Omit<
   ProductConfiguration,
@@ -33,6 +53,7 @@ type ProductConfigurationForm = Omit<
   | "topBottomAllowanceMm"
   | "wearStripHeightMm"
   | "bagsPerCarton"
+  | "productSnapshots"
 > & {
   quantity: string;
   bagDiameterMm: string;
@@ -41,21 +62,15 @@ type ProductConfigurationForm = Omit<
   topBottomAllowanceMm: string;
   wearStripHeightMm: string;
   bagsPerCarton: string;
+  productSnapshots: ProductSnapshotForm[];
 };
-
-type ConfigTab = "bag-specifications" | "accessories" | "materials" | "packaging";
-
-const tabs: Array<{ id: ConfigTab; label: string }> = [
-  { id: "bag-specifications", label: "Bag Specifications" },
-  { id: "accessories", label: "Accessories" },
-  { id: "materials", label: "Materials" },
-  { id: "packaging", label: "Packaging" },
-];
 
 const initialForm = (tenderId: string): ProductConfigurationForm => ({
   tenantId: "alimex-demo",
   tenderId,
   productConfigId: "base",
+  selectedProductIds: [],
+  productSnapshots: [],
   productType: "Filter Bag",
   quantity: "",
   bagDiameterMm: "",
@@ -84,10 +99,192 @@ const numberOrNull = (value: string) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const isBagBody = (component: ProductSnapshotComponentForm) =>
+  component.componentType.trim().toLowerCase() === "bag body" ||
+  component.componentName.trim().toLowerCase() === "bag body";
+
+const specificationsToRows = (specifications: Product["components"][number]["specifications"]) =>
+  Object.entries(specifications)
+    .filter(
+      ([key]) =>
+        key !== "diameter" &&
+        key !== "length" &&
+        key !== "seamAllowanceMm" &&
+        key !== "topBottomAllowanceMm",
+    )
+    .map(([key, value]) => ({
+      key,
+      value: value === null ? "" : String(value),
+    }));
+
+const toSnapshotComponentForm = (
+  component: Product["components"][number],
+): ProductSnapshotComponentForm => ({
+  componentId: component.componentId,
+  componentName: component.componentName,
+  componentType: component.componentType,
+  material: component.material,
+  diameter:
+    component.specifications.diameter === null || component.specifications.diameter === undefined
+      ? ""
+      : String(component.specifications.diameter),
+  length:
+    component.specifications.length === null || component.specifications.length === undefined
+      ? ""
+      : String(component.specifications.length),
+  seamAllowanceMm:
+    component.specifications.seamAllowanceMm === null ||
+    component.specifications.seamAllowanceMm === undefined
+      ? ""
+      : String(component.specifications.seamAllowanceMm),
+  topBottomAllowanceMm:
+    component.specifications.topBottomAllowanceMm === null ||
+    component.specifications.topBottomAllowanceMm === undefined
+      ? ""
+      : String(component.specifications.topBottomAllowanceMm),
+  specificationRows: specificationsToRows(component.specifications),
+});
+
+const toSnapshotForm = (product: Product): ProductSnapshotForm => ({
+  productId: product.productId,
+  tenantId: product.tenantId,
+  productName: product.productName,
+  productType: product.productType,
+  requestedQuantity:
+    product.requestedQuantity === null || product.requestedQuantity === undefined
+      ? ""
+      : String(product.requestedQuantity),
+  factoryOverheadPerBag:
+    product.factoryOverheadPerBag === null || product.factoryOverheadPerBag === undefined
+      ? ""
+      : String(product.factoryOverheadPerBag),
+  manufacturingOverheadPerBag:
+    product.manufacturingOverheadPerBag === null || product.manufacturingOverheadPerBag === undefined
+      ? ""
+      : String(product.manufacturingOverheadPerBag),
+  managementOverheadPerBag:
+    product.managementOverheadPerBag === null || product.managementOverheadPerBag === undefined
+      ? ""
+      : String(product.managementOverheadPerBag),
+  active: product.active,
+  components: product.components.map(toSnapshotComponentForm),
+});
+
+const buildSnapshotProduct = (product: ProductSnapshotForm): Product => {
+  const components = product.components.map((component) => {
+    const specifications = Object.fromEntries(
+      component.specificationRows
+        .filter((row) => row.key.trim())
+        .map((row) => {
+          const trimmedValue = row.value.trim();
+          const numericValue = trimmedValue === "" ? null : Number(trimmedValue);
+          return [
+            row.key.trim(),
+            trimmedValue === ""
+              ? null
+              : Number.isFinite(numericValue)
+                ? numericValue
+                : trimmedValue,
+          ];
+        }),
+    ) as Record<string, string | number | boolean | null>;
+
+    if (isBagBody(component)) {
+      specifications.diameter = numberOrNull(component.diameter);
+      specifications.length = numberOrNull(component.length);
+      specifications.seamAllowanceMm = numberOrNull(component.seamAllowanceMm);
+      specifications.topBottomAllowanceMm = numberOrNull(component.topBottomAllowanceMm);
+    }
+
+    return {
+      componentId: component.componentId,
+      componentName: component.componentName.trim(),
+      componentType: component.componentType.trim(),
+      material: component.material.trim(),
+      specifications,
+    };
+  });
+
+  return {
+    entityType: "PRODUCT",
+    tenantId: product.tenantId,
+    productId: product.productId,
+    productName: product.productName.trim(),
+    productType: product.productType,
+    requestedQuantity: numberOrNull(product.requestedQuantity),
+    factoryOverheadPerBag: numberOrNull(product.factoryOverheadPerBag),
+    manufacturingOverheadPerBag: numberOrNull(product.manufacturingOverheadPerBag),
+    managementOverheadPerBag: numberOrNull(product.managementOverheadPerBag),
+    components,
+    active: product.active,
+    createdAt: "",
+    updatedAt: "",
+  };
+};
+
+const normalizeMaterialReference = (value: string, materials: Material[]) => {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  const match = materials.find(
+    (material) => material.materialId === trimmed || material.materialName === trimmed,
+  );
+
+  return match?.materialId ?? trimmed;
+};
+
+const applyDerivedSnapshotValues = (
+  current: ProductConfigurationForm,
+  snapshots: ProductSnapshotForm[],
+  materials: Material[],
+): ProductConfigurationForm => {
+  const allComponents = snapshots.flatMap((product) => product.components);
+  const bagBody = allComponents.find(isBagBody);
+  const ring = allComponents.find((component) => component.componentType === "Ring");
+  const thread = allComponents.find((component) => component.componentType === "Thread");
+  const totalRequestedQuantity = snapshots.reduce((total, product) => {
+    const parsed = numberOrNull(product.requestedQuantity);
+    return parsed === null ? total : total + parsed;
+  }, 0);
+
+  return {
+    ...current,
+    selectedProductIds: snapshots.map((product) => product.productId),
+    productSnapshots: snapshots,
+    productType: snapshots[0]?.productType ?? "Filter Bag",
+    quantity: totalRequestedQuantity > 0 ? String(totalRequestedQuantity) : "",
+    bagDiameterMm: bagBody?.diameter ?? "",
+    bagLengthMm: bagBody?.length ?? "",
+    seamAllowanceMm: bagBody?.seamAllowanceMm ?? "",
+    topBottomAllowanceMm: bagBody?.topBottomAllowanceMm ?? "",
+    mainFabricMaterialId: bagBody ? normalizeMaterialReference(bagBody.material, materials) : "",
+    accessoriesMaterialId: ring ? normalizeMaterialReference(ring.material, materials) : "",
+    threadMaterialId: thread ? normalizeMaterialReference(thread.material, materials) : "",
+  };
+};
+
 const toForm = (config: ProductConfiguration): ProductConfigurationForm => ({
   tenantId: config.tenantId,
   tenderId: config.tenderId,
   productConfigId: config.productConfigId,
+  selectedProductIds: config.selectedProductIds ?? [],
+  productSnapshots: (config.productSnapshots ?? []).map((product, index, allProducts) => {
+    const snapshot = toSnapshotForm(product);
+
+    if (
+      snapshot.requestedQuantity === "" &&
+      config.quantity !== null &&
+      config.quantity !== undefined &&
+      allProducts.length === 1
+    ) {
+      return { ...snapshot, requestedQuantity: String(config.quantity) };
+    }
+
+    return snapshot;
+  }),
   productType: config.productType,
   quantity: config.quantity?.toString() ?? "",
   bagDiameterMm: config.bagDiameterMm?.toString() ?? "",
@@ -107,87 +304,17 @@ const toForm = (config: ProductConfiguration): ProductConfigurationForm => ({
   packagingNotes: config.packagingNotes ?? "",
 });
 
-const requiredFields: Array<keyof ProductConfigurationForm> = [
-  "productType",
-  "quantity",
-  "bagDiameterMm",
-  "bagLengthMm",
-  "topDesign",
-  "bottomDesign",
-  "seamType",
-  "mainFabricMaterialId",
-  "threadMaterialId",
-  "packagingType",
-];
-
-const VisualDiagram = ({
-  diameter,
-  length,
-  allowance,
-}: {
-  diameter: string;
-  length: string;
-  allowance: string;
-}) => (
-  <div className="rounded-[1.25rem] border border-dashed border-border bg-slate-50 p-5">
-    <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-800">
-      <PencilRuler className="h-4 w-4 text-primary" />
-      Filter Bag Diagram Placeholder
-    </div>
-    <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
-      <div className="flex items-center justify-center rounded-3xl bg-white p-4">
-        <svg viewBox="0 0 180 260" className="h-56 w-full max-w-[180px]">
-          <defs>
-            <linearGradient id="bagBody" x1="0%" x2="100%">
-              <stop offset="0%" stopColor="#dbeafe" />
-              <stop offset="100%" stopColor="#93c5fd" />
-            </linearGradient>
-          </defs>
-          <ellipse cx="90" cy="42" rx="50" ry="20" fill="#bfdbfe" stroke="#2563eb" strokeWidth="2" />
-          <rect x="40" y="42" width="100" height="150" rx="18" fill="url(#bagBody)" stroke="#2563eb" strokeWidth="2" />
-          <ellipse cx="90" cy="192" rx="50" ry="20" fill="#93c5fd" stroke="#2563eb" strokeWidth="2" />
-          <line x1="25" y1="42" x2="25" y2="192" stroke="#0f172a" strokeDasharray="4 4" />
-          <line x1="40" y1="20" x2="140" y2="20" stroke="#0f172a" strokeDasharray="4 4" />
-          <line x1="150" y1="42" x2="150" y2="70" stroke="#0f172a" strokeDasharray="4 4" />
-          <line x1="150" y1="164" x2="150" y2="192" stroke="#0f172a" strokeDasharray="4 4" />
-          <text x="90" y="15" textAnchor="middle" fontSize="10" fill="#0f172a">Diameter</text>
-          <text x="10" y="120" fontSize="10" fill="#0f172a" transform="rotate(-90 10 120)">Length</text>
-          <text x="154" y="60" fontSize="9" fill="#0f172a">Top</text>
-          <text x="154" y="72" fontSize="9" fill="#0f172a">Allowance</text>
-          <text x="154" y="178" fontSize="9" fill="#0f172a">Bottom</text>
-          <text x="154" y="190" fontSize="9" fill="#0f172a">Allowance</text>
-          <text x="90" y="228" textAnchor="middle" fontSize="10" fill="#0f172a">Cutting Width</text>
-        </svg>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {[
-          { label: "Diameter", value: diameter || "Not set" },
-          { label: "Length", value: length || "Not set" },
-          { label: "Top Allowance", value: allowance || "Not set" },
-          { label: "Bottom Allowance", value: allowance || "Not set" },
-          { label: "Cutting Width", value: diameter ? `${diameter} + seam allowance` : "Derived later" },
-        ].map((item) => (
-          <div key={item.label} className="rounded-2xl border border-border bg-white p-3">
-            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{item.label}</p>
-            <p className="mt-1 text-sm font-medium text-slate-900">{item.value}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  </div>
-);
-
 export const ProductConfigurationPage = () => {
   const navigate = useNavigate();
   const { tenderId = "" } = useParams();
-  const [activeTab, setActiveTab] = useState<ConfigTab>("bag-specifications");
   const [form, setForm] = useState<ProductConfigurationForm>(() => initialForm(tenderId));
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [selectedProductToAdd, setSelectedProductToAdd] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [saveMode, setSaveMode] = useState<"draft" | "continue" | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof ProductConfigurationForm, string>>>({});
 
   useEffect(() => {
     setForm(initialForm(tenderId));
@@ -206,45 +333,56 @@ export const ProductConfigurationPage = () => {
       setError("");
 
       try {
-        const [loadedMaterials, config] = await Promise.all([
+        const [loadedMaterials, loadedProducts] = await Promise.all([
           api.get<Material[]>("/materials?tenantId=alimex-demo"),
-          api.get<ProductConfiguration>(
-            `/tenders/${tenderId}/product-configuration?tenantId=alimex-demo`,
-          ),
+          api.get<Product[]>("/products?tenantId=alimex-demo"),
         ]);
 
+        const activeMaterials = loadedMaterials.filter((item) => item.active);
+        const activeProducts = loadedProducts.filter((item) => item.active);
+
         if (isMounted) {
-          setMaterials(loadedMaterials.filter((item) => item.active));
-          setForm(toForm(config));
+          setMaterials(activeMaterials);
+          setProducts(activeProducts);
         }
-      } catch (reason) {
-        if (
-          reason instanceof ApiError &&
-          reason.status === 404
-        ) {
-          try {
-            const [loadedMaterials, tender] = await Promise.all([
-              api.get<Material[]>("/materials?tenantId=alimex-demo"),
-              api.get<TenderRequest>(`/tenders/${tenderId}?tenantId=alimex-demo`),
-            ]);
+
+        try {
+          const config = await api.get<ProductConfiguration>(
+            `/tenders/${tenderId}/product-configuration?tenantId=alimex-demo`,
+          );
+
+          if (isMounted) {
+            setForm(applyDerivedSnapshotValues(toForm(config), toForm(config).productSnapshots, activeMaterials));
+          }
+        } catch (reason) {
+          if (reason instanceof ApiError && reason.status === 404) {
+            const tender = await api.get<TenderRequest>(`/tenders/${tenderId}?tenantId=alimex-demo`);
+            const tenderSnapshots =
+              tender.productSnapshots.length > 0
+                ? tender.productSnapshots.map(toSnapshotForm)
+                : activeProducts
+                    .filter((product) => tender.selectedProductIds.includes(product.productId))
+                    .map(toSnapshotForm);
 
             if (isMounted) {
-              setMaterials(loadedMaterials.filter((item) => item.active));
-              setForm((current) => ({
-                ...current,
-                bagDiameterMm: tender.bagDiameterMm?.toString() ?? "",
-                bagLengthMm: tender.bagLengthMm?.toString() ?? "",
-                topDesign: tender.topDesign,
-                bottomDesign: tender.bottomDesign,
-                accessoriesMaterialId: tender.accessoriesMaterial,
-              }));
+              setForm((current) =>
+                applyDerivedSnapshotValues(
+                  {
+                    ...current,
+                    selectedProductIds: tender.selectedProductIds ?? [],
+                    productSnapshots: tenderSnapshots,
+                  },
+                  tenderSnapshots,
+                  activeMaterials,
+                ),
+              );
             }
-          } catch {
-            if (isMounted) {
-              setError("No product configuration exists yet. Start by saving a draft.");
-            }
+          } else {
+            throw reason;
           }
-        } else if (isMounted) {
+        }
+      } catch (reason) {
+        if (isMounted) {
           setError(reason instanceof Error ? reason.message : "Unable to load product configuration.");
         }
       } finally {
@@ -261,37 +399,190 @@ export const ProductConfigurationPage = () => {
     };
   }, [tenderId]);
 
-  const updateField = <K extends keyof ProductConfigurationForm>(key: K, value: ProductConfigurationForm[K]) => {
-    setForm((current) => ({ ...current, [key]: value }));
-    setFieldErrors((current) => {
-      if (!current[key]) {
-        return current;
-      }
-
-      const next = { ...current };
-      delete next[key];
-      return next;
+  const updateProductSnapshot = (productIndex: number, patch: Partial<ProductSnapshotForm>) => {
+    setForm((current) => {
+      const nextSnapshots = current.productSnapshots.map((product, index) =>
+        index === productIndex ? { ...product, ...patch } : product,
+      );
+      return applyDerivedSnapshotValues(current, nextSnapshots, materials);
     });
   };
 
-  const renderError = (field: keyof ProductConfigurationForm) =>
-    fieldErrors[field] ? <p className="text-xs text-rose-600">{fieldErrors[field]}</p> : null;
+  const updateComponent = (
+    productIndex: number,
+    componentIndex: number,
+    patch: Partial<ProductSnapshotComponentForm>,
+  ) => {
+    setForm((current) => {
+      const nextSnapshots = current.productSnapshots.map((product, index) =>
+        index === productIndex
+          ? {
+              ...product,
+              components: product.components.map((component, currentComponentIndex) =>
+                currentComponentIndex === componentIndex ? { ...component, ...patch } : component,
+              ),
+            }
+          : product,
+      );
+
+      return applyDerivedSnapshotValues(current, nextSnapshots, materials);
+    });
+  };
+
+  const removeComponent = (productIndex: number, componentIndex: number) => {
+    setForm((current) => {
+      const nextSnapshots = current.productSnapshots.map((product, index) =>
+        index === productIndex
+          ? {
+              ...product,
+              components: product.components.filter((_, currentComponentIndex) => currentComponentIndex !== componentIndex),
+            }
+          : product,
+      );
+
+      return applyDerivedSnapshotValues(current, nextSnapshots, materials);
+    });
+  };
+
+  const addSpecificationRow = (productIndex: number, componentIndex: number) => {
+    setForm((current) => {
+      const nextSnapshots = current.productSnapshots.map((product, index) =>
+        index === productIndex
+          ? {
+              ...product,
+              components: product.components.map((component, currentComponentIndex) =>
+                currentComponentIndex === componentIndex
+                  ? {
+                      ...component,
+                      specificationRows: [...component.specificationRows, { key: "", value: "" }],
+                    }
+                  : component,
+              ),
+            }
+          : product,
+      );
+
+      return applyDerivedSnapshotValues(current, nextSnapshots, materials);
+    });
+  };
+
+  const updateSpecificationRow = (
+    productIndex: number,
+    componentIndex: number,
+    rowIndex: number,
+    patch: Partial<SpecificationFormRow>,
+  ) => {
+    setForm((current) => {
+      const nextSnapshots = current.productSnapshots.map((product, index) =>
+        index === productIndex
+          ? {
+              ...product,
+              components: product.components.map((component, currentComponentIndex) =>
+                currentComponentIndex === componentIndex
+                  ? {
+                      ...component,
+                      specificationRows: component.specificationRows.map((row, currentRowIndex) =>
+                        currentRowIndex === rowIndex ? { ...row, ...patch } : row,
+                      ),
+                    }
+                  : component,
+              ),
+            }
+          : product,
+      );
+
+      return applyDerivedSnapshotValues(current, nextSnapshots, materials);
+    });
+  };
+
+  const removeSpecificationRow = (productIndex: number, componentIndex: number, rowIndex: number) => {
+    setForm((current) => {
+      const nextSnapshots = current.productSnapshots.map((product, index) =>
+        index === productIndex
+          ? {
+              ...product,
+              components: product.components.map((component, currentComponentIndex) =>
+                currentComponentIndex === componentIndex
+                  ? {
+                      ...component,
+                      specificationRows: component.specificationRows.filter(
+                        (_, currentRowIndex) => currentRowIndex !== rowIndex,
+                      ),
+                    }
+                  : component,
+              ),
+            }
+          : product,
+      );
+
+      return applyDerivedSnapshotValues(current, nextSnapshots, materials);
+    });
+  };
+
+  const addProductToConfiguration = () => {
+    const product = products.find((item) => item.productId === selectedProductToAdd);
+
+    if (!product) {
+      setError("Select a product before adding it to the configuration.");
+      return;
+    }
+
+    setForm((current) => {
+      if (current.selectedProductIds.includes(product.productId)) {
+        return current;
+      }
+
+      const nextSnapshots = [...current.productSnapshots, toSnapshotForm(product)];
+      return applyDerivedSnapshotValues(current, nextSnapshots, materials);
+    });
+
+    setSelectedProductToAdd("");
+    setError("");
+    setMessage(`${product.productName} added as a tender-specific snapshot.`);
+  };
+
+  const removeProductFromConfiguration = (productId: string) => {
+    setForm((current) => {
+      const nextSnapshots = current.productSnapshots.filter((product) => product.productId !== productId);
+      return applyDerivedSnapshotValues(current, nextSnapshots, materials);
+    });
+  };
 
   const validate = () => {
-    const nextErrors: Partial<Record<keyof ProductConfigurationForm, string>> = {};
-
-    for (const field of requiredFields) {
-      if (String(form[field] ?? "").trim().length === 0) {
-        nextErrors[field] = "This field is required.";
-      }
+    if (!form.productSnapshots.length) {
+      setError("Add at least one product to configure this tender.");
+      return false;
     }
 
-    if (form.includeWearStrip && form.wearStripHeightMm.trim().length === 0) {
-      nextErrors.wearStripHeightMm = "Provide the wear strip height.";
+    if (
+      form.productSnapshots.some(
+        (product) =>
+          !product.productName.trim() ||
+          product.components.some((component) => !component.componentName.trim()),
+      )
+    ) {
+      setError("Each selected product and each Product Component must have a name.");
+      return false;
     }
 
-    setFieldErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
+    if (
+      form.productSnapshots.some(
+        (product) =>
+          product.requestedQuantity.trim() === "" || numberOrNull(product.requestedQuantity) === null,
+      )
+    ) {
+      setError("Provide a requested quantity for each added product.");
+      return false;
+    }
+
+    if (!form.bagDiameterMm || !form.bagLengthMm || !form.mainFabricMaterialId) {
+      setError(
+        "Add a Bag Body component with diameter, length, and material before continuing.",
+      );
+      return false;
+    }
+
+    return true;
   };
 
   const payload = useMemo<ProductConfiguration>(
@@ -300,6 +591,8 @@ export const ProductConfigurationPage = () => {
       tenantId: form.tenantId,
       tenderId,
       productConfigId: form.productConfigId || "base",
+      selectedProductIds: form.selectedProductIds,
+      productSnapshots: form.productSnapshots.map(buildSnapshotProduct),
       productType: form.productType,
       quantity: numberOrNull(form.quantity),
       bagDiameterMm: numberOrNull(form.bagDiameterMm),
@@ -311,16 +604,16 @@ export const ProductConfigurationPage = () => {
       seamType: form.seamType.trim(),
       includeWearStrip: form.includeWearStrip,
       wearStripHeightMm: form.includeWearStrip ? numberOrNull(form.wearStripHeightMm) : null,
-      mainFabricMaterialId: form.mainFabricMaterialId.trim(),
-      accessoriesMaterialId: form.accessoriesMaterialId.trim(),
-      threadMaterialId: form.threadMaterialId.trim(),
+      mainFabricMaterialId: normalizeMaterialReference(form.mainFabricMaterialId, materials),
+      accessoriesMaterialId: normalizeMaterialReference(form.accessoriesMaterialId, materials),
+      threadMaterialId: normalizeMaterialReference(form.threadMaterialId, materials),
       packagingType: form.packagingType.trim(),
       bagsPerCarton: numberOrNull(form.bagsPerCarton),
       packagingNotes: form.packagingNotes?.trim() ?? "",
       createdAt: "",
       updatedAt: "",
     }),
-    [form, tenderId],
+    [form, materials, tenderId],
   );
 
   const save = async (mode: "draft" | "continue") => {
@@ -335,7 +628,6 @@ export const ProductConfigurationPage = () => {
     }
 
     if (mode === "continue" && !validate()) {
-      setError("Complete the required configuration fields before continuing.");
       setSaveMode(null);
       return;
     }
@@ -346,15 +638,20 @@ export const ProductConfigurationPage = () => {
         payload,
       );
 
-      setForm(toForm(response));
+      const nextForm = applyDerivedSnapshotValues(
+        toForm(response),
+        toForm(response).productSnapshots,
+        materials,
+      );
+      setForm(nextForm);
       setMessage(
         mode === "draft"
-          ? "Product configuration draft saved."
-          : "Product configuration saved. Continuing to material roll calculation.",
+          ? "Product configuration snapshot saved."
+          : "Product configuration snapshot saved. Continuing to material sourcing and costing.",
       );
 
       if (mode === "continue") {
-        navigate(`/tenders/${tenderId}/material-roll-calculation`);
+        navigate(`/tenders/${tenderId}/material-sourcing`);
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to save product configuration.");
@@ -363,229 +660,360 @@ export const ProductConfigurationPage = () => {
     }
   };
 
-  const summaryItems = [
-    { label: "Product Type", value: form.productType || "Filter Bag" },
-    { label: "Quantity", value: form.quantity || "Not set" },
-    { label: "Diameter", value: form.bagDiameterMm || "Not set" },
-    { label: "Length", value: form.bagLengthMm || "Not set" },
-    { label: "Top Design", value: form.topDesign || "Not set" },
-    { label: "Bottom Design", value: form.bottomDesign || "Not set" },
-    { label: "Seam Type", value: form.seamType || "Not set" },
-    { label: "Main Material", value: form.mainFabricMaterialId || "Not set" },
-    { label: "Accessories Material", value: form.accessoriesMaterialId || "Not set" },
-    { label: "Thread Material", value: form.threadMaterialId || "Not set" },
-    { label: "Packaging", value: form.packagingType || "Not set" },
-  ];
-
   return (
     <div className="space-y-6">
       <TenderWorkflowStepper currentStep={2} tenderId={tenderId} />
 
-      <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
-        <div className="space-y-6">
+      <div className="space-y-6">
           <Card>
             <CardHeader>
               <div>
                 <CardTitle>Product Configuration</CardTitle>
                 <CardDescription>
-                  Configure the filter bag product that will be priced for this tender.
+                  Edit tender-specific product snapshots and Product Components without changing the master data records.
                 </CardDescription>
               </div>
               <Badge variant="default">PRODUCT_CONFIGURATION</Badge>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="flex flex-wrap gap-2 rounded-2xl border border-border bg-slate-50 p-2">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    className={cn(
-                      "rounded-xl px-4 py-2 text-sm font-medium transition-colors",
-                      activeTab === tab.id
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-white hover:text-slate-900",
-                    )}
-                    onClick={() => setActiveTab(tab.id)}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
               {isLoading ? (
                 <div className="rounded-2xl bg-slate-50 p-6 text-sm text-muted-foreground">
                   Loading product configuration...
                 </div>
               ) : null}
 
-              {!isLoading && activeTab === "bag-specifications" ? (
-                <div className="space-y-6">
-                  <div className="grid gap-5 md:grid-cols-2">
-                    <label className="space-y-2 text-sm font-medium text-slate-700">
-                      Product Type
-                      <Input value={form.productType} onChange={(event) => updateField("productType", event.target.value)} />
-                      {renderError("productType")}
-                    </label>
-                    <label className="space-y-2 text-sm font-medium text-slate-700">
-                      Quantity
-                      <Input value={form.quantity} inputMode="numeric" onChange={(event) => updateField("quantity", event.target.value)} />
-                      {renderError("quantity")}
-                    </label>
-                    <label className="space-y-2 text-sm font-medium text-slate-700">
-                      Bag Diameter (mm)
-                      <Input value={form.bagDiameterMm} inputMode="decimal" onChange={(event) => updateField("bagDiameterMm", event.target.value)} />
-                      {renderError("bagDiameterMm")}
-                    </label>
-                    <label className="space-y-2 text-sm font-medium text-slate-700">
-                      Bag Length (mm)
-                      <Input value={form.bagLengthMm} inputMode="decimal" onChange={(event) => updateField("bagLengthMm", event.target.value)} />
-                      {renderError("bagLengthMm")}
-                    </label>
-                    <label className="space-y-2 text-sm font-medium text-slate-700">
-                      Seam Allowance (mm)
-                      <Input value={form.seamAllowanceMm} inputMode="decimal" onChange={(event) => updateField("seamAllowanceMm", event.target.value)} />
-                    </label>
-                    <label className="space-y-2 text-sm font-medium text-slate-700">
-                      Top / Bottom Allowance (mm)
-                      <Input value={form.topBottomAllowanceMm} inputMode="decimal" onChange={(event) => updateField("topBottomAllowanceMm", event.target.value)} />
-                    </label>
+              {!isLoading ? (
+                <>
+                  <div className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
+                    <div className="mb-4">
+                      <h3 className="text-base font-semibold text-slate-900">Selected Products</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Start empty, add one or more products, then edit their snapshot details for this tender.
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-3 md:flex-row">
+                      <div className="flex-1">
+                        <Select
+                          value={selectedProductToAdd}
+                          onChange={(event) => setSelectedProductToAdd(event.target.value)}
+                        >
+                          <option value="">Select a product</option>
+                          {products.map((product) => (
+                            <option key={product.productId} value={product.productId}>
+                              {product.productName} ({product.productType})
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                      <Button onClick={addProductToConfiguration} type="button">
+                        <Plus className="h-4 w-4" />
+                        Add Product
+                      </Button>
+                    </div>
                   </div>
-                  <VisualDiagram
-                    diameter={form.bagDiameterMm}
-                    length={form.bagLengthMm}
-                    allowance={form.topBottomAllowanceMm}
-                  />
-                </div>
-              ) : null}
 
-              {!isLoading && activeTab === "accessories" ? (
-                <div className="grid gap-5 md:grid-cols-2">
-                  <label className="space-y-2 text-sm font-medium text-slate-700">
-                    Top Design
-                    <Input value={form.topDesign} onChange={(event) => updateField("topDesign", event.target.value)} />
-                    {renderError("topDesign")}
-                  </label>
-                  <label className="space-y-2 text-sm font-medium text-slate-700">
-                    Bottom Design
-                    <Input value={form.bottomDesign} onChange={(event) => updateField("bottomDesign", event.target.value)} />
-                    {renderError("bottomDesign")}
-                  </label>
-                  <label className="space-y-2 text-sm font-medium text-slate-700">
-                    Seam Type
-                    <Input value={form.seamType} onChange={(event) => updateField("seamType", event.target.value)} />
-                    {renderError("seamType")}
-                  </label>
-                  <div className="space-y-3">
-                    <label className="flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3 text-sm font-medium text-slate-700">
-                      <Checkbox
-                        checked={form.includeWearStrip}
-                        onChange={(event) => updateField("includeWearStrip", event.target.checked)}
-                      />
-                      Include wear strip
-                    </label>
-                    <label className="space-y-2 text-sm font-medium text-slate-700">
-                      Wear Strip Height (mm)
-                      <Input
-                        value={form.wearStripHeightMm}
-                        inputMode="decimal"
-                        disabled={!form.includeWearStrip}
-                        onChange={(event) => updateField("wearStripHeightMm", event.target.value)}
-                      />
-                      {renderError("wearStripHeightMm")}
-                    </label>
+                  <div className="space-y-4">
+                    {form.productSnapshots.length ? (
+                      form.productSnapshots.map((product, productIndex) => (
+                        <div key={product.productId} className="rounded-[1.25rem] border border-border bg-white p-5">
+                          <div className="mb-5 flex items-start justify-between gap-4">
+                            <div>
+                              <p className="text-base font-semibold text-slate-900">
+                                {product.productName || "Untitled product snapshot"}
+                              </p>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                Changes here are saved only on this tender snapshot.
+                              </p>
+                            </div>
+                            <Button
+                              onClick={() => removeProductFromConfiguration(product.productId)}
+                              type="button"
+                              variant="ghost"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Remove Product
+                            </Button>
+                          </div>
+
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <label className="space-y-2 text-sm font-medium text-slate-700">
+                              Product Name
+                              <Input
+                                value={product.productName}
+                                onChange={(event) =>
+                                  updateProductSnapshot(productIndex, { productName: event.target.value })
+                                }
+                              />
+                            </label>
+                            <label className="space-y-2 text-sm font-medium text-slate-700">
+                              Product Type
+                              <Select
+                                value={product.productType}
+                                onChange={(event) =>
+                                  updateProductSnapshot(productIndex, {
+                                    productType: event.target.value as Product["productType"],
+                                  })
+                                }
+                              >
+                                <option value="Filter Bag">Filter Bag</option>
+                                <option value="Other">Other</option>
+                              </Select>
+                            </label>
+                            <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
+                              Requested Quantity
+                              <Input
+                                inputMode="decimal"
+                                value={product.requestedQuantity}
+                                onChange={(event) =>
+                                  updateProductSnapshot(productIndex, {
+                                    requestedQuantity: event.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+
+                          <div className="mt-5 space-y-4">
+                            {product.components.length ? (
+                              product.components.map((component, componentIndex) => (
+                                <div
+                                  key={component.componentId}
+                                  className="rounded-2xl border border-border bg-slate-50 p-4"
+                                >
+                                  <div className="mb-4 flex items-center justify-between gap-3">
+                                    <div>
+                                      <p className="text-sm font-semibold text-slate-900">
+                                        {component.componentName || `Component ${componentIndex + 1}`}
+                                      </p>
+                                      <p className="text-xs text-muted-foreground">
+                                        Edit this Product Component for the tender snapshot.
+                                      </p>
+                                    </div>
+                                    <Button
+                                      onClick={() => removeComponent(productIndex, componentIndex)}
+                                      type="button"
+                                      variant="ghost"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+
+                                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                                    <label className="space-y-2 text-sm font-medium text-slate-700">
+                                      Component Name
+                                      <Input
+                                        value={component.componentName}
+                                        onChange={(event) =>
+                                          updateComponent(productIndex, componentIndex, {
+                                            componentName: event.target.value,
+                                          })
+                                        }
+                                      />
+                                    </label>
+                                    <label className="space-y-2 text-sm font-medium text-slate-700">
+                                      Component Type
+                                      <Input
+                                        value={component.componentType}
+                                        onChange={(event) =>
+                                          updateComponent(productIndex, componentIndex, {
+                                            componentType: event.target.value,
+                                          })
+                                        }
+                                      />
+                                    </label>
+                                    <label className="space-y-2 text-sm font-medium text-slate-700">
+                                      Material
+                                      <Select
+                                        value={normalizeMaterialReference(component.material, materials)}
+                                        onChange={(event) =>
+                                          updateComponent(productIndex, componentIndex, {
+                                            material: event.target.value,
+                                          })
+                                        }
+                                      >
+                                        <option value="">Select material</option>
+                                        {materials.map((material) => (
+                                          <option key={material.materialId} value={material.materialId}>
+                                            {material.materialName}
+                                          </option>
+                                        ))}
+                                      </Select>
+                                    </label>
+                                  </div>
+
+                                  {isBagBody(component) ? (
+                                    <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                                        Diameter (m)
+                                        <Input
+                                          inputMode="decimal"
+                                          value={component.diameter}
+                                          onChange={(event) =>
+                                            updateComponent(productIndex, componentIndex, {
+                                              diameter: event.target.value,
+                                            })
+                                          }
+                                        />
+                                      </label>
+                                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                                        Length (m)
+                                        <Input
+                                          inputMode="decimal"
+                                          value={component.length}
+                                          onChange={(event) =>
+                                            updateComponent(productIndex, componentIndex, {
+                                              length: event.target.value,
+                                            })
+                                          }
+                                        />
+                                      </label>
+                                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                                        Seam Allowance (m)
+                                        <Input
+                                          inputMode="decimal"
+                                          value={component.seamAllowanceMm}
+                                          onChange={(event) =>
+                                            updateComponent(productIndex, componentIndex, {
+                                              seamAllowanceMm: event.target.value,
+                                            })
+                                          }
+                                        />
+                                      </label>
+                                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                                        Top / Bottom Allowance (m)
+                                        <Input
+                                          inputMode="decimal"
+                                          value={component.topBottomAllowanceMm}
+                                          onChange={(event) =>
+                                            updateComponent(productIndex, componentIndex, {
+                                              topBottomAllowanceMm: event.target.value,
+                                            })
+                                          }
+                                        />
+                                      </label>
+                                    </div>
+                                  ) : null}
+
+                                  <div className="mt-4 rounded-2xl border border-border bg-white p-4">
+                                    <div className="mb-3 flex items-center justify-between gap-3">
+                                      <div>
+                                        <p className="text-sm font-semibold text-slate-900">Specifications</p>
+                                        <p className="text-xs text-muted-foreground">
+                                          Add flexible key-value details for this component snapshot.
+                                        </p>
+                                      </div>
+                                      <Button
+                                        onClick={() => addSpecificationRow(productIndex, componentIndex)}
+                                        type="button"
+                                        variant="outline"
+                                      >
+                                        <Plus className="h-4 w-4" />
+                                        Add Field
+                                      </Button>
+                                    </div>
+                                    <div className="space-y-3">
+                                      {component.specificationRows.length ? (
+                                        component.specificationRows.map((row, rowIndex) => (
+                                          <div
+                                            key={`${component.componentId}-${rowIndex}`}
+                                            className="grid gap-3 md:grid-cols-[1fr_1fr_auto]"
+                                          >
+                                            <Input
+                                              value={row.key}
+                                              placeholder="Specification name"
+                                              onChange={(event) =>
+                                                updateSpecificationRow(
+                                                  productIndex,
+                                                  componentIndex,
+                                                  rowIndex,
+                                                  { key: event.target.value },
+                                                )
+                                              }
+                                            />
+                                            <Input
+                                              value={row.value}
+                                              placeholder="Specification value"
+                                              onChange={(event) =>
+                                                updateSpecificationRow(
+                                                  productIndex,
+                                                  componentIndex,
+                                                  rowIndex,
+                                                  { value: event.target.value },
+                                                )
+                                              }
+                                            />
+                                            <Button
+                                              onClick={() =>
+                                                removeSpecificationRow(productIndex, componentIndex, rowIndex)
+                                              }
+                                              type="button"
+                                              variant="ghost"
+                                            >
+                                              <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                          </div>
+                                        ))
+                                      ) : (
+                                        <p className="text-sm text-muted-foreground">
+                                          No extra specification fields added.
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="rounded-2xl border border-dashed border-border bg-white px-4 py-6 text-center text-sm text-muted-foreground">
+                                This product snapshot has no Product Components yet.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-border bg-white px-4 py-10 text-center text-sm text-muted-foreground">
+                        No products added yet. Choose a product above to create a tender-specific snapshot.
+                      </div>
+                    )}
                   </div>
-                </div>
-              ) : null}
 
-              {!isLoading && activeTab === "materials" ? (
-                <div className="grid gap-5">
-                  <label className="space-y-2 text-sm font-medium text-slate-700">
-                    Main Fabric Material ID
-                    <Select
-                      value={form.mainFabricMaterialId}
-                      onChange={(event) => updateField("mainFabricMaterialId", event.target.value)}
-                    >
-                      <option value="">Select main fabric material</option>
-                      {materials.map((material) => (
-                        <option key={material.materialId} value={material.materialId}>
-                          {material.materialName} ({material.materialId})
-                        </option>
-                      ))}
-                    </Select>
-                    {renderError("mainFabricMaterialId")}
-                  </label>
-                  <label className="space-y-2 text-sm font-medium text-slate-700">
-                    Accessories Material ID
-                    <Select
-                      value={form.accessoriesMaterialId}
-                      onChange={(event) => updateField("accessoriesMaterialId", event.target.value)}
-                    >
-                      <option value="">Select accessories material</option>
-                      {materials.map((material) => (
-                        <option key={material.materialId} value={material.materialId}>
-                          {material.materialName} ({material.materialId})
-                        </option>
-                      ))}
-                    </Select>
-                  </label>
-                  <label className="space-y-2 text-sm font-medium text-slate-700">
-                    Thread Material ID
-                    <Select
-                      value={form.threadMaterialId}
-                      onChange={(event) => updateField("threadMaterialId", event.target.value)}
-                    >
-                      <option value="">Select thread material</option>
-                      {materials.map((material) => (
-                        <option key={material.materialId} value={material.materialId}>
-                          {material.materialName} ({material.materialId})
-                        </option>
-                      ))}
-                    </Select>
-                    {renderError("threadMaterialId")}
-                  </label>
-                </div>
-              ) : null}
-
-              {!isLoading && activeTab === "packaging" ? (
-                <div className="grid gap-5 md:grid-cols-2">
-                  <label className="space-y-2 text-sm font-medium text-slate-700">
-                    Packaging Type
-                    <Select value={form.packagingType} onChange={(event) => updateField("packagingType", event.target.value)}>
-                      <option value="">Select packaging type</option>
-                      <option value="carton">Carton</option>
-                      <option value="bundle">Bundle</option>
-                      <option value="palletized carton">Palletized Carton</option>
-                    </Select>
-                    {renderError("packagingType")}
-                  </label>
-                  <label className="space-y-2 text-sm font-medium text-slate-700">
-                    Bags Per Carton
-                    <Input value={form.bagsPerCarton} inputMode="numeric" onChange={(event) => updateField("bagsPerCarton", event.target.value)} />
-                  </label>
-                  <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
-                    Packaging Notes
-                    <Input value={form.packagingNotes ?? ""} onChange={(event) => updateField("packagingNotes", event.target.value)} />
-                  </label>
-                </div>
+                </>
               ) : null}
 
               <div className="flex flex-col gap-4 rounded-[1.2rem] border border-border bg-white p-4 md:flex-row md:items-center md:justify-between">
                 <div className="text-sm">
-                  <p className="font-medium text-slate-900">Save the base product configuration before roll calculations.</p>
-                  <p className="text-muted-foreground">Saving this section also updates the tender status to `PRODUCT_CONFIGURATION`.</p>
+                  <p className="font-medium text-slate-900">
+                    Save the tender-specific product snapshot before roll calculations.
+                  </p>
+                  <p className="text-muted-foreground">
+                    Saving this section also updates the tender status to `PRODUCT_CONFIGURATION`.
+                  </p>
                   {message ? <p className="mt-2 text-emerald-600">{message}</p> : null}
                   {error ? <p className="mt-2 text-rose-600">{error}</p> : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <Button type="button" variant="ghost" onClick={() => navigate(`/tenders/intake/${tenderId}`)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => navigate(`/tenders/intake/${tenderId}`)}
+                  >
                     <ArrowLeft className="h-4 w-4" />
                     Back
                   </Button>
-                  <Button type="button" variant="outline" disabled={saveMode !== null} onClick={() => void save("draft")}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={saveMode !== null}
+                    onClick={() => void save("draft")}
+                  >
                     <Save className="h-4 w-4" />
                     {saveMode === "draft" ? "Saving..." : "Save Draft"}
                   </Button>
-                  <Button type="button" disabled={saveMode !== null} onClick={() => void save("continue")}>
+                  <Button
+                    type="button"
+                    disabled={saveMode !== null}
+                    onClick={() => void save("continue")}
+                  >
                     <ArrowRight className="h-4 w-4" />
                     {saveMode === "continue" ? "Saving..." : "Save & Continue"}
                   </Button>
@@ -593,55 +1021,7 @@ export const ProductConfigurationPage = () => {
               </div>
             </CardContent>
           </Card>
-        </div>
-
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <div>
-                <CardTitle>Configuration Summary</CardTitle>
-                <CardDescription>Live view of the base product configuration that will be priced.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {summaryItems.map((item) => (
-                <div key={item.label} className="flex items-start justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3">
-                  <p className="text-sm text-muted-foreground">{item.label}</p>
-                  <p className="text-right text-sm font-medium text-slate-900">{item.value}</p>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div>
-                <CardTitle>Configuration Areas</CardTitle>
-                <CardDescription>Each tab contributes inputs used in downstream costing.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {[
-                { icon: Rows3, label: "Bag Specifications" },
-                { icon: Package, label: "Accessories" },
-                { icon: Box, label: "Materials" },
-                { icon: Save, label: "Packaging" },
-              ].map((item) => {
-                const Icon = item.icon;
-                return (
-                  <div key={item.label} className="flex items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3">
-                    <div className="rounded-xl bg-blue-50 p-2 text-blue-700">
-                      <Icon className="h-4 w-4" />
-                    </div>
-                    <p className="text-sm font-medium text-slate-900">{item.label}</p>
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
-        </div>
       </div>
-
     </div>
   );
 };

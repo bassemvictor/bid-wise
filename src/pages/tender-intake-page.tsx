@@ -2,7 +2,6 @@ import {
   BriefcaseBusiness,
   CircleDollarSign,
   FileText,
-  Package,
   Truck,
 } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
@@ -41,6 +40,8 @@ const initialState: TenderIntakeForm = {
   tenderId: "",
   tenantId: "alimex-demo",
   customerName: "",
+  selectedProductIds: [],
+  productSnapshots: [],
   tenderNumber: "",
   internalInquiryNumber: "",
   tenderDueDate: "",
@@ -80,7 +81,6 @@ const requiredFields: Array<keyof TenderIntakeForm> = [
   "internalInquiryNumber",
   "tenderDueDate",
   "requestType",
-  "requestedMaterial",
   "requestedDeliveryTime",
   "deliveryPlace",
 ];
@@ -90,11 +90,6 @@ const sectionCards = [
     title: "Customer & Tender Information",
     description: "Capture the commercial entry point and reference identifiers for the opportunity.",
     icon: BriefcaseBusiness,
-  },
-  {
-    title: "Requested Product Details",
-    description: "Record the requested product geometry, design, and accessory expectations.",
-    icon: Package,
   },
   {
     title: "Commercial Information",
@@ -180,6 +175,8 @@ export const TenderIntakePage = () => {
           tenderId: record.tenderId,
           tenantId: record.tenantId,
           customerName: record.customerName,
+          selectedProductIds: record.selectedProductIds ?? [],
+          productSnapshots: record.productSnapshots ?? [],
           tenderNumber: record.tenderNumber,
           internalInquiryNumber: record.internalInquiryNumber,
           tenderDueDate: record.tenderDueDate,
@@ -239,6 +236,14 @@ export const TenderIntakePage = () => {
     tenantId: form.tenantId,
     tenderId: form.tenderId || crypto.randomUUID(),
     customerName: form.customerName.trim(),
+    selectedProductIds: form.selectedProductIds,
+    productSnapshots: form.productSnapshots.map((product) => ({
+      ...product,
+      components: product.components.map((component) => ({
+        ...component,
+        specifications: { ...component.specifications },
+      })),
+    })),
     tenderNumber: form.tenderNumber.trim(),
     internalInquiryNumber: form.internalInquiryNumber.trim(),
     tenderDueDate: form.tenderDueDate,
@@ -348,7 +353,7 @@ export const TenderIntakePage = () => {
           <CardContent>
             <form className="grid gap-6" onSubmit={handleSubmit}>
               <div className="grid gap-6">
-                <div className="grid gap-6 xl:grid-cols-2">
+                <div className="grid gap-6">
                   <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
                     <div className="mb-4 flex items-start justify-between gap-4">
                       <div>
@@ -416,90 +421,13 @@ export const TenderIntakePage = () => {
                       </label>
                     </div>
                   </section>
-
-                  <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
-                    <div className="mb-4 flex items-start justify-between gap-4">
-                      <div>
-                        <h3 className="text-base font-semibold text-slate-900">{sectionCards[1].title}</h3>
-                        <p className="mt-1 text-sm text-muted-foreground">{sectionCards[1].description}</p>
-                      </div>
-                      <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
-                        <Package className="h-5 w-5" />
-                      </div>
-                    </div>
-                    <div className="grid gap-5 md:grid-cols-2">
-                      <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
-                        Requested Material *
-                        <Select
-                          value={form.requestedMaterial}
-                          onChange={(event) => updateField("requestedMaterial", event.target.value)}
-                        >
-                          <option value="">Select a material</option>
-                          {materials.map((material) => (
-                            <option key={material.materialId} value={material.materialName}>
-                              {material.materialName}
-                            </option>
-                          ))}
-                        </Select>
-                        {renderFieldMessage("requestedMaterial")}
-                      </label>
-                      <label className="space-y-2 text-sm font-medium text-slate-700">
-                        Bag Diameter (mm)
-                        <Input
-                          inputMode="decimal"
-                          value={form.bagDiameterMm}
-                          onChange={(event) => updateField("bagDiameterMm", event.target.value)}
-                        />
-                      </label>
-                      <label className="space-y-2 text-sm font-medium text-slate-700">
-                        Bag Length (mm)
-                        <Input
-                          inputMode="decimal"
-                          value={form.bagLengthMm}
-                          onChange={(event) => updateField("bagLengthMm", event.target.value)}
-                        />
-                      </label>
-                      <label className="space-y-2 text-sm font-medium text-slate-700">
-                        Top Design
-                        <Input value={form.topDesign} onChange={(event) => updateField("topDesign", event.target.value)} />
-                      </label>
-                      <label className="space-y-2 text-sm font-medium text-slate-700">
-                        Bottom Design
-                        <Input
-                          value={form.bottomDesign}
-                          onChange={(event) => updateField("bottomDesign", event.target.value)}
-                        />
-                      </label>
-                      <label className="space-y-2 text-sm font-medium text-slate-700">
-                        Accessories Material
-                        <Select
-                          value={form.accessoriesMaterial}
-                          onChange={(event) => updateField("accessoriesMaterial", event.target.value)}
-                        >
-                          <option value="">Select an accessory</option>
-                          {accessories.map((accessory) => (
-                            <option key={accessory.accessoryId} value={accessory.accessoryName}>
-                              {accessory.accessoryName}
-                            </option>
-                          ))}
-                        </Select>
-                      </label>
-                      <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
-                        Requested Material Notes
-                        <Textarea
-                          value={form.requestedMaterialNotes ?? ""}
-                          onChange={(event) => updateField("requestedMaterialNotes", event.target.value)}
-                        />
-                      </label>
-                    </div>
-                  </section>
                 </div>
 
                 <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
                   <div className="mb-4 flex items-start justify-between gap-4">
                     <div>
-                      <h3 className="text-base font-semibold text-slate-900">{sectionCards[2].title}</h3>
-                      <p className="mt-1 text-sm text-muted-foreground">{sectionCards[2].description}</p>
+                      <h3 className="text-base font-semibold text-slate-900">{sectionCards[1].title}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">{sectionCards[1].description}</p>
                     </div>
                     <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
                       <CircleDollarSign className="h-5 w-5" />
@@ -545,8 +473,8 @@ export const TenderIntakePage = () => {
                 <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
                   <div className="mb-4 flex items-start justify-between gap-4">
                     <div>
-                      <h3 className="text-base font-semibold text-slate-900">{sectionCards[3].title}</h3>
-                      <p className="mt-1 text-sm text-muted-foreground">{sectionCards[3].description}</p>
+                      <h3 className="text-base font-semibold text-slate-900">{sectionCards[2].title}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">{sectionCards[2].description}</p>
                     </div>
                     <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
                       <Truck className="h-5 w-5" />
@@ -556,6 +484,7 @@ export const TenderIntakePage = () => {
                     <label className="space-y-2 text-sm font-medium text-slate-700">
                       Requested Delivery Time *
                       <Input
+                        type="date"
                         value={form.requestedDeliveryTime}
                         onChange={(event) => updateField("requestedDeliveryTime", event.target.value)}
                       />
@@ -594,8 +523,8 @@ export const TenderIntakePage = () => {
                 <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
                   <div className="mb-4 flex items-start justify-between gap-4">
                     <div>
-                      <h3 className="text-base font-semibold text-slate-900">{sectionCards[4].title}</h3>
-                      <p className="mt-1 text-sm text-muted-foreground">{sectionCards[4].description}</p>
+                      <h3 className="text-base font-semibold text-slate-900">{sectionCards[3].title}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">{sectionCards[3].description}</p>
                     </div>
                     <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
                       <FileText className="h-5 w-5" />
