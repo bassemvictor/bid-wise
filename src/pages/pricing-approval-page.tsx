@@ -20,6 +20,10 @@ type DecisionForm = {
   scenarioId: string;
   label: string;
   status: PricingApprovalDecisionStatus;
+  profitPercent: number | null;
+  factorOfSafetyPercent: number | null;
+  customerCommissionPercent: number | null;
+  salesPersonCommissionPercent: number | null;
   pricePerBag: number | null;
   totalPrice: number | null;
   notes: string;
@@ -42,6 +46,14 @@ const formatCurrency = (value: number | null | undefined) =>
         maximumFractionDigits: 2,
       })} EGP`;
 
+const formatPercent = (value: number | null | undefined) =>
+  value === null || value === undefined || !Number.isFinite(value)
+    ? "Not set"
+    : `${value.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}%`;
+
 const buildInitialForm = (
   tenderId: string,
   alternatives: ScenarioAlternative,
@@ -62,6 +74,10 @@ const buildInitialForm = (
         scenarioId: scenario.scenarioId,
         label: scenario.label,
         status: existing?.status ?? "pending",
+        profitPercent: scenario.profitPercent,
+        factorOfSafetyPercent: scenario.factorOfSafetyPercent,
+        customerCommissionPercent: scenario.customerCommissionPercent,
+        salesPersonCommissionPercent: scenario.salesPersonCommissionPercent,
         pricePerBag: scenario.pricePerBag,
         totalPrice: scenario.totalPrice,
         notes: existing?.notes ?? "",
@@ -377,6 +393,28 @@ export const PricingApprovalPage = () => {
 
                     <div className="mt-4 grid gap-3 lg:grid-cols-[repeat(2,minmax(0,1fr))_minmax(16rem,1.4fr)]">
                       <div className="rounded-2xl border border-border bg-white px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Profit %</p>
+                        <p className="mt-2 text-sm font-semibold text-slate-900">{formatPercent(decision.profitPercent)}</p>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-white px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Factor of Safety %</p>
+                        <p className="mt-2 text-sm font-semibold text-slate-900">
+                          {formatPercent(decision.factorOfSafetyPercent)}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-white px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Customer Commission %</p>
+                        <p className="mt-2 text-sm font-semibold text-slate-900">
+                          {formatPercent(decision.customerCommissionPercent)}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-white px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Sales Commission %</p>
+                        <p className="mt-2 text-sm font-semibold text-slate-900">
+                          {formatPercent(decision.salesPersonCommissionPercent)}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-white px-4 py-3">
                         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Price Per Bag</p>
                         <p className="mt-2 text-sm font-semibold text-slate-900">{formatCurrency(decision.pricePerBag)}</p>
                       </div>
@@ -384,7 +422,7 @@ export const PricingApprovalPage = () => {
                         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Scenario Value</p>
                         <p className="mt-2 text-sm font-semibold text-slate-900">{formatCurrency(decision.totalPrice)}</p>
                       </div>
-                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                      <label className="space-y-2 text-sm font-medium text-slate-700 lg:col-span-2">
                         Approval Notes
                         <Textarea
                           rows={2}
