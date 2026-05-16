@@ -1,5 +1,7 @@
 import { fetchAuthSession } from "aws-amplify/auth";
 
+import outputs from "../../amplify_outputs.json";
+
 export class ApiError extends Error {
   status: number;
 
@@ -13,14 +15,27 @@ export class ApiError extends Error {
   }
 }
 
-const baseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+type AmplifyOutputs = {
+  custom?: {
+    API?: {
+      alimexTenderPricingApi?: {
+        endpoint?: string;
+      };
+    };
+  };
+};
+
+const configuredApiEndpoint =
+  (outputs as AmplifyOutputs).custom?.API?.alimexTenderPricingApi?.endpoint ?? "";
+
+const baseUrl = (configuredApiEndpoint || import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 
 export const isApiConfigured = Boolean(baseUrl);
 
 const buildUrl = (path: string) => {
   if (!baseUrl) {
     throw new ApiError(
-      "Missing VITE_API_BASE_URL. Point the frontend to your API Gateway endpoint.",
+      "Missing API base URL. Regenerate amplify_outputs.json or set VITE_API_BASE_URL.",
       0,
     );
   }
