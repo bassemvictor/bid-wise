@@ -85,6 +85,32 @@ type ComponentDrawerState = {
 const componentTypeOptions = ["Bag Body", "Ring", "Thread", "Other"] as const;
 type ComponentTypeOption = (typeof componentTypeOptions)[number];
 
+const getMaterialCategoryForComponentType = (componentType: string): Material["category"] | null => {
+  switch (componentType) {
+    case "Bag Body":
+      return "Fabric Material";
+    case "Thread":
+      return "Threading Material";
+    case "Ring":
+      return "Ring Material";
+    default:
+      return null;
+  }
+};
+
+const getMaterialPlaceholderForComponentType = (componentType: string) => {
+  switch (componentType) {
+    case "Bag Body":
+      return "Select fabric material";
+    case "Thread":
+      return "Select threading material";
+    case "Ring":
+      return "Select ring material";
+    default:
+      return "Select material";
+  }
+};
+
 const initialForm = (tenderId: string): ProductConfigurationForm => ({
   tenantId: "alimex-demo",
   tenderId,
@@ -411,6 +437,11 @@ const ProductComponentDrawer = ({
     return null;
   }
 
+  const selectedMaterialCategory = getMaterialCategoryForComponentType(draft.componentType);
+  const availableMaterials = selectedMaterialCategory
+    ? materials.filter((material) => material.category === selectedMaterialCategory)
+    : materials;
+
   const addSpecificationRow = () => {
     setDraft((current) => ({
       ...current,
@@ -502,6 +533,25 @@ const ProductComponentDrawer = ({
                             ? ""
                             : nextType
                           : current.componentName,
+                      material: (() => {
+                        const nextCategory = getMaterialCategoryForComponentType(nextType);
+                        const normalizedMaterialId = normalizeMaterialReference(
+                          current.material,
+                          materials,
+                        );
+
+                        if (!normalizedMaterialId || !nextCategory) {
+                          return "";
+                        }
+
+                        return materials.some(
+                          (material) =>
+                            material.materialId === normalizedMaterialId &&
+                            material.category === nextCategory,
+                        )
+                          ? normalizedMaterialId
+                          : "";
+                      })(),
                     }));
                   }}
                 >
@@ -520,8 +570,8 @@ const ProductComponentDrawer = ({
                     setDraft((current) => ({ ...current, material: event.target.value }))
                   }
                 >
-                  <option value="">Select material</option>
-                  {materials.map((material) => (
+                  <option value="">{getMaterialPlaceholderForComponentType(draft.componentType)}</option>
+                  {availableMaterials.map((material) => (
                     <option key={material.materialId} value={material.materialId}>
                       {material.materialName}
                     </option>

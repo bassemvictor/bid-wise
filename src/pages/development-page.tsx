@@ -59,7 +59,7 @@ export const DevelopmentPage = () => {
                   <h3 className="text-base font-semibold text-slate-900">Seed Master Data</h3>
                   <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
                     Creates at least 10 records per reusable master-data entity, including customers, materials,
-                    suppliers, products, accessories, stock rolls, import rolls, and supplier offers.
+                    suppliers, products, accessories, in-stock materials, import presets, and supplier offers.
                   </p>
                 </div>
               </div>

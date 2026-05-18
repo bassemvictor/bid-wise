@@ -361,12 +361,28 @@ const normalizeCustomerPayload = (payload: Partial<Customer>, tenantId: string):
   updatedAt: payload.updatedAt ?? "",
 });
 
+const normalizeMaterialCategory = (value: unknown): Material["category"] => {
+  switch (String(value ?? "").trim()) {
+    case "FabricMaterial":
+    case "Fabric Material":
+      return "Fabric Material";
+    case "threadMaterial":
+    case "Threading Material":
+      return "Threading Material";
+    case "accessoriesMaterial":
+    case "Ring Material":
+      return "Ring Material";
+    default:
+      return "Fabric Material";
+  }
+};
+
 const normalizeMaterialPayload = (payload: Partial<Material>, tenantId: string): Material => ({
   entityType: "MATERIAL",
   tenantId,
   materialId: payload.materialId ?? crypto.randomUUID(),
   materialName: payload.materialName?.trim() ?? "",
-  category: (payload.category ?? "FabricMaterial") as Material["category"],
+  category: normalizeMaterialCategory(payload.category),
   temperatureLimit: payload.temperatureLimit?.trim() ?? "",
   chemicalResistance: payload.chemicalResistance?.trim() ?? "",
   defaultWastePercent: toNullableNumber(payload.defaultWastePercent),
@@ -882,7 +898,7 @@ const sanitizeMaterial = (item: StoredEntity | null): Material | null => {
     tenantId: item.tenantId,
     materialId: String(item.materialId ?? ""),
     materialName: String(item.materialName ?? ""),
-    category: (String(item.category ?? "FabricMaterial") as Material["category"]),
+    category: normalizeMaterialCategory(item.category),
     temperatureLimit: String(item.temperatureLimit ?? ""),
     chemicalResistance: String(item.chemicalResistance ?? ""),
     defaultWastePercent: toNullableNumber(item.defaultWastePercent),
@@ -2507,7 +2523,7 @@ const seedDevMasterData = async (context: RequestContext) => {
         tenantId: context.tenantId,
         materialName: materialNames[index],
         category:
-          index < 6 ? "FabricMaterial" : index < 8 ? "accessoriesMaterial" : "threadMaterial",
+          index < 6 ? "Fabric Material" : index < 8 ? "Ring Material" : "Threading Material",
         temperatureLimit: `${160 + index * 10} C`,
         chemicalResistance: ["Low", "Medium", "High"][index % 3],
         defaultWastePercent: 3 + index,

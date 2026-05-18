@@ -18,13 +18,19 @@ type MaterialForm = Omit<Material, "entityType" | "createdAt" | "updatedAt" | "d
   rollLengthM: string;
 };
 
-const materialCategories: MaterialCategory[] = ["FabricMaterial", "accessoriesMaterial", "threadMaterial"];
+const materialCategories: MaterialCategory[] = ["Fabric Material", "Threading Material", "Ring Material"];
+
+const materialCategoryLabels: Record<MaterialCategory, string> = {
+  "Fabric Material": "Fabric Material",
+  "Threading Material": "Threading Material",
+  "Ring Material": "Ring Material",
+};
 
 const initialForm: MaterialForm = {
   materialId: "",
   tenantId: "alimex-demo",
   materialName: "",
-  category: "FabricMaterial",
+  category: "Fabric Material",
   temperatureLimit: "",
   chemicalResistance: "",
   defaultWastePercent: "",
@@ -120,8 +126,8 @@ export const MaterialsPage = () => {
       chemicalResistance: form.chemicalResistance.trim(),
       defaultWastePercent:
         form.defaultWastePercent.trim() === "" ? null : Number(form.defaultWastePercent),
-      rollWidthM: form.category === "FabricMaterial" && form.rollWidthM.trim() !== "" ? Number(form.rollWidthM) : null,
-      rollLengthM: form.category === "FabricMaterial" && form.rollLengthM.trim() !== "" ? Number(form.rollLengthM) : null,
+      rollWidthM: form.category === "Fabric Material" && form.rollWidthM.trim() !== "" ? Number(form.rollWidthM) : null,
+      rollLengthM: form.category === "Fabric Material" && form.rollLengthM.trim() !== "" ? Number(form.rollLengthM) : null,
       active: form.active,
       createdAt: "",
       updatedAt: "",
@@ -193,7 +199,7 @@ export const MaterialsPage = () => {
                       <p className="font-medium text-slate-900">{record.materialName}</p>
                       <p className="text-xs text-muted-foreground">{record.materialId}</p>
                     </TableCell>
-                    <TableCell>{record.category}</TableCell>
+                    <TableCell>{materialCategoryLabels[record.category]}</TableCell>
                     <TableCell><StatusBadge active={record.active} /></TableCell>
                     <TableCell className="space-x-2">
                       <Button size="sm" variant="ghost" onClick={() => openEdit(record)} type="button">Edit</Button>
@@ -234,14 +240,14 @@ export const MaterialsPage = () => {
                 setForm((current) => ({
                   ...current,
                   category: event.target.value as MaterialCategory,
-                  rollWidthM: event.target.value === "FabricMaterial" ? current.rollWidthM : "",
-                  rollLengthM: event.target.value === "FabricMaterial" ? current.rollLengthM : "",
+                  rollWidthM: event.target.value === "Fabric Material" ? current.rollWidthM : "",
+                  rollLengthM: event.target.value === "Fabric Material" ? current.rollLengthM : "",
                 }))
               }
             >
               {materialCategories.map((category) => (
                 <option key={category} value={category}>
-                  {category}
+                  {materialCategoryLabels[category]}
                 </option>
               ))}
             </Select>

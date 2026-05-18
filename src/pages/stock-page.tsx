@@ -12,6 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { api, isApiConfigured } from "../lib/api";
 import type { Material, StockItem, Supplier } from "../../shared/types";
 
+const isFabricMaterialCategory = (category?: Material["category"] | null) => category === "Fabric Material";
+
 type StockForm = Omit<
   StockItem,
   | "entityType"
@@ -95,6 +97,12 @@ export const StockPage = () => {
     () => Object.fromEntries(materials.map((material) => [material.materialId, material.materialName])),
     [materials],
   );
+  const materialCategoryMap = useMemo(
+    () => Object.fromEntries(materials.map((material) => [material.materialId, material.category])),
+    [materials],
+  );
+  const selectedMaterial = materials.find((material) => material.materialId === form.materialId) ?? null;
+  const isFabricMaterial = isFabricMaterialCategory(selectedMaterial?.category);
 
   const filtered = useMemo(
     () =>
@@ -134,8 +142,8 @@ export const StockPage = () => {
       supplierId: form.supplierId,
       materialId: form.materialId,
       unitCount: form.unitCount.trim() === "" ? null : Number(form.unitCount),
-      rollWidthM: form.rollWidthM.trim() === "" ? null : Number(form.rollWidthM),
-      rollLengthM: form.rollLengthM.trim() === "" ? null : Number(form.rollLengthM),
+      rollWidthM: isFabricMaterial && form.rollWidthM.trim() !== "" ? Number(form.rollWidthM) : null,
+      rollLengthM: isFabricMaterial && form.rollLengthM.trim() !== "" ? Number(form.rollLengthM) : null,
       unitCostUsdPerM2:
         form.unitCostUsdPerM2.trim() === "" ? null : Number(form.unitCostUsdPerM2),
       active: form.active,
@@ -183,9 +191,9 @@ export const StockPage = () => {
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>In Stock Rolls</CardTitle>
+            <CardTitle>In Stock</CardTitle>
             <CardDescription>
-              Track reusable in-stock roll records by supplier, material, roll width, roll length, and unit cost.
+              Track reusable in-stock material records by supplier, material, dimensions when needed, and cost.
             </CardDescription>
           </div>
         </CardHeader>
@@ -199,12 +207,12 @@ export const StockPage = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Stock Roll</TableHead>
+                  <TableHead>Stock Item</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead>Material</TableHead>
                   <TableHead>Roll Width (m)</TableHead>
                   <TableHead>Roll Length (m)</TableHead>
-                  <TableHead>Unit Cost USD/m²</TableHead>
+                  <TableHead>Cost</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -214,14 +222,18 @@ export const StockPage = () => {
                   <TableRow key={record.stockId}>
                     <TableCell>
                       <p className="font-medium text-slate-900">{record.stockId}</p>
-                      <p className="text-xs text-muted-foreground">In-stock roll record</p>
+                      <p className="text-xs text-muted-foreground">In-stock material record</p>
                     </TableCell>
                     <TableCell>{supplierMap[record.supplierId] ?? record.supplierId ?? "-"}</TableCell>
                     <TableCell>{materialMap[record.materialId] ?? record.materialId ?? "-"}</TableCell>
-                    <TableCell>{record.rollWidthM ?? "-"}</TableCell>
-                    <TableCell>{record.rollLengthM ?? "-"}</TableCell>
+                    <TableCell>{isFabricMaterialCategory(materialCategoryMap[record.materialId]) ? (record.rollWidthM ?? "-") : "-"}</TableCell>
+                    <TableCell>{isFabricMaterialCategory(materialCategoryMap[record.materialId]) ? (record.rollLengthM ?? "-") : "-"}</TableCell>
                     <TableCell>
-                      {record.unitCostUsdPerM2 !== null ? record.unitCostUsdPerM2.toFixed(3) : "-"}
+                      {record.unitCostUsdPerM2 !== null
+                        ? isFabricMaterialCategory(materialCategoryMap[record.materialId])
+                          ? `${record.unitCostUsdPerM2.toFixed(3)} USD/m²`
+                          : `${record.unitCostUsdPerM2.toFixed(2)} EGP/bag`
+                        : "-"}
                     </TableCell>
                     <TableCell><StatusBadge active={record.active} /></TableCell>
                     <TableCell className="space-x-2">
@@ -252,8 +264,8 @@ export const StockPage = () => {
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title={editing ? "Edit In Stock Roll" : "Add In Stock Roll"}
-        description="Select the supplier and material, then capture the roll width, roll length, and unit cost."
+        title={editing ? "Edit In Stock Item" : "Add In Stock Item"}
+        description="Select the supplier and material, then capture dimensions for fabric materials or direct bag cost for other materials."
       >
         <form className="grid gap-5 md:grid-cols-2" onSubmit={submit}>
           <label className="space-y-2 text-sm font-medium text-slate-700">
@@ -273,7 +285,24 @@ export const StockPage = () => {
           </label>
           <label className="space-y-2 text-sm font-medium text-slate-700">
             Material
-            <Select required value={form.materialId} onChange={(event) => setForm((current) => ({ ...current, materialId: event.target.value }))}>
+            <Select
+              required
+              value={form.materialId}
+              onChange={(event) =>
+                setForm((current) => {
+                  const nextMaterialId = event.target.value;
+                  const nextMaterial = materials.find((material) => material.materialId === nextMaterialId);
+                  const nextIsFabric = isFabricMaterialCategory(nextMaterial?.category);
+
+                  return {
+                    ...current,
+                    materialId: nextMaterialId,
+                    rollWidthM: nextIsFabric ? current.rollWidthM : "",
+                    rollLengthM: nextIsFabric ? current.rollLengthM : "",
+                  };
+                })
+              }
+            >
               <option value="">Select material</option>
               {materials.map((material) => (
                 <option key={material.materialId} value={material.materialId}>
@@ -282,16 +311,20 @@ export const StockPage = () => {
               ))}
             </Select>
           </label>
+          {isFabricMaterial ? (
+            <>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Roll Width (m)
+                <Input required inputMode="decimal" value={form.rollWidthM} onChange={(event) => setForm((current) => ({ ...current, rollWidthM: event.target.value }))} />
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Roll Length (m)
+                <Input required inputMode="decimal" value={form.rollLengthM} onChange={(event) => setForm((current) => ({ ...current, rollLengthM: event.target.value }))} />
+              </label>
+            </>
+          ) : null}
           <label className="space-y-2 text-sm font-medium text-slate-700">
-            Roll Width (m)
-            <Input required inputMode="decimal" value={form.rollWidthM} onChange={(event) => setForm((current) => ({ ...current, rollWidthM: event.target.value }))} />
-          </label>
-          <label className="space-y-2 text-sm font-medium text-slate-700">
-            Roll Length (m)
-            <Input required inputMode="decimal" value={form.rollLengthM} onChange={(event) => setForm((current) => ({ ...current, rollLengthM: event.target.value }))} />
-          </label>
-          <label className="space-y-2 text-sm font-medium text-slate-700">
-            Unit Cost USD / m²
+            {isFabricMaterial ? "Unit Cost USD / m²" : "Cost per Bag (EGP)"}
             <Input
               inputMode="decimal"
               value={form.unitCostUsdPerM2}

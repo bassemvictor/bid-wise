@@ -12,6 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { api, isApiConfigured } from "../lib/api";
 import type { ImportPreset, Material, Supplier } from "../../shared/types";
 
+const isFabricMaterialCategory = (category?: Material["category"] | null) => category === "Fabric Material";
+
 type ImportPresetForm = Omit<
   ImportPreset,
   | "entityType"
@@ -99,6 +101,12 @@ export const ImportPresetsPage = () => {
     () => Object.fromEntries(materials.map((material) => [material.materialId, material.materialName])),
     [materials],
   );
+  const materialCategoryMap = useMemo(
+    () => Object.fromEntries(materials.map((material) => [material.materialId, material.category])),
+    [materials],
+  );
+  const selectedMaterial = materials.find((material) => material.materialId === form.materialId) ?? null;
+  const isFabricMaterial = isFabricMaterialCategory(selectedMaterial?.category);
 
   const filtered = useMemo(
     () =>
@@ -138,11 +146,12 @@ export const ImportPresetsPage = () => {
       importPresetId: form.importPresetId || crypto.randomUUID(),
       supplierId: form.supplierId,
       materialId: form.materialId,
-      rollWidthM: form.rollWidthM.trim() === "" ? null : Number(form.rollWidthM),
-      rollLengthM: form.rollLengthM.trim() === "" ? null : Number(form.rollLengthM),
+      rollWidthM: isFabricMaterial && form.rollWidthM.trim() !== "" ? Number(form.rollWidthM) : null,
+      rollLengthM: isFabricMaterial && form.rollLengthM.trim() !== "" ? Number(form.rollLengthM) : null,
       leadTimeDays: form.leadTimeDays.trim() === "" ? null : Number(form.leadTimeDays),
       unitCostUsdPerM2: form.unitCostUsdPerM2.trim() === "" ? null : Number(form.unitCostUsdPerM2),
-      customsEstimate: form.customsEstimate.trim() === "" ? null : Number(form.customsEstimate),
+      customsEstimate:
+        isFabricMaterial && form.customsEstimate.trim() !== "" ? Number(form.customsEstimate) : null,
       active: form.active,
       createdAt: "",
       updatedAt: "",
@@ -188,9 +197,9 @@ export const ImportPresetsPage = () => {
       <Card>
         <CardHeader>
           <div>
-            <CardTitle>Import Rolls</CardTitle>
+            <CardTitle>Import</CardTitle>
             <CardDescription>
-              Define import roll presets by supplier, material, roll width, roll length, lead time, unit cost, and customs.
+              Define import material presets by supplier, material, dimensions when needed, lead time, cost, and customs for fabric items.
             </CardDescription>
           </div>
         </CardHeader>
@@ -204,13 +213,13 @@ export const ImportPresetsPage = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Import Roll</TableHead>
+                  <TableHead>Import Preset</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead>Material</TableHead>
                   <TableHead>Roll Width (m)</TableHead>
                   <TableHead>Roll Length (m)</TableHead>
                   <TableHead>Lead Time</TableHead>
-                  <TableHead>Unit Cost USD/m²</TableHead>
+                  <TableHead>Cost</TableHead>
                   <TableHead>Customs</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
@@ -221,15 +230,25 @@ export const ImportPresetsPage = () => {
                   <TableRow key={record.importPresetId}>
                     <TableCell>
                       <p className="font-medium text-slate-900">{record.importPresetId}</p>
-                      <p className="text-xs text-muted-foreground">Import roll preset</p>
+                      <p className="text-xs text-muted-foreground">Import material preset</p>
                     </TableCell>
                     <TableCell>{supplierMap[record.supplierId] ?? record.supplierId ?? "-"}</TableCell>
                     <TableCell>{materialMap[record.materialId] ?? record.materialId ?? "-"}</TableCell>
-                    <TableCell>{record.rollWidthM ?? "-"}</TableCell>
-                    <TableCell>{record.rollLengthM ?? "-"}</TableCell>
+                    <TableCell>{isFabricMaterialCategory(materialCategoryMap[record.materialId]) ? (record.rollWidthM ?? "-") : "-"}</TableCell>
+                    <TableCell>{isFabricMaterialCategory(materialCategoryMap[record.materialId]) ? (record.rollLengthM ?? "-") : "-"}</TableCell>
                     <TableCell>{record.leadTimeDays !== null ? `${record.leadTimeDays} days` : "-"}</TableCell>
-                    <TableCell>{record.unitCostUsdPerM2 !== null ? record.unitCostUsdPerM2.toFixed(3) : "-"}</TableCell>
-                    <TableCell>{record.customsEstimate !== null ? record.customsEstimate.toFixed(2) : "-"}</TableCell>
+                    <TableCell>
+                      {record.unitCostUsdPerM2 !== null
+                        ? isFabricMaterialCategory(materialCategoryMap[record.materialId])
+                          ? `${record.unitCostUsdPerM2.toFixed(3)} USD/m²`
+                          : `${record.unitCostUsdPerM2.toFixed(2)} EGP/bag`
+                        : "-"}
+                    </TableCell>
+                    <TableCell>
+                      {isFabricMaterialCategory(materialCategoryMap[record.materialId]) && record.customsEstimate !== null
+                        ? record.customsEstimate.toFixed(2)
+                        : "-"}
+                    </TableCell>
                     <TableCell><StatusBadge active={record.active} /></TableCell>
                     <TableCell className="space-x-2">
                       <Button
@@ -259,8 +278,8 @@ export const ImportPresetsPage = () => {
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title={editing ? "Edit Import Roll" : "Add Import Roll"}
-        description="Select the supplier and material, then capture roll width, roll length, lead time, unit cost, and customs."
+        title={editing ? "Edit Import Preset" : "Add Import Preset"}
+        description="Select the supplier and material, then capture dimensions for fabric materials or direct bag cost for other materials."
       >
         <form className="grid gap-5 md:grid-cols-2" onSubmit={submit}>
           <label className="space-y-2 text-sm font-medium text-slate-700">
@@ -280,7 +299,25 @@ export const ImportPresetsPage = () => {
           </label>
           <label className="space-y-2 text-sm font-medium text-slate-700">
             Material
-            <Select required value={form.materialId} onChange={(event) => setForm((current) => ({ ...current, materialId: event.target.value }))}>
+            <Select
+              required
+              value={form.materialId}
+              onChange={(event) =>
+                setForm((current) => {
+                  const nextMaterialId = event.target.value;
+                  const nextMaterial = materials.find((material) => material.materialId === nextMaterialId);
+                  const nextIsFabric = isFabricMaterialCategory(nextMaterial?.category);
+
+                  return {
+                    ...current,
+                    materialId: nextMaterialId,
+                    rollWidthM: nextIsFabric ? current.rollWidthM : "",
+                    rollLengthM: nextIsFabric ? current.rollLengthM : "",
+                    customsEstimate: nextIsFabric ? current.customsEstimate : "",
+                  };
+                })
+              }
+            >
               <option value="">Select material</option>
               {materials.map((material) => (
                 <option key={material.materialId} value={material.materialId}>
@@ -289,26 +326,32 @@ export const ImportPresetsPage = () => {
               ))}
             </Select>
           </label>
-          <label className="space-y-2 text-sm font-medium text-slate-700">
-            Roll Width (m)
-            <Input inputMode="decimal" value={form.rollWidthM} onChange={(event) => setForm((current) => ({ ...current, rollWidthM: event.target.value }))} />
-          </label>
-          <label className="space-y-2 text-sm font-medium text-slate-700">
-            Roll Length (m)
-            <Input inputMode="decimal" value={form.rollLengthM} onChange={(event) => setForm((current) => ({ ...current, rollLengthM: event.target.value }))} />
-          </label>
+          {isFabricMaterial ? (
+            <>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Roll Width (m)
+                <Input inputMode="decimal" value={form.rollWidthM} onChange={(event) => setForm((current) => ({ ...current, rollWidthM: event.target.value }))} />
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Roll Length (m)
+                <Input inputMode="decimal" value={form.rollLengthM} onChange={(event) => setForm((current) => ({ ...current, rollLengthM: event.target.value }))} />
+              </label>
+            </>
+          ) : null}
           <label className="space-y-2 text-sm font-medium text-slate-700">
             Lead Time (days)
             <Input inputMode="decimal" value={form.leadTimeDays} onChange={(event) => setForm((current) => ({ ...current, leadTimeDays: event.target.value }))} />
           </label>
           <label className="space-y-2 text-sm font-medium text-slate-700">
-            Unit Cost USD / m²
+            {isFabricMaterial ? "Unit Cost USD / m²" : "Cost per Bag (EGP)"}
             <Input inputMode="decimal" value={form.unitCostUsdPerM2} onChange={(event) => setForm((current) => ({ ...current, unitCostUsdPerM2: event.target.value }))} />
           </label>
-          <label className="space-y-2 text-sm font-medium text-slate-700">
-            Customs
-            <Input inputMode="decimal" value={form.customsEstimate} onChange={(event) => setForm((current) => ({ ...current, customsEstimate: event.target.value }))} />
-          </label>
+          {isFabricMaterial ? (
+            <label className="space-y-2 text-sm font-medium text-slate-700">
+              Customs
+              <Input inputMode="decimal" value={form.customsEstimate} onChange={(event) => setForm((current) => ({ ...current, customsEstimate: event.target.value }))} />
+            </label>
+          ) : null}
           <label className="flex items-center gap-3 rounded-2xl border border-border bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
             <input checked={form.active} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />
             Active

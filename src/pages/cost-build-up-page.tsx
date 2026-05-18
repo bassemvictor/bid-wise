@@ -13,6 +13,7 @@ import { api, ApiError, isApiConfigured } from "../lib/api";
 import type {
   CostBuildUp,
   CostLine,
+  Material,
   MaterialSourceSelection,
   ProductConfiguration,
   RollCalculation,
@@ -59,6 +60,12 @@ type CostDefaults = {
   managementOverheadPerBag: number | null;
 };
 
+type MaterialLineOverrides = {
+  A: number | null;
+  B: number | null;
+  C: number | null;
+};
+
 const lineDefinitions: Array<Omit<CostLine, "costPerBag"> & { costPerBag?: number | null }> = [
   {
     code: "A",
@@ -69,17 +76,17 @@ const lineDefinitions: Array<Omit<CostLine, "costPerBag"> & { costPerBag?: numbe
   },
   {
     code: "B",
-    category: "Accessories",
-    description: "Accessories added per bag.",
-    calculationBasis: "Accessory consumption per bag",
-    editable: true,
+    category: "Ring Material",
+    description: "Ring material added per bag.",
+    calculationBasis: "Ring material consumption per bag",
+    editable: false,
   },
   {
     code: "C",
-    category: "Sewing Thread",
-    description: "Thread usage for one bag.",
-    calculationBasis: "Thread consumption per bag",
-    editable: true,
+    category: "Threading Material",
+    description: "Threading material usage for one bag.",
+    calculationBasis: "Threading material consumption per bag",
+    editable: false,
   },
   {
     code: "D",
@@ -160,12 +167,110 @@ const lineDefinitions: Array<Omit<CostLine, "costPerBag"> & { costPerBag?: numbe
   },
 ];
 
-const buildDefaultLines = (materialCostPerBagEgp: number | null, defaults?: CostDefaults) =>
+const isFabricMaterialCategory = (category?: Material["category"] | null) => category === "Fabric Material";
+const isRingMaterialCategory = (category?: Material["category"] | null) => category === "Ring Material";
+const isThreadingMaterialCategory = (category?: Material["category"] | null) => category === "Threading Material";
+
+const resolveMaterialCategoryForSelection = (
+  selection: NonNullable<MaterialSourceSelection["componentSelections"]>[number],
+  materials: Material[],
+) => {
+  const materialCategory = materials.find((material) => material.materialId === selection.materialId)?.category;
+
+  if (materialCategory) {
+    return materialCategory;
+  }
+
+  const componentName = selection.componentName.trim().toLowerCase();
+  if (componentName.includes("ring")) {
+    return "Ring Material" as const;
+  }
+  if (componentName.includes("thread")) {
+    return "Threading Material" as const;
+  }
+  return "Fabric Material" as const;
+};
+
+const calculateMaterialLineOverrides = ({
+  materialSourcing,
+  exchangeRate,
+  currencySafetyFactorPercent,
+  materials,
+}: {
+  materialSourcing: MaterialSourceSelection | null;
+  exchangeRate: number | null;
+  currencySafetyFactorPercent: number | null;
+  materials: Material[];
+}): MaterialLineOverrides => {
+  if (!materialSourcing?.componentSelections?.length) {
+    return { A: null, B: null, C: null };
+  }
+
+  const effectiveExchangeRate =
+    exchangeRate !== null && currencySafetyFactorPercent !== null
+      ? exchangeRate * (1 + currencySafetyFactorPercent / 100)
+      : null;
+
+  return materialSourcing.componentSelections.reduce<MaterialLineOverrides>(
+    (totals, selection) => {
+      const category = resolveMaterialCategoryForSelection(selection, materials);
+      let componentCostPerBag = selection.materialCostPerBagEgp ?? null;
+
+      if (isFabricMaterialCategory(category) && effectiveExchangeRate !== null) {
+        const requestedQuantity = selection.requestedQuantity ?? 0;
+        if (requestedQuantity > 0) {
+          const recomputedTotal = selection.selectedSources.reduce((total, source) => {
+            const qtyUsedM2 = source.qtyUsedM2 ?? null;
+            const unitCostUsdPerM2 = source.unitCostUsdPerM2 ?? null;
+            const customsEstimate = source.customsEstimate ?? 0;
+            const freightCostPerM2Egp = materialSourcing.freightCostPerM2Egp ?? 0;
+            const otherChargesPerM2Egp = materialSourcing.otherChargesPerM2Egp ?? 0;
+
+            if (qtyUsedM2 === null || unitCostUsdPerM2 === null) {
+              return total;
+            }
+
+            const landedCostPerM2Egp =
+              unitCostUsdPerM2 * effectiveExchangeRate +
+              freightCostPerM2Egp +
+              customsEstimate +
+              otherChargesPerM2Egp;
+
+            return total + qtyUsedM2 * landedCostPerM2Egp;
+          }, 0);
+
+          componentCostPerBag = recomputedTotal / requestedQuantity;
+        }
+      }
+
+      if (componentCostPerBag === null) {
+        return totals;
+      }
+
+      if (isFabricMaterialCategory(category)) {
+        totals.A = (totals.A ?? 0) + componentCostPerBag;
+      } else if (isRingMaterialCategory(category)) {
+        totals.B = (totals.B ?? 0) + componentCostPerBag;
+      } else if (isThreadingMaterialCategory(category)) {
+        totals.C = (totals.C ?? 0) + componentCostPerBag;
+      }
+
+      return totals;
+    },
+    { A: 0, B: 0, C: 0 },
+  );
+};
+
+const buildDefaultLines = (materialLineOverrides: MaterialLineOverrides, defaults?: CostDefaults) =>
   lineDefinitions.map((line) => ({
     ...line,
     costPerBag:
       line.code === "A"
-        ? materialCostPerBagEgp
+        ? materialLineOverrides.A
+        : line.code === "B"
+          ? materialLineOverrides.B
+          : line.code === "C"
+            ? materialLineOverrides.C
         : line.code === "F"
           ? defaults?.factoryOverheadPerBag ?? null
           : line.code === "G"
@@ -185,7 +290,7 @@ const initialForm = (tenderId: string): CostBuildUpForm => ({
   exchangeRate: "",
   currencySafetyFactorPercent: "",
   effectiveExchangeRate: "",
-  costLines: buildDefaultLines(null).map((line) => ({
+  costLines: buildDefaultLines({ A: null, B: null, C: null }).map((line) => ({
     ...line,
     costPerBag: line.costPerBag?.toString() ?? "",
   })),
@@ -254,65 +359,19 @@ const formatMetric = (value: number | null, digits = 2, suffix = "") =>
         maximumFractionDigits: digits,
       })}${suffix}`;
 
-const calculateMaterialCostFromOverrides = ({
-  materialSourcing,
-  exchangeRate,
-  currencySafetyFactorPercent,
-}: {
-  materialSourcing: MaterialSourceSelection | null;
-  exchangeRate: number | null;
-  currencySafetyFactorPercent: number | null;
-}) => {
-  if (!materialSourcing) {
-    return null;
-  }
-
-  const effectiveExchangeRate =
-    exchangeRate !== null && currencySafetyFactorPercent !== null
-      ? exchangeRate * (1 + currencySafetyFactorPercent / 100)
-      : null;
-
-  if (effectiveExchangeRate === null) {
-    return materialSourcing.materialCostPerBagEgp ?? null;
-  }
-
-  const totalRequiredBags = materialSourcing.totalRequiredBags ?? 0;
-  if (totalRequiredBags <= 0) {
-    return null;
-  }
-
-  const totalMaterialCostEgp = (materialSourcing.selectedSources ?? []).reduce((total, source) => {
-    const qtyUsedM2 = source.qtyUsedM2 ?? null;
-    const unitCostUsdPerM2 = source.unitCostUsdPerM2 ?? null;
-    const customsEstimate = source.customsEstimate ?? 0;
-    const otherCharges = materialSourcing.otherChargesPerM2Egp ?? 0;
-    const freightCostPerM2Egp = materialSourcing.freightCostPerM2Egp ?? 0;
-
-    if (qtyUsedM2 === null || unitCostUsdPerM2 === null) {
-      return total;
-    }
-
-    const landedCostPerM2 =
-      unitCostUsdPerM2 * effectiveExchangeRate + (freightCostPerM2Egp ?? 0) + customsEstimate + otherCharges;
-    return total + qtyUsedM2 * landedCostPerM2;
-  }, 0);
-
-  return totalMaterialCostEgp / totalRequiredBags;
-};
-
 const mergeCostLines = (
   savedLines: CostLine[] | undefined,
-  materialCostPerBagEgp: number | null,
+  materialLineOverrides: MaterialLineOverrides,
   defaults?: CostDefaults,
 ): CostLineForm[] => {
-  const defaultLines = buildDefaultLines(materialCostPerBagEgp, defaults);
+  const defaultLines = buildDefaultLines(materialLineOverrides, defaults);
   const savedByCode = new Map((savedLines ?? []).map((line) => [line.code, line]));
 
   return defaultLines.map((line) => {
     const saved = savedByCode.get(line.code);
     const costPerBag =
-      line.code === "A"
-        ? materialCostPerBagEgp
+      ["A", "B", "C"].includes(line.code)
+        ? line.costPerBag ?? null
         : saved?.editable
           ? saved.costPerBag
           : line.costPerBag ?? saved?.costPerBag ?? null;
@@ -330,7 +389,7 @@ const mergeCostLines = (
 
 const toForm = (
   payload: CostBuildUp,
-  materialCostPerBagEgp: number | null,
+  materialLineOverrides: MaterialLineOverrides,
   defaults?: CostDefaults,
 ): CostBuildUpForm => ({
   tenantId: payload.tenantId,
@@ -342,7 +401,7 @@ const toForm = (
   exchangeRate: payload.exchangeRate?.toString() ?? "",
   currencySafetyFactorPercent: payload.currencySafetyFactorPercent?.toString() ?? "",
   effectiveExchangeRate: payload.effectiveExchangeRate?.toString() ?? "",
-  costLines: mergeCostLines(payload.costLines, materialCostPerBagEgp, defaults),
+  costLines: mergeCostLines(payload.costLines, materialLineOverrides, defaults),
   totalMaterialCostPerBag: payload.totalMaterialCostPerBag?.toString() ?? "",
   totalOperatingCostPerBag: payload.totalOperatingCostPerBag?.toString() ?? "",
   totalAdditionalCostPerBag: payload.totalAdditionalCostPerBag?.toString() ?? "",
@@ -358,6 +417,7 @@ export const CostBuildUpPage = () => {
   const [productConfiguration, setProductConfiguration] = useState<ProductConfiguration | null>(null);
   const [rollCalculation, setRollCalculation] = useState<RollCalculation | null>(null);
   const [materialSourcing, setMaterialSourcing] = useState<MaterialSourceSelection | null>(null);
+  const [materials, setMaterials] = useState<Material[]>([]);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -380,7 +440,7 @@ export const CostBuildUpPage = () => {
       setError("");
 
       try {
-        const [loadedTender, loadedConfiguration, loadedRollCalculation, loadedMaterialSourcing, saved] =
+        const [loadedTender, loadedConfiguration, loadedRollCalculation, loadedMaterialSourcing, loadedMaterials, saved] =
           await Promise.all([
             api.get<TenderRequest>(`/tenders/${tenderId}?tenantId=alimex-demo`),
             api.get<ProductConfiguration>(`/tenders/${tenderId}/product-configuration?tenantId=alimex-demo`),
@@ -402,6 +462,7 @@ export const CostBuildUpPage = () => {
 
                 throw reason;
               }),
+            api.get<Material[]>(`/materials?tenantId=alimex-demo`),
             api
               .get<CostBuildUp>(`/tenders/${tenderId}/cost-build-up?tenantId=alimex-demo`)
               .catch((reason) => {
@@ -421,6 +482,7 @@ export const CostBuildUpPage = () => {
         setProductConfiguration(loadedConfiguration);
         setRollCalculation(loadedRollCalculation);
         setMaterialSourcing(loadedMaterialSourcing);
+        setMaterials(loadedMaterials.filter((item) => item.active));
 
         if (!loadedMaterialSourcing) {
           setError(
@@ -428,10 +490,15 @@ export const CostBuildUpPage = () => {
           );
         }
 
-        const materialCostPerBag = loadedMaterialSourcing?.materialCostPerBagEgp ?? null;
+        const materialLineOverrides = calculateMaterialLineOverrides({
+          materialSourcing: loadedMaterialSourcing,
+          exchangeRate: loadedTender.exchangeRate ?? null,
+          currencySafetyFactorPercent: loadedTender.currencySafetyFactorPercent ?? null,
+          materials: loadedMaterials,
+        });
         const costDefaults = deriveCostDefaults(loadedConfiguration);
         if (saved) {
-          setForm(toForm(saved, materialCostPerBag, costDefaults));
+          setForm(toForm(saved, materialLineOverrides, costDefaults));
           return;
         }
 
@@ -452,7 +519,7 @@ export const CostBuildUpPage = () => {
                   (1 + loadedTender.currencySafetyFactorPercent / 100)
                 ).toString()
               : "",
-          costLines: mergeCostLines(undefined, materialCostPerBag, costDefaults),
+          costLines: mergeCostLines(undefined, materialLineOverrides, costDefaults),
         });
       } catch (reason) {
         if (isMounted) {
@@ -479,14 +546,15 @@ export const CostBuildUpPage = () => {
     exchangeRate !== null && currencySafetyFactorPercent !== null
       ? exchangeRate * (1 + currencySafetyFactorPercent / 100)
       : null;
-  const overriddenMaterialCostPerBag = useMemo(
+  const materialLineOverrides = useMemo(
     () =>
-      calculateMaterialCostFromOverrides({
+      calculateMaterialLineOverrides({
         materialSourcing,
         exchangeRate,
         currencySafetyFactorPercent,
+        materials,
       }),
-    [materialSourcing, exchangeRate, currencySafetyFactorPercent],
+    [materialSourcing, exchangeRate, currencySafetyFactorPercent, materials],
   );
 
   const calculatedLines = useMemo(() => {
@@ -495,8 +563,12 @@ export const CostBuildUpPage = () => {
     );
 
     const read = (code: string) => editableByCode.get(code)?.costPerBag ?? 0;
-    const materialLineCost = overriddenMaterialCostPerBag ?? read("A");
-    const materialCostPerBag = materialLineCost + read("B") + read("C") + read("D");
+    const fabricMaterialCost = materialLineOverrides.A ?? 0;
+    const ringMaterialCost = materialLineOverrides.B ?? 0;
+    const threadingMaterialCost = materialLineOverrides.C ?? 0;
+    const packagingMaterialCost = read("D");
+    const materialCostPerBag =
+      fabricMaterialCost + ringMaterialCost + threadingMaterialCost + packagingMaterialCost;
     const operatingCostPerBag = read("F") + read("G") + read("G2") + read("H");
     const additionalCostPerBag = read("I_RUSH") + read("J") + read("K");
     const totalCostPricePerBag = materialCostPerBag + operatingCostPerBag + additionalCostPerBag;
@@ -507,7 +579,11 @@ export const CostBuildUpPage = () => {
       let value = numberOrNull(line.costPerBag);
 
       if (line.code === "A") {
-        value = overriddenMaterialCostPerBag;
+        value = materialLineOverrides.A;
+      } else if (line.code === "B") {
+        value = materialLineOverrides.B;
+      } else if (line.code === "C") {
+        value = materialLineOverrides.C;
       } else if (line.code === "I_TOTAL") {
         value = materialCostPerBag;
       } else if (line.code === "II_TOTAL") {
@@ -523,7 +599,7 @@ export const CostBuildUpPage = () => {
           totalCostPricePerBag > 0 && value !== null ? (value / totalCostPricePerBag) * 100 : 0,
       };
     });
-  }, [form.costLines, overriddenMaterialCostPerBag, quantity]);
+  }, [form.costLines, materialLineOverrides, quantity]);
 
   const totals = useMemo(() => {
     const findValue = (code: string) =>
@@ -592,8 +668,6 @@ export const CostBuildUpPage = () => {
         const sourcedMaterialCostPerBag =
           requestedQuantity && requestedQuantity > 0 ? sourcedMaterialTotal / requestedQuantity : null;
 
-        const accessoriesCost = currentLineValues.get("B") ?? 0;
-        const threadCost = currentLineValues.get("C") ?? 0;
         const packagingCost = currentLineValues.get("D") ?? 0;
         const factoryOverhead = product.factoryOverheadPerBag ?? (currentLineValues.get("F") ?? 0);
         const manufacturingOverhead =
@@ -605,8 +679,7 @@ export const CostBuildUpPage = () => {
         const transportationCost = currentLineValues.get("J") ?? 0;
         const installationCost = currentLineValues.get("K") ?? 0;
 
-        const materialPerBag =
-          (sourcedMaterialCostPerBag ?? 0) + accessoriesCost + threadCost + packagingCost;
+        const materialPerBag = (sourcedMaterialCostPerBag ?? 0) + packagingCost;
         const operatingPerBag =
           factoryOverhead + manufacturingOverhead + managementOverhead + salesCost;
         const additionalPerBag = rushCost + transportationCost + installationCost;
@@ -635,7 +708,7 @@ export const CostBuildUpPage = () => {
       {
         id: "material",
         title: "Material Cost Breakdown",
-        description: "Fabric cost is pulled from sourcing, while the remaining lines can be adjusted here.",
+        description: "Review material cost grouped by type and adjust only the manual inputs.",
         totalCode: "I_TOTAL",
         rows: calculatedLines.filter((line) => ["A", "B", "C", "D"].includes(line.code)),
       },
@@ -654,6 +727,32 @@ export const CostBuildUpPage = () => {
         rows: calculatedLines.filter((line) => ["I_RUSH", "J", "K"].includes(line.code)),
       },
     ],
+    [calculatedLines],
+  );
+
+  const materialTypeGroups = useMemo(
+    () => [
+      {
+        id: "fabric-material",
+        title: "Fabric Material",
+        rows: calculatedLines.filter((line) => ["A"].includes(line.code)),
+      },
+      {
+        id: "ring-material",
+        title: "Ring Material",
+        rows: calculatedLines.filter((line) => ["B"].includes(line.code)),
+      },
+      {
+        id: "threading-material",
+        title: "Threading Material",
+        rows: calculatedLines.filter((line) => ["C"].includes(line.code)),
+      },
+      {
+        id: "packaging",
+        title: "Packaging",
+        rows: calculatedLines.filter((line) => ["D"].includes(line.code)),
+      },
+    ].filter((group) => group.rows.length > 0),
     [calculatedLines],
   );
 
@@ -737,10 +836,16 @@ export const CostBuildUpPage = () => {
 
     try {
       const response = await api.put<CostBuildUp>(`/tenders/${tenderId}/cost-build-up`, payload);
+      const nextMaterialLineOverrides = calculateMaterialLineOverrides({
+        materialSourcing,
+        exchangeRate,
+        currencySafetyFactorPercent,
+        materials,
+      });
       setForm(
         toForm(
           response,
-          materialSourcing?.materialCostPerBagEgp ?? null,
+          nextMaterialLineOverrides,
           deriveCostDefaults(productConfiguration),
         ),
       );
@@ -1016,8 +1121,16 @@ export const CostBuildUpPage = () => {
                                         <td className="px-4 py-3">{source.allocatedBags?.toLocaleString() ?? "-"}</td>
                                         <td className="px-4 py-3">{formatMetric(source.actualAreaPerBagM2 ?? null, 4, " m²")}</td>
                                         <td className="px-4 py-3">{formatMetric(source.qtyUsedM2 ?? null, 4, " m²")}</td>
-                                        <td className="px-4 py-3">{formatMetric(source.unitCostUsdPerM2 ?? null, 3, " USD/m²")}</td>
-                                        <td className="px-4 py-3">{formatMetric(source.totalCostUsd ?? null, 2, " USD")}</td>
+                                        <td className="px-4 py-3">
+                                          {source.actualAreaPerBagM2 !== null
+                                            ? formatMetric(source.unitCostUsdPerM2 ?? null, 3, " USD/m²")
+                                            : formatMetric(source.unitCostUsdPerM2 ?? null, 2, " EGP/bag")}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                          {source.actualAreaPerBagM2 !== null
+                                            ? formatMetric(source.totalCostUsd ?? null, 2, " USD")
+                                            : formatMetric(source.allocatedBags != null && source.unitCostUsdPerM2 !== null ? source.allocatedBags * source.unitCostUsdPerM2 : null, 2, " EGP")}
+                                        </td>
                                         <td className="px-4 py-3">{formatMetric(source.leadTimeDays ?? null, 0, " days")}</td>
                                       </tr>
                                     ))
@@ -1139,43 +1252,58 @@ export const CostBuildUpPage = () => {
                             </div>
 
                             <div className="space-y-3">
-                              {section.rows.map((line) => (
-                                <div
-                                  key={line.code}
-                                  className="grid gap-3 rounded-2xl border border-border bg-slate-50/80 p-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)_180px_110px]"
-                                >
-                                  <div>
-                                    <p className="text-sm font-semibold text-slate-900">{line.category}</p>
-                                    <p className="mt-1 text-sm text-muted-foreground">{line.description}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Calculation Basis</p>
-                                    <p className="mt-1 text-sm text-slate-700">{line.calculationBasis}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Cost / Bag</p>
-                                    <div className="mt-1">
-                                      {line.editable ? (
-                                        <Input
-                                          inputMode="decimal"
-                                          value={form.costLines.find((item) => item.code === line.code)?.costPerBag ?? ""}
-                                          onChange={(event) => updateLineCost(line.code, event.target.value)}
-                                        />
-                                      ) : (
-                                        <div className="rounded-xl border border-border bg-white px-3 py-2.5 text-sm font-medium text-slate-700">
-                                          {line.costPerBag === null ? "Calculated" : `${line.costPerBag.toFixed(2)} EGP`}
+                              {(section.id === "material"
+                                ? materialTypeGroups.flatMap((group) =>
+                                    group.rows.map((line, index) => ({
+                                      groupTitle: index === 0 ? group.title : null,
+                                      line,
+                                    })),
+                                  )
+                                : section.rows.map((line) => ({ groupTitle: null, line }))).map(
+                                ({ groupTitle, line }) => (
+                                  <div key={line.code} className="space-y-2">
+                                    {groupTitle ? (
+                                      <div className="px-1">
+                                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                                          {groupTitle}
+                                        </p>
+                                      </div>
+                                    ) : null}
+                                    <div className="grid gap-3 rounded-2xl border border-border bg-slate-50/80 p-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)_180px_110px]">
+                                      <div>
+                                        <p className="text-sm font-semibold text-slate-900">{line.category}</p>
+                                        <p className="mt-1 text-sm text-muted-foreground">{line.description}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Calculation Basis</p>
+                                        <p className="mt-1 text-sm text-slate-700">{line.calculationBasis}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Cost / Bag</p>
+                                        <div className="mt-1">
+                                          {line.editable ? (
+                                            <Input
+                                              inputMode="decimal"
+                                              value={form.costLines.find((item) => item.code === line.code)?.costPerBag ?? ""}
+                                              onChange={(event) => updateLineCost(line.code, event.target.value)}
+                                            />
+                                          ) : (
+                                            <div className="rounded-xl border border-border bg-white px-3 py-2.5 text-sm font-medium text-slate-700">
+                                              {line.costPerBag === null ? "Calculated" : `${line.costPerBag.toFixed(2)} EGP`}
+                                            </div>
+                                          )}
                                         </div>
-                                      )}
+                                      </div>
+                                      <div>
+                                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">% of Total</p>
+                                        <p className="mt-2 text-sm font-semibold text-slate-900">
+                                          {line.percentOfTotal.toFixed(1)}%
+                                        </p>
+                                      </div>
                                     </div>
                                   </div>
-                                  <div>
-                                    <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">% of Total</p>
-                                    <p className="mt-2 text-sm font-semibold text-slate-900">
-                                      {line.percentOfTotal.toFixed(1)}%
-                                    </p>
-                                  </div>
-                                </div>
-                              ))}
+                                ),
+                              )}
                             </div>
                           </div>
                         );

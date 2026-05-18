@@ -173,7 +173,7 @@ export type RollCalculation = EntityEnvelope & {
 
 export type MaterialSourceType = "stock" | "import";
 
-export type MaterialCategory = "FabricMaterial" | "accessoriesMaterial" | "threadMaterial";
+export type MaterialCategory = "Fabric Material" | "Ring Material" | "Threading Material";
 
 export type SourcingStrategy = "single-source" | "combine-sources";
 

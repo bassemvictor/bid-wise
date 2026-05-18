@@ -28,8 +28,8 @@ const navigation = [
         label: "Materials",
         href: "/materials",
         children: [
-          { label: "In Stock Rolls", href: "/stock" },
-          { label: "Import Rolls", href: "/import-presets" },
+          { label: "In Stock", href: "/stock" },
+          { label: "Import", href: "/import-presets" },
         ],
       },
       { label: "Suppliers", href: "/suppliers" },

@@ -827,7 +827,7 @@ test("creates material with tenant keys and clean json response", async () => {
         body: JSON.stringify({
           materialId: "MAT-1",
           materialName: "PTFE",
-          category: "FabricMaterial",
+          category: "Fabric Material",
           temperatureLimit: "260C",
           chemicalResistance: "High",
           defaultWastePercent: 5,
@@ -848,7 +848,7 @@ test("creates material with tenant keys and clean json response", async () => {
   assert.equal(item.PK, "TENANT#tenant-a");
   assert.equal(item.SK, "MATERIAL#MAT-1");
   assert.equal(item.entityType, "MATERIAL");
-  assert.equal(item.category, "FabricMaterial");
+  assert.equal(item.category, "Fabric Material");
   assert.equal(item.rollWidthM, 1.6);
   assert.equal(item.rollLengthM, 100);
   const body = JSON.parse(response.body ?? "{}") as Record<string, unknown>;

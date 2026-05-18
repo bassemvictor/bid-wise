@@ -333,7 +333,7 @@ export const NestedTenderGrid = ({
             supplierName,
             materialCode: source.materialId ?? "\u2014",
             unitCost: source.unitCostUsdPerM2,
-            currency: "USD/m²",
+            currency: source.actualAreaPerBagM2 !== null ? "USD/m²" : "EGP/bag",
             leadTime: source.leadTimeDays ?? null,
             notes: "\u2014",
             costImpact,
