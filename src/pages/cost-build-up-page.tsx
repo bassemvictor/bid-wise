@@ -29,6 +29,9 @@ type CostBuildUpForm = Omit<
   | "createdAt"
   | "updatedAt"
   | "quantity"
+  | "exchangeRate"
+  | "currencySafetyFactorPercent"
+  | "effectiveExchangeRate"
   | "costLines"
   | "totalMaterialCostPerBag"
   | "totalOperatingCostPerBag"
@@ -37,6 +40,9 @@ type CostBuildUpForm = Omit<
   | "totalCostPriceForOrder"
 > & {
   quantity: string;
+  exchangeRate: string;
+  currencySafetyFactorPercent: string;
+  effectiveExchangeRate: string;
   costLines: CostLineForm[];
   totalMaterialCostPerBag: string;
   totalOperatingCostPerBag: string;
@@ -90,13 +96,6 @@ const lineDefinitions: Array<Omit<CostLine, "costPerBag"> & { costPerBag?: numbe
     editable: false,
   },
   {
-    code: "E",
-    category: "Direct Labour",
-    description: "Production labour loaded per bag.",
-    calculationBasis: "Labour minutes and rate per bag",
-    editable: true,
-  },
-  {
     code: "F",
     category: "Factory Overhead",
     description: "Factory overhead allocation pulled from the product default when available.",
@@ -128,7 +127,7 @@ const lineDefinitions: Array<Omit<CostLine, "costPerBag"> & { costPerBag?: numbe
     code: "II_TOTAL",
     category: "Total Operating Cost",
     description: "Subtotal of labour and operating overheads.",
-    calculationBasis: "E + F + G + G2 + H",
+    calculationBasis: "F + G + G2 + H",
     editable: false,
   },
   {
@@ -183,6 +182,9 @@ const initialForm = (tenderId: string): CostBuildUpForm => ({
   alternativeId: "base",
   quantity: "",
   currency: "EGP",
+  exchangeRate: "",
+  currencySafetyFactorPercent: "",
+  effectiveExchangeRate: "",
   costLines: buildDefaultLines(null).map((line) => ({
     ...line,
     costPerBag: line.costPerBag?.toString() ?? "",
@@ -252,6 +254,52 @@ const formatMetric = (value: number | null, digits = 2, suffix = "") =>
         maximumFractionDigits: digits,
       })}${suffix}`;
 
+const calculateMaterialCostFromOverrides = ({
+  materialSourcing,
+  exchangeRate,
+  currencySafetyFactorPercent,
+}: {
+  materialSourcing: MaterialSourceSelection | null;
+  exchangeRate: number | null;
+  currencySafetyFactorPercent: number | null;
+}) => {
+  if (!materialSourcing) {
+    return null;
+  }
+
+  const effectiveExchangeRate =
+    exchangeRate !== null && currencySafetyFactorPercent !== null
+      ? exchangeRate * (1 + currencySafetyFactorPercent / 100)
+      : null;
+
+  if (effectiveExchangeRate === null) {
+    return materialSourcing.materialCostPerBagEgp ?? null;
+  }
+
+  const totalRequiredBags = materialSourcing.totalRequiredBags ?? 0;
+  if (totalRequiredBags <= 0) {
+    return null;
+  }
+
+  const totalMaterialCostEgp = (materialSourcing.selectedSources ?? []).reduce((total, source) => {
+    const qtyUsedM2 = source.qtyUsedM2 ?? null;
+    const unitCostUsdPerM2 = source.unitCostUsdPerM2 ?? null;
+    const customsEstimate = source.customsEstimate ?? 0;
+    const otherCharges = materialSourcing.otherChargesPerM2Egp ?? 0;
+    const freightCostPerM2Egp = materialSourcing.freightCostPerM2Egp ?? 0;
+
+    if (qtyUsedM2 === null || unitCostUsdPerM2 === null) {
+      return total;
+    }
+
+    const landedCostPerM2 =
+      unitCostUsdPerM2 * effectiveExchangeRate + (freightCostPerM2Egp ?? 0) + customsEstimate + otherCharges;
+    return total + qtyUsedM2 * landedCostPerM2;
+  }, 0);
+
+  return totalMaterialCostEgp / totalRequiredBags;
+};
+
 const mergeCostLines = (
   savedLines: CostLine[] | undefined,
   materialCostPerBagEgp: number | null,
@@ -291,6 +339,9 @@ const toForm = (
   alternativeId: payload.alternativeId,
   quantity: payload.quantity?.toString() ?? "",
   currency: payload.currency,
+  exchangeRate: payload.exchangeRate?.toString() ?? "",
+  currencySafetyFactorPercent: payload.currencySafetyFactorPercent?.toString() ?? "",
+  effectiveExchangeRate: payload.effectiveExchangeRate?.toString() ?? "",
   costLines: mergeCostLines(payload.costLines, materialCostPerBagEgp, defaults),
   totalMaterialCostPerBag: payload.totalMaterialCostPerBag?.toString() ?? "",
   totalOperatingCostPerBag: payload.totalOperatingCostPerBag?.toString() ?? "",
@@ -389,6 +440,18 @@ export const CostBuildUpPage = () => {
           tenantId: loadedTender.tenantId,
           productConfigId: loadedConfiguration.productConfigId,
           quantity: loadedConfiguration.quantity?.toString() ?? "",
+          exchangeRate: loadedTender.exchangeRate?.toString() ?? "",
+          currencySafetyFactorPercent: loadedTender.currencySafetyFactorPercent?.toString() ?? "",
+          effectiveExchangeRate:
+            loadedTender.exchangeRate !== null &&
+            loadedTender.exchangeRate !== undefined &&
+            loadedTender.currencySafetyFactorPercent !== null &&
+            loadedTender.currencySafetyFactorPercent !== undefined
+              ? (
+                  loadedTender.exchangeRate *
+                  (1 + loadedTender.currencySafetyFactorPercent / 100)
+                ).toString()
+              : "",
           costLines: mergeCostLines(undefined, materialCostPerBag, costDefaults),
         });
       } catch (reason) {
@@ -410,6 +473,21 @@ export const CostBuildUpPage = () => {
   }, [tenderId]);
 
   const quantity = numberOrNull(form.quantity);
+  const exchangeRate = numberOrNull(form.exchangeRate);
+  const currencySafetyFactorPercent = numberOrNull(form.currencySafetyFactorPercent);
+  const effectiveExchangeRate =
+    exchangeRate !== null && currencySafetyFactorPercent !== null
+      ? exchangeRate * (1 + currencySafetyFactorPercent / 100)
+      : null;
+  const overriddenMaterialCostPerBag = useMemo(
+    () =>
+      calculateMaterialCostFromOverrides({
+        materialSourcing,
+        exchangeRate,
+        currencySafetyFactorPercent,
+      }),
+    [materialSourcing, exchangeRate, currencySafetyFactorPercent],
+  );
 
   const calculatedLines = useMemo(() => {
     const editableByCode = new Map(
@@ -417,8 +495,9 @@ export const CostBuildUpPage = () => {
     );
 
     const read = (code: string) => editableByCode.get(code)?.costPerBag ?? 0;
-    const materialCostPerBag = read("A") + read("B") + read("C") + read("D");
-    const operatingCostPerBag = read("E") + read("F") + read("G") + read("G2") + read("H");
+    const materialLineCost = overriddenMaterialCostPerBag ?? read("A");
+    const materialCostPerBag = materialLineCost + read("B") + read("C") + read("D");
+    const operatingCostPerBag = read("F") + read("G") + read("G2") + read("H");
     const additionalCostPerBag = read("I_RUSH") + read("J") + read("K");
     const totalCostPricePerBag = materialCostPerBag + operatingCostPerBag + additionalCostPerBag;
     const totalCostPriceForOrder =
@@ -427,7 +506,9 @@ export const CostBuildUpPage = () => {
     return form.costLines.map((line) => {
       let value = numberOrNull(line.costPerBag);
 
-      if (line.code === "I_TOTAL") {
+      if (line.code === "A") {
+        value = overriddenMaterialCostPerBag;
+      } else if (line.code === "I_TOTAL") {
         value = materialCostPerBag;
       } else if (line.code === "II_TOTAL") {
         value = operatingCostPerBag;
@@ -442,7 +523,7 @@ export const CostBuildUpPage = () => {
           totalCostPricePerBag > 0 && value !== null ? (value / totalCostPricePerBag) * 100 : 0,
       };
     });
-  }, [form.costLines, quantity]);
+  }, [form.costLines, overriddenMaterialCostPerBag, quantity]);
 
   const totals = useMemo(() => {
     const findValue = (code: string) =>
@@ -514,7 +595,6 @@ export const CostBuildUpPage = () => {
         const accessoriesCost = currentLineValues.get("B") ?? 0;
         const threadCost = currentLineValues.get("C") ?? 0;
         const packagingCost = currentLineValues.get("D") ?? 0;
-        const labourCost = currentLineValues.get("E") ?? 0;
         const factoryOverhead = product.factoryOverheadPerBag ?? (currentLineValues.get("F") ?? 0);
         const manufacturingOverhead =
           product.manufacturingOverheadPerBag ?? (currentLineValues.get("G") ?? 0);
@@ -528,7 +608,7 @@ export const CostBuildUpPage = () => {
         const materialPerBag =
           (sourcedMaterialCostPerBag ?? 0) + accessoriesCost + threadCost + packagingCost;
         const operatingPerBag =
-          labourCost + factoryOverhead + manufacturingOverhead + managementOverhead + salesCost;
+          factoryOverhead + manufacturingOverhead + managementOverhead + salesCost;
         const additionalPerBag = rushCost + transportationCost + installationCost;
         const totalPerBag = materialPerBag + operatingPerBag + additionalPerBag;
 
@@ -564,7 +644,7 @@ export const CostBuildUpPage = () => {
         title: "Operating Cost Breakdown",
         description: "Labour and overhead defaults come from product master data and stay editable here.",
         totalCode: "II_TOTAL",
-        rows: calculatedLines.filter((line) => ["E", "F", "G", "G2", "H"].includes(line.code)),
+        rows: calculatedLines.filter((line) => ["F", "G", "G2", "H"].includes(line.code)),
       },
       {
         id: "additional",
@@ -597,6 +677,10 @@ export const CostBuildUpPage = () => {
     }));
   };
 
+  const updateField = <K extends keyof CostBuildUpForm>(key: K, value: CostBuildUpForm[K]) => {
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
   const payload = useMemo<CostBuildUp>(
     () => ({
       entityType: "COST_BUILDUP",
@@ -606,6 +690,9 @@ export const CostBuildUpPage = () => {
       alternativeId: form.alternativeId || "base",
       quantity,
       currency: "EGP",
+      exchangeRate,
+      currencySafetyFactorPercent,
+      effectiveExchangeRate,
       costLines: calculatedLines.map((line) => ({
         code: line.code,
         category: line.category,
@@ -622,7 +709,19 @@ export const CostBuildUpPage = () => {
       createdAt: "",
       updatedAt: "",
     }),
-    [form.tenantId, form.productConfigId, form.alternativeId, quantity, tenderId, productConfiguration, calculatedLines, totals],
+    [
+      form.tenantId,
+      form.productConfigId,
+      form.alternativeId,
+      quantity,
+      tenderId,
+      productConfiguration,
+      exchangeRate,
+      currencySafetyFactorPercent,
+      effectiveExchangeRate,
+      calculatedLines,
+      totals,
+    ],
   );
 
   const save = async (mode: "draft" | "continue") => {
@@ -939,6 +1038,71 @@ export const CostBuildUpPage = () => {
                           No material sourcing detail is available yet.
                         </div>
                       )}
+                    </div>
+                  </section>
+
+                  <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
+                    <div className="mb-4 flex items-start justify-between gap-4">
+                      <div>
+                        <h3 className="text-base font-semibold text-slate-900">Landed Cost Inputs</h3>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Exchange defaults come from Tender Intake. You can override them here and the sourced fabric cost will recalculate.
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+                        <Calculator className="h-5 w-5" />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Exchange Rate
+                        <Input
+                          inputMode="decimal"
+                          value={form.exchangeRate}
+                          onChange={(event) => updateField("exchangeRate", event.target.value)}
+                        />
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Currency Safety Factor %
+                        <Input
+                          inputMode="decimal"
+                          value={form.currencySafetyFactorPercent}
+                          onChange={(event) =>
+                            updateField("currencySafetyFactorPercent", event.target.value)
+                          }
+                        />
+                      </label>
+                      <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-slate-700">
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                          Effective Exchange Rate
+                        </p>
+                        <p className="mt-2 font-semibold text-slate-900">
+                          {formatMetric(effectiveExchangeRate, 3)}
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Tender default: {formatMetric(
+                            tender?.exchangeRate !== null &&
+                              tender?.exchangeRate !== undefined &&
+                              tender?.currencySafetyFactorPercent !== null &&
+                              tender?.currencySafetyFactorPercent !== undefined
+                              ? tender.exchangeRate * (1 + tender.currencySafetyFactorPercent / 100)
+                              : null,
+                            3,
+                          )}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-slate-700">
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                          Freight Cost / m²
+                        </p>
+                        <p className="mt-2 font-semibold text-slate-900">
+                          {formatMetric(materialSourcing?.freightCostPerM2Egp ?? null, 2, " EGP")}
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Managed in Material Sourcing & Costing.
+                        </p>
+                      </div>
                     </div>
                   </section>
 

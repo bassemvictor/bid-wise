@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Plus, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Plus, Save, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -33,6 +33,24 @@ type AlternativesForm = {
   baseCostPerBag: string;
   notes: string;
   scenarios: AlternativeScenarioForm[];
+};
+
+type ScenarioDrawerState = {
+  mode: "add" | "edit";
+  scenarioId: string;
+};
+
+type CalculatedScenario = {
+  scenarioId: string;
+  label: string;
+  profitPercent: number | null;
+  factorOfSafetyPercent: number | null;
+  customerCommissionPercent: number | null;
+  salesPersonCommissionPercent: number | null;
+  markupPercent: number | null;
+  pricePerBag: number | null;
+  totalPrice: number | null;
+  notes: string;
 };
 
 const numberOrNull = (value: string) => {
@@ -99,12 +117,162 @@ const toForm = (payload: ScenarioAlternative): AlternativesForm => ({
       : [createScenario(0)],
 });
 
+const ScenarioDrawer = ({
+  state,
+  draft,
+  preview,
+  onClose,
+  onSave,
+  onDelete,
+  onUpdate,
+}: {
+  state: ScenarioDrawerState | null;
+  draft: AlternativeScenarioForm | null;
+  preview: CalculatedScenario | null;
+  onClose: () => void;
+  onSave: () => void;
+  onDelete: (() => void) | null;
+  onUpdate: (patch: Partial<AlternativeScenarioForm>) => void;
+}) => {
+  if (!state || !draft || !preview) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] flex justify-end bg-slate-950/30">
+      <button
+        aria-label="Close scenario drawer overlay"
+        className="absolute inset-0"
+        onClick={onClose}
+        type="button"
+      />
+      <aside className="relative z-10 flex h-full w-full flex-col border-l border-border bg-white shadow-2xl sm:max-w-xl">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-5">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">
+              {state.mode === "add" ? "Add Scenario" : "Edit Scenario"}
+            </h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Fine-tune the pricing assumptions for this scenario here.
+            </p>
+          </div>
+          <button
+            className="rounded-xl border border-border bg-white p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-5">
+          <div className="space-y-5">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-2xl border border-border bg-slate-50 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Markup</p>
+                <p className="mt-2 text-sm font-semibold text-slate-900">
+                  {formatMetric(preview.markupPercent, 2, "%")}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-border bg-slate-50 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Price / Bag</p>
+                <p className="mt-2 text-sm font-semibold text-slate-900">
+                  {formatMetric(preview.pricePerBag, 2, " EGP")}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-border bg-slate-50 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Price</p>
+                <p className="mt-2 text-sm font-semibold text-slate-900">
+                  {formatMetric(preview.totalPrice, 2, " EGP")}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="space-y-2 text-sm font-medium text-slate-700 sm:col-span-2">
+                Scenario Name
+                <Input
+                  value={draft.label}
+                  onChange={(event) => onUpdate({ label: event.target.value })}
+                />
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Profit %
+                <Input
+                  inputMode="decimal"
+                  value={draft.profitPercent}
+                  onChange={(event) => onUpdate({ profitPercent: event.target.value })}
+                />
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Factor of Safety %
+                <Input
+                  inputMode="decimal"
+                  value={draft.factorOfSafetyPercent}
+                  onChange={(event) => onUpdate({ factorOfSafetyPercent: event.target.value })}
+                />
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Customer Commission %
+                <Input
+                  inputMode="decimal"
+                  value={draft.customerCommissionPercent}
+                  onChange={(event) => onUpdate({ customerCommissionPercent: event.target.value })}
+                />
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Sales Person Commission %
+                <Input
+                  inputMode="decimal"
+                  value={draft.salesPersonCommissionPercent}
+                  onChange={(event) => onUpdate({ salesPersonCommissionPercent: event.target.value })}
+                />
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700 sm:col-span-2">
+                Notes
+                <Textarea
+                  rows={4}
+                  value={draft.notes}
+                  onChange={(event) => onUpdate({ notes: event.target.value })}
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="border-t border-border px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm text-muted-foreground">
+              Save this scenario to update the summary and comparison below.
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              {onDelete ? (
+                <Button onClick={onDelete} type="button" variant="ghost">
+                  <Trash2 className="h-4 w-4" />
+                  Remove
+                </Button>
+              ) : null}
+              <Button onClick={onClose} type="button" variant="outline">
+                Cancel
+              </Button>
+              <Button onClick={onSave} type="button">
+                Save Scenario
+              </Button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+};
+
 export const AlternativesPage = () => {
   const navigate = useNavigate();
   const { tenderId = "" } = useParams();
   const [form, setForm] = useState<AlternativesForm>(() => initialForm(tenderId));
   const [tender, setTender] = useState<TenderRequest | null>(null);
   const [costBuildUp, setCostBuildUp] = useState<CostBuildUp | null>(null);
+  const [drawerState, setDrawerState] = useState<ScenarioDrawerState | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -193,7 +361,7 @@ export const AlternativesPage = () => {
   const baseCostPerBag = numberOrNull(form.baseCostPerBag);
 
   const scenarios = useMemo(
-    () =>
+    (): CalculatedScenario[] =>
       form.scenarios.map((scenario) => {
         const profitPercent = numberOrNull(scenario.profitPercent) ?? 0;
         const factorOfSafetyPercent = numberOrNull(scenario.factorOfSafetyPercent) ?? 0;
@@ -231,6 +399,22 @@ export const AlternativesPage = () => {
     [scenarios],
   );
 
+  const activeDrawerScenario = useMemo(
+    () =>
+      drawerState
+        ? form.scenarios.find((scenario) => scenario.scenarioId === drawerState.scenarioId) ?? null
+        : null,
+    [drawerState, form.scenarios],
+  );
+
+  const activeDrawerPreview = useMemo(
+    () =>
+      drawerState
+        ? scenarios.find((scenario) => scenario.scenarioId === drawerState.scenarioId) ?? null
+        : null,
+    [drawerState, scenarios],
+  );
+
   const updateScenario = (scenarioId: string, patch: Partial<AlternativeScenarioForm>) => {
     setForm((current) => ({
       ...current,
@@ -241,10 +425,15 @@ export const AlternativesPage = () => {
   };
 
   const addScenario = () => {
+    const nextScenario = createScenario(form.scenarios.length);
     setForm((current) => ({
       ...current,
-      scenarios: [...current.scenarios, createScenario(current.scenarios.length)],
+      scenarios: [...current.scenarios, nextScenario],
     }));
+    setDrawerState({
+      mode: "add",
+      scenarioId: nextScenario.scenarioId,
+    });
   };
 
   const removeScenario = (scenarioId: string) => {
@@ -255,6 +444,33 @@ export const AlternativesPage = () => {
           ? current.scenarios
           : current.scenarios.filter((scenario) => scenario.scenarioId !== scenarioId),
     }));
+  };
+
+  const openScenarioDrawer = (scenarioId: string) => {
+    setDrawerState({
+      mode: "edit",
+      scenarioId,
+    });
+  };
+
+  const closeScenarioDrawer = () => {
+    if (drawerState?.mode === "add") {
+      const scenario = form.scenarios.find((entry) => entry.scenarioId === drawerState.scenarioId);
+      const isBlank =
+        scenario &&
+        !scenario.profitPercent.trim() &&
+        !scenario.factorOfSafetyPercent.trim() &&
+        !scenario.customerCommissionPercent.trim() &&
+        !scenario.salesPersonCommissionPercent.trim() &&
+        !scenario.notes.trim() &&
+        scenario.label.trim() === `Scenario ${form.scenarios.length}`;
+
+      if (isBlank && form.scenarios.length > 1) {
+        removeScenario(drawerState.scenarioId);
+      }
+    }
+
+    setDrawerState(null);
   };
 
   const payload = useMemo<ScenarioAlternative>(
@@ -296,6 +512,25 @@ export const AlternativesPage = () => {
     }
 
     return true;
+  };
+
+  const saveDrawerScenario = () => {
+    if (!activeDrawerScenario?.label.trim()) {
+      setError("Each scenario needs a scenario name.");
+      return;
+    }
+
+    setError("");
+    setDrawerState(null);
+  };
+
+  const removeDrawerScenario = () => {
+    if (!drawerState) {
+      return;
+    }
+
+    removeScenario(drawerState.scenarioId);
+    setDrawerState(null);
   };
 
   const save = async (mode: "draft" | "continue") => {
@@ -378,9 +613,9 @@ export const AlternativesPage = () => {
               <div className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
                   <div>
-                    <h3 className="text-base font-semibold text-slate-900">Scenario Builder</h3>
+                    <h3 className="text-base font-semibold text-slate-900">Scenarios</h3>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Create one or more alternatives and compare the resulting bag price and total order value.
+                      Keep the page focused on scenario summaries, then open a side drawer to add or edit details.
                     </p>
                   </div>
                   <Button onClick={addScenario} type="button">
@@ -389,93 +624,45 @@ export const AlternativesPage = () => {
                   </Button>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {scenarios.map((scenario, index) => (
-                    <div key={scenario.scenarioId} className="rounded-2xl border border-border bg-white p-4">
-                      <div className="mb-4 flex items-center justify-between gap-3">
-                        <div>
+                    <div
+                      key={scenario.scenarioId}
+                      className="rounded-2xl border border-border bg-white px-4 py-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="min-w-0">
                           <p className="text-sm font-semibold text-slate-900">
                             {scenario.label || `Scenario ${index + 1}`}
                           </p>
-                          <p className="text-xs text-muted-foreground">
-                            Total markup: {formatMetric(scenario.markupPercent, 2, "%")}
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Markup {formatMetric(scenario.markupPercent, 2, "%")} · Profit{" "}
+                            {formatMetric(scenario.profitPercent, 2, "%")} · Safety{" "}
+                            {formatMetric(scenario.factorOfSafetyPercent, 2, "%")}
                           </p>
                         </div>
-                        <Button
-                          onClick={() => removeScenario(scenario.scenarioId)}
-                          type="button"
-                          variant="ghost"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                        <label className="space-y-2 text-sm font-medium text-slate-700 xl:col-span-2">
-                          Scenario Name
-                          <Input
-                            value={scenario.label}
-                            onChange={(event) => updateScenario(scenario.scenarioId, { label: event.target.value })}
-                          />
-                        </label>
-                        <label className="space-y-2 text-sm font-medium text-slate-700">
-                          Profit %
-                          <Input
-                            inputMode="decimal"
-                            value={form.scenarios.find((entry) => entry.scenarioId === scenario.scenarioId)?.profitPercent ?? ""}
-                            onChange={(event) => updateScenario(scenario.scenarioId, { profitPercent: event.target.value })}
-                          />
-                        </label>
-                        <label className="space-y-2 text-sm font-medium text-slate-700">
-                          Factor of Safety %
-                          <Input
-                            inputMode="decimal"
-                            value={form.scenarios.find((entry) => entry.scenarioId === scenario.scenarioId)?.factorOfSafetyPercent ?? ""}
-                            onChange={(event) =>
-                              updateScenario(scenario.scenarioId, { factorOfSafetyPercent: event.target.value })
-                            }
-                          />
-                        </label>
-                        <label className="space-y-2 text-sm font-medium text-slate-700">
-                          Customer Commission %
-                          <Input
-                            inputMode="decimal"
-                            value={form.scenarios.find((entry) => entry.scenarioId === scenario.scenarioId)?.customerCommissionPercent ?? ""}
-                            onChange={(event) =>
-                              updateScenario(scenario.scenarioId, { customerCommissionPercent: event.target.value })
-                            }
-                          />
-                        </label>
-                        <label className="space-y-2 text-sm font-medium text-slate-700">
-                          Sales Person Commission %
-                          <Input
-                            inputMode="decimal"
-                            value={form.scenarios.find((entry) => entry.scenarioId === scenario.scenarioId)?.salesPersonCommissionPercent ?? ""}
-                            onChange={(event) =>
-                              updateScenario(scenario.scenarioId, { salesPersonCommissionPercent: event.target.value })
-                            }
-                          />
-                        </label>
-                        <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Price / Bag</p>
-                          <p className="mt-2 text-sm font-semibold text-slate-900">
-                            {formatMetric(scenario.pricePerBag, 2, " EGP")}
-                          </p>
-                        </div>
-                        <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Price</p>
-                          <p className="mt-2 text-sm font-semibold text-slate-900">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="neutral">
+                            {formatMetric(scenario.pricePerBag, 2, " EGP / bag")}
+                          </Badge>
+                          <Badge variant="default">
                             {formatMetric(scenario.totalPrice, 2, " EGP")}
-                          </p>
+                          </Badge>
+                          <Button
+                            onClick={() => openScenarioDrawer(scenario.scenarioId)}
+                            type="button"
+                            variant="outline"
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            onClick={() => removeScenario(scenario.scenarioId)}
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
-                        <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2 xl:col-span-5">
-                          Notes
-                          <Textarea
-                            rows={2}
-                            value={scenario.notes}
-                            onChange={(event) => updateScenario(scenario.scenarioId, { notes: event.target.value })}
-                          />
-                        </label>
                       </div>
                     </div>
                   ))}
@@ -534,9 +721,6 @@ export const AlternativesPage = () => {
 
           <div className="flex flex-col gap-4 rounded-[1.2rem] border border-border bg-white p-4 md:flex-row md:items-center md:justify-between">
             <div className="text-sm">
-              <p className="font-medium text-slate-900">
-                Save one or more scenarios here before moving to the pricing approval stage.
-              </p>
               {message ? <p className="mt-2 text-emerald-600">{message}</p> : null}
               {error ? <p className="mt-2 text-rose-600">{error}</p> : null}
             </div>
@@ -557,6 +741,22 @@ export const AlternativesPage = () => {
           </div>
         </CardContent>
       </Card>
+
+      <ScenarioDrawer
+        state={drawerState}
+        draft={activeDrawerScenario}
+        preview={activeDrawerPreview}
+        onClose={closeScenarioDrawer}
+        onDelete={form.scenarios.length > 1 && drawerState?.mode === "edit" ? removeDrawerScenario : null}
+        onSave={saveDrawerScenario}
+        onUpdate={(patch) => {
+          if (!drawerState) {
+            return;
+          }
+
+          updateScenario(drawerState.scenarioId, patch);
+        }}
+      />
     </div>
   );
 };

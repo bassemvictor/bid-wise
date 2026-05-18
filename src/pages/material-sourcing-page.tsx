@@ -11,6 +11,7 @@ import {
   Save,
   Trash2,
   Truck,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -20,7 +21,6 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
-import { Select } from "../components/ui/select";
 import { api, ApiError, isApiConfigured } from "../lib/api";
 import type {
   BagBodySourcingSelection,
@@ -57,6 +57,7 @@ type SelectedSourceForm = {
 type ComponentSourcingForm = {
   componentId: string;
   componentName: string;
+  componentType?: string;
   productId: string;
   productName: string;
   materialId: string;
@@ -108,6 +109,12 @@ type SourceLineMetrics = {
   capacityBags: number | null;
   remainingCapacityBags: number | null;
   remainingRollLengthM: number | null;
+};
+
+type SourceDrawerState = {
+  componentIndex: number;
+  sourceIndex?: number;
+  draftSource: SelectedSourceForm;
 };
 
 type ComponentMetrics = {
@@ -183,6 +190,15 @@ const initialForm = (tenderId: string): MaterialSourcingForm => ({
   componentSelections: [],
 });
 
+const applyTenderRateDefaults = (
+  form: MaterialSourcingForm,
+  tender: TenderRequest | null,
+): MaterialSourcingForm => ({
+  ...form,
+  exchangeRate: tender?.exchangeRate?.toString() ?? "",
+  currencySafetyFactorPercent: tender?.currencySafetyFactorPercent?.toString() ?? "",
+});
+
 const numberOrNull = (value: string) => {
   if (value.trim() === "") {
     return null;
@@ -194,6 +210,162 @@ const numberOrNull = (value: string) => {
 
 const formatMetric = (value: number | null, digits = 2, suffix = "") =>
   value === null || !Number.isFinite(value) ? "Not calculated" : `${value.toFixed(digits)}${suffix}`;
+
+const buildSelectedSourceFromOption = (option: SourceOption): SelectedSourceForm => ({
+  sourceId: option.sourceId,
+  sourceName: option.sourceName,
+  sourceType: option.sourceType,
+  supplierId: option.supplierId,
+  materialId: option.materialId,
+  rollWidthM: option.rollWidthM?.toString() ?? "",
+  rollLengthM: option.rollLengthM?.toString() ?? "",
+  rollCount: "1",
+  allocatedBags: "",
+  unitCostUsdPerM2: option.unitCostUsdPerM2?.toString() ?? "",
+  leadTimeDays: option.leadTimeDays?.toString() ?? "",
+  customsEstimate: option.customsEstimate?.toString() ?? "",
+});
+
+const upsertSelectedSource = (
+  component: ComponentSourcingForm,
+  source: SelectedSourceForm,
+  sourcingStrategy: MaterialSourcingForm["sourcingStrategy"],
+  sourceIndex?: number,
+) => {
+  if (sourcingStrategy === "single-source") {
+    return {
+      ...component,
+      selectedSources: [
+        {
+          ...source,
+          allocatedBags: component.requestedQuantity,
+        },
+      ],
+    };
+  }
+
+  if (sourceIndex !== undefined) {
+    return {
+      ...component,
+      selectedSources: component.selectedSources.map((item, index) =>
+        index === sourceIndex ? source : item,
+      ),
+    };
+  }
+
+  const existingIndex = component.selectedSources.findIndex((item) => item.sourceId === source.sourceId);
+  if (existingIndex >= 0) {
+    return {
+      ...component,
+      selectedSources: component.selectedSources.map((item, index) =>
+        index === existingIndex ? source : item,
+      ),
+    };
+  }
+
+  return {
+    ...component,
+    selectedSources: [...component.selectedSources, source],
+  };
+};
+
+const calculateSourceLineMetrics = ({
+  component,
+  source,
+  sourcingStrategy,
+  requestedQuantity,
+  bagWidthMm,
+  bagLengthWithAllowanceMm,
+  existingUsedBags,
+  effectiveExchangeRate,
+  freightCostPerM2Egp,
+  otherChargesPerM2Egp,
+}: {
+  component: ComponentSourcingForm;
+  source: SelectedSourceForm;
+  sourcingStrategy: MaterialSourcingForm["sourcingStrategy"];
+  requestedQuantity: number | null;
+  bagWidthMm: number | null;
+  bagLengthWithAllowanceMm: number | null;
+  existingUsedBags: number;
+  effectiveExchangeRate: number | null;
+  freightCostPerM2Egp: number | null;
+  otherChargesPerM2Egp: number | null;
+}) => {
+  const rollWidthM = numberOrNull(source.rollWidthM);
+  const rollLengthM = numberOrNull(source.rollLengthM);
+  const unitCostUsdPerM2 = numberOrNull(source.unitCostUsdPerM2);
+  const customsEstimate = numberOrNull(source.customsEstimate) ?? 0;
+  const rollCount =
+    source.sourceType === "stock" ? 1 : Math.max(1, Math.floor(numberOrNull(source.rollCount) ?? 1));
+  const bagsAcrossRollWidth =
+    rollWidthM !== null && bagWidthMm !== null && bagWidthMm > 0
+      ? Math.floor(rollWidthM / bagWidthMm)
+      : null;
+  const bagsAlongRollLength =
+    rollLengthM !== null && bagLengthWithAllowanceMm !== null && bagLengthWithAllowanceMm > 0
+      ? Math.floor(rollLengthM / bagLengthWithAllowanceMm)
+      : null;
+  const bagsPerRoll =
+    bagsAcrossRollWidth !== null &&
+    bagsAlongRollLength !== null &&
+    bagsAcrossRollWidth > 0 &&
+    bagsAlongRollLength > 0
+      ? bagsAcrossRollWidth * bagsAlongRollLength
+      : null;
+  const actualAreaPerBagM2 =
+    rollWidthM !== null && rollLengthM !== null && bagsPerRoll !== null && bagsPerRoll > 0
+      ? (rollWidthM * rollLengthM) / bagsPerRoll
+      : null;
+  const capacityBags = bagsPerRoll !== null ? bagsPerRoll * rollCount : null;
+  const requestedAllocatedBags =
+    sourcingStrategy === "combine-sources" ? numberOrNull(source.allocatedBags) : requestedQuantity;
+  const usedBeforeThisLine = source.sourceType === "stock" ? existingUsedBags : 0;
+  const remainingCapacityForThisLine =
+    capacityBags !== null ? Math.max(capacityBags - usedBeforeThisLine, 0) : null;
+  const allocatedBags =
+    remainingCapacityForThisLine !== null
+      ? requestedAllocatedBags === null
+        ? Math.min(requestedQuantity ?? remainingCapacityForThisLine, remainingCapacityForThisLine)
+        : Math.min(requestedAllocatedBags, remainingCapacityForThisLine)
+      : null;
+  const qtyUsedM2 =
+    actualAreaPerBagM2 !== null && allocatedBags !== null ? actualAreaPerBagM2 * allocatedBags : null;
+  const landedCostPerM2Egp =
+    unitCostUsdPerM2 !== null && effectiveExchangeRate !== null
+      ? unitCostUsdPerM2 * effectiveExchangeRate +
+        (freightCostPerM2Egp ?? 0) +
+        customsEstimate +
+        (otherChargesPerM2Egp ?? 0)
+      : null;
+  const totalCostEgp =
+    qtyUsedM2 !== null && landedCostPerM2Egp !== null ? qtyUsedM2 * landedCostPerM2Egp : null;
+  const usedRows =
+    allocatedBags !== null && bagsAcrossRollWidth !== null && bagsAcrossRollWidth > 0
+      ? Math.ceil(allocatedBags / bagsAcrossRollWidth)
+      : null;
+  const totalRows = bagsAlongRollLength !== null ? bagsAlongRollLength * rollCount : null;
+  const remainingRows =
+    totalRows !== null && usedRows !== null ? Math.max(totalRows - usedRows, 0) : null;
+  const remainingRollLengthM =
+    remainingRows !== null && bagLengthWithAllowanceMm !== null
+      ? remainingRows * bagLengthWithAllowanceMm
+      : null;
+
+  return {
+    component,
+    source,
+    allocatedBags,
+    actualAreaPerBagM2,
+    totalCostEgp,
+    capacityBags,
+    remainingCapacityBags:
+      remainingCapacityForThisLine !== null && allocatedBags !== null
+        ? Math.max(remainingCapacityForThisLine - allocatedBags, 0)
+        : remainingCapacityForThisLine,
+    remainingRollLengthM,
+  };
+};
 
 const getQuantityCoverageBadge = (
   requestedQuantity: number | null,
@@ -241,8 +413,10 @@ const getTotalCostBadge = (totalMaterialCostEgp: number | null, allocatedQuantit
 };
 
 const isBagBody = (component: Product["components"][number]) =>
-  component.componentType.trim().toLowerCase() === "bag body" ||
-  component.componentName.trim().toLowerCase() === "bag body";
+  component.componentType.trim().toLowerCase().includes("bag body") ||
+  component.componentName.trim().toLowerCase().includes("bag body");
+
+const isSourcedComponent = (_component: Product["components"][number]) => true;
 
 const resolveMaterialId = (value: string, materials: Material[]) => {
   const match = materials.find(
@@ -254,21 +428,30 @@ const resolveMaterialId = (value: string, materials: Material[]) => {
 const resolveMaterialLabel = (value: string, materials: Material[]) =>
   materials.find((material) => material.materialId === value)?.materialName ?? value;
 
+const isBagStyleComponent = (component: ComponentSourcingForm) =>
+  Boolean(
+    component.bagDiameterMm.trim() ||
+      component.bagLengthMm.trim() ||
+      component.seamAllowanceMm.trim() ||
+      component.topBottomAllowanceMm.trim(),
+  );
+
 const buildComponentSelectionsFromProducts = (
   configuration: ProductConfiguration,
   materials: Material[],
 ): ComponentSourcingForm[] =>
   configuration.productSnapshots.flatMap((product) => {
-    const bagBodyComponents = product.components.filter(isBagBody);
+    const sourcedComponents = product.components.filter(isSourcedComponent);
     const productFallbackMaterialId =
-      bagBodyComponents
+      sourcedComponents
         .map((component) => resolveMaterialId(component.material, materials))
         .find(Boolean) ||
       resolveMaterialId(configuration.mainFabricMaterialId, materials);
 
-    return bagBodyComponents.map((component) => ({
+    return sourcedComponents.map((component) => ({
       componentId: component.componentId,
       componentName: component.componentName,
+      componentType: component.componentType,
       productId: product.productId,
       productName: product.productName,
       materialId: resolveMaterialId(component.material, materials) || productFallbackMaterialId,
@@ -306,9 +489,9 @@ const buildComponentSelectionFromSnapshot = (
   configuration: ProductConfiguration,
   materials: Material[],
 ): ComponentSourcingForm => {
-  const bagBodyComponents = product.components.filter(isBagBody);
+  const sourcedComponents = product.components.filter(isSourcedComponent);
   const productFallbackMaterialId =
-    bagBodyComponents
+    sourcedComponents
       .map((entry) => resolveMaterialId(entry.material, materials))
       .find(Boolean) ||
     resolveMaterialId(configuration.mainFabricMaterialId, materials);
@@ -316,6 +499,7 @@ const buildComponentSelectionFromSnapshot = (
   return {
     componentId: component.componentId,
     componentName: component.componentName,
+    componentType: component.componentType,
     productId: product.productId,
     productName: product.productName,
     materialId: resolveMaterialId(component.material, materials) || productFallbackMaterialId,
@@ -360,6 +544,7 @@ const toForm = (payload: MaterialSourceSelection): MaterialSourcingForm => ({
     payload.componentSelections?.map((selection) => ({
       componentId: selection.componentId,
       componentName: selection.componentName,
+      componentType: undefined,
       productId: selection.productId,
       productName: selection.productName,
       materialId: selection.materialId,
@@ -440,58 +625,273 @@ const buildSourceOptions = (
   return [...stockSources, ...importSources];
 };
 
-const MaterialRollSketch = ({
-  count,
+const SourceManagementDrawer = ({
+  component,
+  componentIndex,
+  metrics,
+  draftSource,
+  draftMetrics,
+  sourcingStrategy,
+  onClose,
+  onDelete,
+  onSave,
+  onRemoveSource,
+  onUpdateDraft,
 }: {
-  count: number;
-}) => (
-  <div className="rounded-[1.25rem] border border-dashed border-border bg-slate-50 p-5">
-    <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-800">
-      <PackageSearch className="h-4 w-4 text-primary" />
-      Roll Nesting Preview
-    </div>
-    <div className="grid gap-4 lg:grid-cols-[1fr_0.9fr]">
-      <div className="rounded-3xl bg-white p-4">
-        <svg viewBox="0 0 360 180" className="h-44 w-full">
-          <rect x="18" y="22" width="324" height="136" rx="20" fill="#dbeafe" stroke="#2563eb" strokeWidth="2" />
-          {Array.from({ length: 9 }).map((_, index) => {
-            const column = index % 3;
-            const row = Math.floor(index / 3);
+  component: ComponentSourcingForm;
+  componentIndex: number;
+  metrics: ComponentMetrics | undefined;
+  draftSource: SelectedSourceForm;
+  draftMetrics: ReturnType<typeof calculateSourceLineMetrics>;
+  sourcingStrategy: "single-source" | "combine-sources";
+  onClose: () => void;
+  onDelete?: () => void;
+  onSave: () => void;
+  onRemoveSource: (componentIndex: number, sourceIndex: number) => void;
+  onUpdateDraft: (patch: Partial<SelectedSourceForm>) => void;
+}) => {
+  const isBagStyle = isBagStyleComponent(component);
+  const allocatedQuantity =
+    metrics?.sourceMetrics.reduce((total, line) => total + (line.allocatedBags ?? 0), 0) ?? 0;
+  const quantityCoverageBadge = getQuantityCoverageBadge(metrics?.requestedQuantity ?? null, allocatedQuantity);
+  const totalCostBadge = getTotalCostBadge(draftMetrics.totalCostEgp ?? null, draftMetrics.allocatedBags ?? 0);
+  const optionCoverageBadge = getQuantityCoverageBadge(
+    numberOrNull(component.requestedQuantity),
+    draftMetrics.allocatedBags ?? 0,
+  );
 
-            return (
-              <rect
-                key={index}
-                x={34 + column * 96}
-                y={34 + row * 34}
-                width="78"
-                height="28"
-                rx="10"
-                fill={index % 2 === 0 ? "#93c5fd" : "#bfdbfe"}
-                stroke="#1d4ed8"
-                strokeWidth="1.5"
-              />
-            );
-          })}
-          <text x="180" y="16" textAnchor="middle" fontSize="12" fill="#0f172a">
-            Roll Width
-          </text>
-          <text x="180" y="172" textAnchor="middle" fontSize="12" fill="#0f172a">
-            Bag Bodies Nested Along Roll Length
-          </text>
-        </svg>
-      </div>
-      <div className="grid gap-3">
-        <div className="rounded-2xl border border-border bg-white p-4">
-          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Selected Roll Lines</p>
-          <p className="mt-2 text-sm font-medium text-slate-900">{count} line(s)</p>
+  return (
+    <div className="fixed inset-0 z-[70] flex justify-end bg-slate-950/30">
+      <button
+        aria-label="Close source drawer overlay"
+        className="absolute inset-0"
+        onClick={onClose}
+        type="button"
+      />
+      <aside className="relative z-10 flex h-full w-full flex-col border-l border-border bg-white shadow-2xl sm:max-w-[640px]">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-5">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">{draftSource.sourceName}</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {component.productName} · {component.componentName} ·{" "}
+              {draftSource.sourceType === "stock" ? "In Stock" : "Import"}
+            </p>
+          </div>
+          <button
+            className="rounded-xl border border-border bg-white p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <div className="rounded-2xl border border-border bg-white p-4 text-sm text-muted-foreground">
-          Actual area per bag is derived from the roll width and roll length fit counts, rounded down on both axes.
+
+        <div className="flex-1 overflow-y-auto px-5 py-5">
+          <div className="space-y-5">
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="rounded-2xl border border-border bg-slate-50 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                  {isBagStyle ? "Bag Width" : "Requested Qty"}
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-900">
+                  {isBagStyle
+                    ? formatMetric(metrics?.bagWidthMm ?? null, 4, " m")
+                    : formatMetric(numberOrNull(component.requestedQuantity), 0, " units")}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-border bg-slate-50 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                  {isBagStyle ? "Actual Area / Bag" : "Lead Time"}
+                </p>
+                <p className="mt-2 text-sm font-semibold text-slate-900">
+                  {isBagStyle
+                    ? formatMetric(draftMetrics.actualAreaPerBagM2 ?? null, 4, " m²")
+                    : formatMetric(numberOrNull(draftSource.leadTimeDays), 0, " days")}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-border bg-slate-50 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Cost</p>
+                <div className="mt-2">
+                  <Badge variant={totalCostBadge.variant}>{totalCostBadge.label}</Badge>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-border bg-slate-50 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                  {isBagStyle ? "Coverage" : "Source Type"}
+                </p>
+                <div className="mt-2">
+                  {isBagStyle ? (
+                    <Badge variant={optionCoverageBadge.variant}>{optionCoverageBadge.label}</Badge>
+                  ) : (
+                    <Badge variant="neutral">{draftSource.sourceType === "stock" ? "Stock" : "Import"}</Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[1.15rem] border border-border bg-slate-50/80 p-4">
+              <div className="mb-4">
+                <h4 className="text-sm font-semibold text-slate-900">Option Details</h4>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Review the selected sourcing option here, then save it back to the main page.
+                </p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-2 text-sm font-medium text-slate-700">
+                  Roll Width (m)
+                  <Input
+                    inputMode="decimal"
+                    value={draftSource.rollWidthM}
+                    onChange={(event) => onUpdateDraft({ rollWidthM: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium text-slate-700">
+                  Roll Length (m)
+                  <Input
+                    inputMode="decimal"
+                    value={draftSource.rollLengthM}
+                    onChange={(event) => onUpdateDraft({ rollLengthM: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium text-slate-700">
+                  Roll Count
+                  <Input
+                    inputMode="numeric"
+                    disabled={draftSource.sourceType === "stock"}
+                    value={draftSource.sourceType === "stock" ? "1" : draftSource.rollCount}
+                    onChange={(event) => onUpdateDraft({ rollCount: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium text-slate-700">
+                  {isBagStyle ? "Applied Bags" : "Allocated Qty"}
+                  <Input
+                    inputMode="numeric"
+                    disabled={sourcingStrategy === "single-source"}
+                    value={
+                      sourcingStrategy === "single-source" ? component.requestedQuantity : draftSource.allocatedBags
+                    }
+                    onChange={(event) => onUpdateDraft({ allocatedBags: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium text-slate-700">
+                  Unit Cost (USD/m²)
+                  <Input
+                    inputMode="decimal"
+                    value={draftSource.unitCostUsdPerM2}
+                    onChange={(event) => onUpdateDraft({ unitCostUsdPerM2: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium text-slate-700">
+                  Lead Time (days)
+                  <Input
+                    inputMode="decimal"
+                    value={draftSource.leadTimeDays}
+                    onChange={(event) => onUpdateDraft({ leadTimeDays: event.target.value })}
+                  />
+                </label>
+                <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
+                  Customs Estimate (EGP/m²)
+                  <Input
+                    inputMode="decimal"
+                    value={draftSource.customsEstimate}
+                    onChange={(event) => onUpdateDraft({ customsEstimate: event.target.value })}
+                  />
+                </label>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-2xl border border-border bg-white px-4 py-3">
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                    {isBagStyle ? "Remaining Capacity" : "Allocated Qty"}
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
+                    {isBagStyle
+                      ? formatMetric(draftMetrics.remainingCapacityBags ?? null, 0, " bags")
+                      : formatMetric(draftMetrics.allocatedBags ?? null, 0, " units")}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-border bg-white px-4 py-3">
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                    {isBagStyle ? "Remaining Length" : "Unit Cost"}
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
+                    {isBagStyle
+                      ? formatMetric(draftMetrics.remainingRollLengthM ?? null, 2, " m")
+                      : formatMetric(numberOrNull(draftSource.unitCostUsdPerM2), 3, " USD/m²")}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {component.selectedSources.length ? (
+              <div className="rounded-[1.15rem] border border-border bg-white p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-slate-900">Saved Options</h4>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Current selections for this component stay compact here.
+                    </p>
+                  </div>
+                  <Badge variant={isBagStyle ? quantityCoverageBadge.variant : "neutral"}>
+                    {isBagStyle ? quantityCoverageBadge.label : `${component.selectedSources.length} source(s)`}
+                  </Badge>
+                </div>
+                <div className="space-y-2">
+                  {component.selectedSources.map((source, sourceIndex) => (
+                    <div
+                      key={`${component.componentId}-${source.sourceId}-${sourceIndex}`}
+                      className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-slate-50 px-4 py-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{source.sourceName}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {source.sourceType === "stock" ? "Stock" : "Import"} ·{" "}
+                          {isBagStyle
+                            ? `${source.rollWidthM || "-"} m x ${source.rollLengthM || "-"} m`
+                            : `${source.unitCostUsdPerM2 || "-"} USD/m² · ${source.leadTimeDays || "-"} days`}
+                        </p>
+                      </div>
+                      <Button
+                        onClick={() => onRemoveSource(componentIndex, sourceIndex)}
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
-      </div>
+
+        <div className="border-t border-border px-5 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm text-muted-foreground">
+              {onDelete ? "Save this option to add or update its summary line." : "Save this option to add its summary line."}
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              {onDelete ? (
+                <Button onClick={onDelete} type="button" variant="ghost">
+                  <Trash2 className="h-4 w-4" />
+                  Remove
+                </Button>
+              ) : null}
+              <Button onClick={onClose} type="button" variant="outline">
+                Cancel
+              </Button>
+              <Button onClick={onSave} type="button">
+                Save Option
+              </Button>
+            </div>
+          </div>
+        </div>
+      </aside>
     </div>
-  </div>
-);
+  );
+};
 
 export const MaterialSourcingPage = () => {
   const navigate = useNavigate();
@@ -501,6 +901,9 @@ export const MaterialSourcingPage = () => {
   const [tender, setTender] = useState<TenderRequest | null>(null);
   const [productConfiguration, setProductConfiguration] = useState<ProductConfiguration | null>(null);
   const [collapsedProducts, setCollapsedProducts] = useState<Record<string, boolean>>({});
+  const [collapsedComponents, setCollapsedComponents] = useState<Record<string, boolean>>({});
+  const [drawerState, setDrawerState] = useState<SourceDrawerState | null>(null);
+  const [sourceSearchByComponent, setSourceSearchByComponent] = useState<Record<string, string>>({});
   const [materials, setMaterials] = useState<Material[]>([]);
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [importPresets, setImportPresets] = useState<ImportPreset[]>([]);
@@ -566,15 +969,15 @@ export const MaterialSourcingPage = () => {
         setSuppliers(loadedSuppliers.filter((item) => item.active));
 
         if (saved?.componentSelections?.length) {
-          setForm(toForm(saved));
+          setForm(applyTenderRateDefaults(toForm(saved), loadedTender));
           return;
         }
 
-        setForm((current) => ({
+        setForm((current) => applyTenderRateDefaults({
           ...current,
           productConfigId: loadedConfiguration.productConfigId,
           componentSelections: buildComponentSelectionsFromProducts(loadedConfiguration, activeMaterials),
-        }));
+        }, loadedTender));
       } catch (reason) {
         if (isMounted) {
           setError(reason instanceof Error ? reason.message : "Unable to load material sourcing.");
@@ -807,6 +1210,54 @@ export const MaterialSourcingPage = () => {
     return summary;
   }, [componentMetrics, form.componentSelections]);
 
+  const drawerPreviewMetrics = useMemo(() => {
+    if (!drawerState) {
+      return null;
+    }
+
+    const component = form.componentSelections[drawerState.componentIndex];
+    const metrics = componentMetrics[drawerState.componentIndex];
+    if (!component) {
+      return null;
+    }
+
+    const bagWidthMm = metrics?.bagWidthMm ?? null;
+    const bagLengthWithAllowanceMm = metrics?.bagLengthWithAllowanceMm ?? null;
+    const requestedQuantity = numberOrNull(component.requestedQuantity);
+    const existingUsedBags =
+      drawerState.draftSource.sourceType === "stock"
+        ? Math.max(
+            (stockUsageSummary.get(drawerState.draftSource.sourceId)?.usedBags ?? 0) -
+              (drawerState.sourceIndex !== undefined
+                ? componentMetrics[drawerState.componentIndex]?.sourceMetrics[drawerState.sourceIndex]?.allocatedBags ?? 0
+                : 0),
+            0,
+          )
+        : 0;
+
+    return calculateSourceLineMetrics({
+      component,
+      source: drawerState.draftSource,
+      sourcingStrategy: form.sourcingStrategy,
+      requestedQuantity,
+      bagWidthMm,
+      bagLengthWithAllowanceMm,
+      existingUsedBags,
+      effectiveExchangeRate,
+      freightCostPerM2Egp,
+      otherChargesPerM2Egp,
+    });
+  }, [
+    componentMetrics,
+    drawerState,
+    effectiveExchangeRate,
+    form.componentSelections,
+    form.sourcingStrategy,
+    freightCostPerM2Egp,
+    otherChargesPerM2Egp,
+    stockUsageSummary,
+  ]);
+
   const componentGroups = useMemo(
     () =>
       form.componentSelections.reduce<
@@ -926,102 +1377,139 @@ export const MaterialSourcingPage = () => {
     }));
   };
 
-  const syncComponentWithProductConfiguration = (componentIndex: number) => {
+  const syncProductWithProductConfiguration = (productId: string) => {
     if (!productConfiguration) {
       setError("Load Product Configuration before syncing a product.");
       return;
     }
 
-    const currentComponent = form.componentSelections[componentIndex];
-    if (!currentComponent) {
+    const currentProductComponents = form.componentSelections.filter(
+      (component) => component.productId === productId,
+    );
+    if (!currentProductComponents.length) {
       return;
     }
 
     const productSnapshot = productConfiguration.productSnapshots.find(
-      (product) => product.productId === currentComponent.productId,
+      (product) => product.productId === productId,
     );
-    const bagBodyComponent = productSnapshot?.components.find(
-      (component) =>
-        component.componentId === currentComponent.componentId ||
-        (isBagBody(component) && component.componentName === currentComponent.componentName),
-    );
+    const sourcedComponents = productSnapshot?.components.filter(isSourcedComponent) ?? [];
 
-    if (!productSnapshot || !bagBodyComponent) {
+    if (!productSnapshot || !sourcedComponents.length) {
       setForm((current) => ({
         ...current,
-        componentSelections: current.componentSelections.filter((_, index) => index !== componentIndex),
+        componentSelections: current.componentSelections.filter(
+          (component) => component.productId !== productId,
+        ),
       }));
       setMessage(
-        `${currentComponent.productName} · ${currentComponent.componentName} is no longer in Product Configuration, so its sourcing snapshot was removed.`,
+        `${currentProductComponents[0]?.productName ?? "This product"} no longer has sourceable components in Product Configuration, so its sourcing snapshot was removed.`,
       );
       setError("");
       return;
     }
 
-    const syncedComponent = buildComponentSelectionFromSnapshot(
-      productSnapshot,
-      bagBodyComponent,
-      productConfiguration,
-      materials,
+    const syncedComponents = sourcedComponents.map((component) =>
+      buildComponentSelectionFromSnapshot(
+        productSnapshot,
+        component,
+        productConfiguration,
+        materials,
+      ),
     );
 
     setForm((current) => ({
       ...current,
-      componentSelections: current.componentSelections.map((component, index) =>
-        index === componentIndex ? syncedComponent : component,
-      ),
+      componentSelections: [
+        ...current.componentSelections.filter((component) => component.productId !== productId),
+        ...syncedComponents,
+      ],
     }));
     setMessage(
-      `${currentComponent.productName} · ${currentComponent.componentName} synced from Product Configuration. Save sourcing to rebuild downstream pricing.`,
+      `${productSnapshot.productName} synced from Product Configuration. Save sourcing to rebuild downstream pricing.`,
     );
     setError("");
   };
 
-  const addSource = (componentIndex: number, option: SourceOption) => {
+  const openSourceDrawer = (componentIndex: number, option: SourceOption) => {
+    const component = form.componentSelections[componentIndex];
+    if (!component) {
+      return;
+    }
+
+    const existingIndex =
+      form.sourcingStrategy === "single-source"
+        ? component.selectedSources.findIndex((source) => source.sourceId === option.sourceId)
+        : component.selectedSources.findIndex((source) => source.sourceId === option.sourceId);
+    const existingSource = existingIndex >= 0 ? component.selectedSources[existingIndex] : null;
+
+    setDrawerState({
+      componentIndex,
+      sourceIndex: existingIndex >= 0 ? existingIndex : undefined,
+      draftSource: existingSource ? { ...existingSource } : buildSelectedSourceFromOption(option),
+    });
+  };
+
+  const updateDrawerDraft = (patch: Partial<SelectedSourceForm>) => {
+    setDrawerState((current) =>
+      current
+        ? {
+            ...current,
+            draftSource: { ...current.draftSource, ...patch },
+          }
+        : current,
+    );
+  };
+
+  const saveDrawerSource = () => {
+    if (!drawerState) {
+      return;
+    }
+
     setForm((current) => ({
       ...current,
       componentSelections: current.componentSelections.map((component, index) =>
-        index === componentIndex
-          ? {
-              ...component,
-              selectedSources:
-                current.sourcingStrategy === "single-source"
-                  ? [
-                      {
-                        sourceId: option.sourceId,
-                        sourceName: option.sourceName,
-                        sourceType: option.sourceType,
-                        supplierId: option.supplierId,
-                        materialId: option.materialId,
-                        rollWidthM: option.rollWidthM?.toString() ?? "",
-                        rollLengthM: option.rollLengthM?.toString() ?? "",
-                        rollCount: option.sourceType === "stock" ? "1" : "1",
-                        allocatedBags: "",
-                        unitCostUsdPerM2: option.unitCostUsdPerM2?.toString() ?? "",
-                        leadTimeDays: option.leadTimeDays?.toString() ?? "",
-                        customsEstimate: option.customsEstimate?.toString() ?? "",
-                      },
-                    ]
-                  : [
-                      ...component.selectedSources,
-                      {
-                        sourceId: option.sourceId,
-                        sourceName: option.sourceName,
-                        sourceType: option.sourceType,
-                        supplierId: option.supplierId,
-                        materialId: option.materialId,
-                        rollWidthM: option.rollWidthM?.toString() ?? "",
-                        rollLengthM: option.rollLengthM?.toString() ?? "",
-                        rollCount: option.sourceType === "stock" ? "1" : "1",
-                        allocatedBags: "",
-                        unitCostUsdPerM2: option.unitCostUsdPerM2?.toString() ?? "",
-                        leadTimeDays: option.leadTimeDays?.toString() ?? "",
-                        customsEstimate: option.customsEstimate?.toString() ?? "",
-                      },
-                    ],
-            }
+        index === drawerState.componentIndex
+          ? upsertSelectedSource(
+              component,
+              drawerState.draftSource,
+              current.sourcingStrategy,
+              drawerState.sourceIndex,
+            )
           : component,
       ),
+    }));
+    setDrawerState(null);
+  };
+
+  const removeDrawerSource = () => {
+    if (!drawerState || drawerState.sourceIndex === undefined) {
+      setDrawerState(null);
+      return;
+    }
+
+    removeSource(drawerState.componentIndex, drawerState.sourceIndex);
+    setDrawerState(null);
+  };
+
+  const openSavedSourceDrawer = (componentIndex: number, sourceIndex: number) => {
+    const component = form.componentSelections[componentIndex];
+    const source = component?.selectedSources[sourceIndex];
+    if (!component || !source) {
+      return;
+    }
+
+    setDrawerState({
+      componentIndex,
+      sourceIndex,
+      draftSource: { ...source },
+    });
+  };
+
+  const updateSourceSearch = (componentId: string, value: string) => {
+    setSourceSearchByComponent((current) => ({
+      ...current,
+      [componentId]: value,
     }));
   };
 
@@ -1029,6 +1517,13 @@ export const MaterialSourcingPage = () => {
     setCollapsedProducts((current) => ({
       ...current,
       [productId]: !current[productId],
+    }));
+  };
+
+  const toggleComponentCollapse = (componentKey: string) => {
+    setCollapsedComponents((current) => ({
+      ...current,
+      [componentKey]: !current[componentKey],
     }));
   };
 
@@ -1127,8 +1622,16 @@ export const MaterialSourcingPage = () => {
   ]);
 
   const rollPayload = useMemo<RollCalculation>(() => {
-    const firstComponent = form.componentSelections[0];
-    const firstMetrics = componentMetrics[0];
+    const preferredComponentIndex = form.componentSelections.findIndex(
+      (component) =>
+        component.bagDiameterMm.trim() ||
+        component.bagLengthMm.trim() ||
+        component.seamAllowanceMm.trim() ||
+        component.topBottomAllowanceMm.trim(),
+    );
+    const resolvedIndex = preferredComponentIndex >= 0 ? preferredComponentIndex : 0;
+    const firstComponent = form.componentSelections[resolvedIndex];
+    const firstMetrics = componentMetrics[resolvedIndex];
 
     return {
       entityType: "ROLL_CALCULATION",
@@ -1167,7 +1670,19 @@ export const MaterialSourcingPage = () => {
     }
 
     if (!form.componentSelections.length) {
-      setError("Add at least one Bag Body component in product configuration first.");
+      setError("Add at least one component in product configuration first.");
+      setSaveMode(null);
+      return;
+    }
+
+    if (!form.exchangeRate.trim() || !form.currencySafetyFactorPercent.trim()) {
+      setError("Exchange Rate and Currency Safety Factor % are required in Tender Intake before saving material sourcing.");
+      setSaveMode(null);
+      return;
+    }
+
+    if (!form.freightCostPerM2Egp.trim()) {
+      setError("Freight Cost / m² EGP is required before saving material sourcing.");
       setSaveMode(null);
       return;
     }
@@ -1186,7 +1701,7 @@ export const MaterialSourcingPage = () => {
           ),
       )
     ) {
-      setError("Each Bag Body component needs a requested quantity and at least one fully defined source line. In combined mode, enter allocated bags for each line.");
+      setError("Each component needs a requested quantity and at least one fully defined source line. In combined mode, enter allocated bags for each line.");
       setSaveMode(null);
       return;
     }
@@ -1202,7 +1717,7 @@ export const MaterialSourcingPage = () => {
         return Math.abs(requested - allocated) > 0.01;
       })
     ) {
-      setError("In combined mode, allocated bags across the selected lines must equal the requested quantity for each Bag Body.");
+      setError("In combined mode, allocated bags across the selected lines must equal the requested quantity for each component.");
       setSaveMode(null);
       return;
     }
@@ -1241,7 +1756,7 @@ export const MaterialSourcingPage = () => {
             <div>
               <CardTitle>Material Sourcing & Costing</CardTitle>
               <CardDescription>
-                Combine roll fit calculation and sourcing in one step for each Bag Body component.
+                Combine roll fit calculation and sourcing in one step for each product component.
               </CardDescription>
             </div>
             <Badge variant="default">MATERIAL_SOURCING</Badge>
@@ -1298,7 +1813,7 @@ export const MaterialSourcingPage = () => {
                     <div>
                       <h3 className="text-base font-semibold text-slate-900">Sourcing Mode</h3>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        Choose a single roll source or combine multiple sources for each Bag Body.
+                        Choose a single roll source or combine multiple sources for each component.
                       </p>
                     </div>
                     <div className="flex gap-2 rounded-2xl border border-border bg-white p-1">
@@ -1329,25 +1844,7 @@ export const MaterialSourcingPage = () => {
 
                   <div className="grid gap-5 md:grid-cols-3">
                     <label className="space-y-2 text-sm font-medium text-slate-700">
-                      Exchange Rate
-                      <Input
-                        inputMode="decimal"
-                        value={form.exchangeRate}
-                        onChange={(event) => updateField("exchangeRate", event.target.value)}
-                      />
-                    </label>
-                    <label className="space-y-2 text-sm font-medium text-slate-700">
-                      Currency Safety Factor %
-                      <Input
-                        inputMode="decimal"
-                        value={form.currencySafetyFactorPercent}
-                        onChange={(event) =>
-                          updateField("currencySafetyFactorPercent", event.target.value)
-                        }
-                      />
-                    </label>
-                    <label className="space-y-2 text-sm font-medium text-slate-700">
-                      Freight Cost / m² EGP
+                      Freight Cost / m² EGP *
                       <Input
                         inputMode="decimal"
                         value={form.freightCostPerM2Egp}
@@ -1368,6 +1865,9 @@ export const MaterialSourcingPage = () => {
                       </p>
                       <p className="mt-2 font-semibold text-slate-900">
                         {formatMetric(effectiveExchangeRate, 3)}
+                      </p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Exchange rates are set during Tender Intake.
                       </p>
                     </div>
                   </div>
@@ -1418,442 +1918,316 @@ export const MaterialSourcingPage = () => {
                             <div className="min-w-0">
                               <p className="text-base font-semibold text-slate-900">{group.productName}</p>
                               <p className="mt-1 text-sm text-muted-foreground">
-                                {group.items.length} Bag Body component(s) · Requested quantity: {group.requestedQuantity || "Not set"}
+                                {group.items.length} component(s) · Requested quantity: {group.requestedQuantity || "Not set"}
                               </p>
                             </div>
                           </button>
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge variant={productCostBadge.variant}>{productCostBadge.label}</Badge>
                             <Badge variant={productCoverageBadge.variant}>{productCoverageBadge.label}</Badge>
+                            <Button
+                              onClick={() => syncProductWithProductConfiguration(group.productId)}
+                              type="button"
+                              variant="outline"
+                            >
+                              Sync
+                            </Button>
                           </div>
                         </div>
 
                         {!collapsedProducts[group.productId] ? (
                           <div className="space-y-6">
                             {group.items.map(({ component, componentIndex }) => {
-                    const metrics = componentMetrics[componentIndex];
-                    const allocatedQuantity = metrics?.sourceMetrics.reduce(
-                      (total, line) => total + (line.allocatedBags ?? 0),
-                      0,
-                    ) ?? 0;
-                    const quantityCoverageBadge = getQuantityCoverageBadge(
-                      metrics?.requestedQuantity ?? null,
-                      allocatedQuantity,
-                    );
-                    const totalCostBadge = getTotalCostBadge(
-                      metrics?.totalMaterialCostEgp ?? null,
-                      allocatedQuantity,
-                    );
-                    const fallbackMaterialId =
-                      component.materialId ||
-                      form.componentSelections.find((item) => item.materialId)?.materialId ||
-                      productConfiguration?.mainFabricMaterialId ||
-                      "";
-                    const sourceOptions = buildSourceOptions(
-                      component,
-                      stockItems,
-                      importPresets,
-                      suppliers,
-                      materials,
-                      fallbackMaterialId,
-                    );
-                    const visibleSources = sourceOptions.filter((source) =>
-                      activeTab === "all" ? true : source.sourceType === activeTab,
-                    );
+                              const componentCollapseKey = `${group.productId}:${component.componentId}`;
+                              const isComponentCollapsed = collapsedComponents[componentCollapseKey] ?? false;
+                              const isBagStyle = isBagStyleComponent(component);
+                              const metrics = componentMetrics[componentIndex];
+                              const allocatedQuantity =
+                                metrics?.sourceMetrics.reduce(
+                                  (total, line) => total + (line.allocatedBags ?? 0),
+                                  0,
+                                ) ?? 0;
+                              const quantityCoverageBadge = getQuantityCoverageBadge(
+                                metrics?.requestedQuantity ?? null,
+                                allocatedQuantity,
+                              );
+                              const totalCostBadge = getTotalCostBadge(
+                                metrics?.totalMaterialCostEgp ?? null,
+                                allocatedQuantity,
+                              );
+                              const fallbackMaterialId =
+                                component.materialId ||
+                                form.componentSelections.find((item) => item.materialId)?.materialId ||
+                                productConfiguration?.mainFabricMaterialId ||
+                                "";
+                              const sourceOptions = buildSourceOptions(
+                                component,
+                                stockItems,
+                                importPresets,
+                                suppliers,
+                                materials,
+                                fallbackMaterialId,
+                              );
+                              const sourceSearch = sourceSearchByComponent[component.componentId] ?? "";
+                              const normalizedSourceSearch = sourceSearch.trim().toLowerCase();
+                              const visibleSources = sourceOptions.filter((source) => {
+                                const matchesTab = activeTab === "all" ? true : source.sourceType === activeTab;
+                                const matchesSupplier =
+                                  normalizedSourceSearch.length === 0
+                                    ? true
+                                    : source.sourceName.toLowerCase().includes(normalizedSourceSearch);
 
-                    return (
-                      <div key={component.componentId} className="rounded-[1.25rem] border border-border bg-slate-50/60 p-5">
-                        <div className="mb-5 flex items-start justify-between gap-4">
-                          <div>
-                            <p className="text-base font-semibold text-slate-900">
-                              {component.productName} · {component.componentName}
-                            </p>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              Material: {resolveMaterialLabel(component.materialId, materials)} · Requested quantity:{" "}
-                              {component.requestedQuantity || "Not set"}
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Button
-                              onClick={() => syncComponentWithProductConfiguration(componentIndex)}
-                              type="button"
-                              variant="outline"
-                            >
-                              Sync Product Configuration
-                            </Button>
-                            <Badge variant={totalCostBadge.variant}>{totalCostBadge.label}</Badge>
-                            <Badge variant={quantityCoverageBadge.variant}>{quantityCoverageBadge.label}</Badge>
-                          </div>
-                        </div>
+                                return matchesTab && matchesSupplier;
+                              });
 
-                        <div className="mb-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-                          <label className="space-y-2 text-sm font-medium text-slate-700">
-                            Material
-                            <Select
-                              value={component.materialId || fallbackMaterialId}
-                              onChange={(event) =>
-                                updateComponent(componentIndex, {
-                                  materialId: event.target.value,
-                                  selectedSources: [],
-                                })
-                              }
-                            >
-                              <option value="">Select material</option>
-                              {materials.map((material) => (
-                                <option key={material.materialId} value={material.materialId}>
-                                  {material.materialName}
-                                </option>
-                              ))}
-                            </Select>
-                          </label>
-                          <label className="space-y-2 text-sm font-medium text-slate-700">
-                            Requested Quantity
-                            <Input
-                              inputMode="decimal"
-                              value={component.requestedQuantity}
-                              onChange={(event) =>
-                                updateComponent(componentIndex, { requestedQuantity: event.target.value })
-                              }
-                            />
-                          </label>
-                          <label className="space-y-2 text-sm font-medium text-slate-700">
-                            Diameter (m)
-                            <Input
-                              inputMode="decimal"
-                              value={component.bagDiameterMm}
-                              onChange={(event) =>
-                                updateComponent(componentIndex, { bagDiameterMm: event.target.value })
-                              }
-                            />
-                          </label>
-                          <label className="space-y-2 text-sm font-medium text-slate-700">
-                            Length (m)
-                            <Input
-                              inputMode="decimal"
-                              value={component.bagLengthMm}
-                              onChange={(event) =>
-                                updateComponent(componentIndex, { bagLengthMm: event.target.value })
-                              }
-                            />
-                          </label>
-                          <label className="space-y-2 text-sm font-medium text-slate-700">
-                            Seam Allowance (m)
-                            <Input
-                              inputMode="decimal"
-                              value={component.seamAllowanceMm}
-                              onChange={(event) =>
-                                updateComponent(componentIndex, { seamAllowanceMm: event.target.value })
-                              }
-                            />
-                          </label>
-                          <label className="space-y-2 text-sm font-medium text-slate-700">
-                            Top / Bottom Allowance (m)
-                            <Input
-                              inputMode="decimal"
-                              value={component.topBottomAllowanceMm}
-                              onChange={(event) =>
-                                updateComponent(componentIndex, {
-                                  topBottomAllowanceMm: event.target.value,
-                                })
-                              }
-                            />
-                          </label>
-                        </div>
-
-                        <div className="mb-5 grid gap-3 md:grid-cols-4">
-                          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Bag Width</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-900">
-                              {formatMetric(metrics?.bagWidthMm ?? null, 4, " m")}
-                            </p>
-                          </div>
-                          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Bag Length + Allowance</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-900">
-                              {formatMetric(metrics?.bagLengthWithAllowanceMm ?? null, 4, " m")}
-                            </p>
-                          </div>
-                          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Actual Area / Bag</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-900">
-                              {formatMetric(metrics?.actualAreaPerBagM2 ?? null, 4, " m²")}
-                            </p>
-                          </div>
-                          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Material Cost / Bag</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-900">
-                              {formatMetric(metrics?.materialCostPerBagEgp ?? null, 2, " EGP")}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="rounded-[1.15rem] border border-border bg-slate-50/80 p-4">
-                          <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-                            <div>
-                              <h4 className="text-sm font-semibold text-slate-900">Source Options</h4>
-                              <p className="mt-1 text-sm text-muted-foreground">
-                                Pick rolls from in stock or import, then fine-tune the line values below.
-                              </p>
-                            </div>
-                            <div className="flex gap-2 rounded-2xl border border-border bg-white p-1">
-                              {[
-                                { value: "all", label: "All Sources" },
-                                { value: "stock", label: "Stock" },
-                                { value: "import", label: "Import" },
-                              ].map((tab) => (
-                                <button
-                                  key={tab.value}
-                                  type="button"
-                                  className={
-                                    activeTab === tab.value
-                                      ? "rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white"
-                                      : "rounded-xl px-4 py-2 text-sm font-medium text-slate-600"
-                                  }
-                                  onClick={() => setActiveTab(tab.value as SourceTab)}
-                                >
-                                  {tab.label}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          <div className="space-y-3">
-                            {visibleSources.length ? (
-                              visibleSources.map((source) => {
-                                const previewAvailability =
-                                  source.sourceType === "stock"
-                                    ? getStockPreviewAvailability(
-                                        source,
-                                        metrics?.bagWidthMm ?? null,
-                                        metrics?.bagLengthWithAllowanceMm ?? null,
-                                        stockUsageSummary.get(source.sourceId)?.usedBags ?? 0,
-                                      )
-                                    : null;
-
-                                return (
+                              return (
                                 <div
-                                  key={`${component.componentId}-${source.sourceId}`}
-                                  className="flex flex-col gap-3 rounded-2xl border border-border bg-white px-4 py-4 lg:flex-row lg:items-center lg:justify-between"
+                                  key={component.componentId}
+                                  className="rounded-[1.15rem] border border-border bg-slate-50/70 px-4 py-4"
                                 >
-                                  <div>
-                                    <p className="text-sm font-semibold text-slate-900">{source.sourceName}</p>
-                                    <p className="mt-1 text-xs text-muted-foreground">
-                                      {source.sourceType === "stock" ? "In Stock" : "Import"} · {source.availabilityLabel}
-                                    </p>
-                                    {source.sourceType === "stock" ? (
-                                      <p className="mt-1 text-xs text-blue-700">
-                                        Remaining:{" "}
-                                        {formatMetric(
-                                          previewAvailability?.remainingCapacityBags ?? null,
-                                          0,
-                                          " bags",
-                                        )}{" "}
-                                        ·{" "}
-                                        {formatMetric(
-                                          previewAvailability?.remainingRollLengthM ?? null,
-                                          2,
-                                          " m length",
-                                        )}
-                                      </p>
-                                    ) : null}
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-4 text-sm text-slate-700">
-                                    <span>{formatMetric(source.rollWidthM, 2, " m")} width</span>
-                                    <span>{formatMetric(source.rollLengthM, 2, " m")} length</span>
-                                    <span>{formatMetric(source.unitCostUsdPerM2, 3, " USD/m²")}</span>
-                                    <Button
-                                      onClick={() => addSource(componentIndex, source)}
+                                  <div className="flex flex-wrap items-start justify-between gap-4">
+                                    <button
+                                      className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                                      onClick={() => toggleComponentCollapse(componentCollapseKey)}
                                       type="button"
-                                      variant="outline"
                                     >
-                                      <Plus className="h-4 w-4" />
-                                      Select
-                                    </Button>
+                                      {isComponentCollapsed ? (
+                                        <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                                      ) : (
+                                        <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                                      )}
+                                      <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <p className="text-sm font-semibold text-slate-900">
+                                            {component.componentName}
+                                          </p>
+                                          <Badge variant="neutral">
+                                            {resolveMaterialLabel(component.materialId, materials)}
+                                          </Badge>
+                                          {component.componentType ? (
+                                            <Badge variant="neutral">{component.componentType}</Badge>
+                                          ) : null}
+                                        </div>
+                                        <p className="mt-1 text-sm text-muted-foreground">
+                                          {isBagStyle
+                                            ? `Requested: ${component.requestedQuantity || "Not set"} bags · Diameter ${component.bagDiameterMm || "-"} m · Length ${component.bagLengthMm || "-"} m`
+                                            : `Requested: ${component.requestedQuantity || "Not set"} units · Use streamlined sourcing details for this component.`}
+                                        </p>
+                                      </div>
+                                    </button>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <Badge variant={totalCostBadge.variant}>{totalCostBadge.label}</Badge>
+                                      <Badge variant={quantityCoverageBadge.variant}>{quantityCoverageBadge.label}</Badge>
+                                    </div>
                                   </div>
+
+                                  {!isComponentCollapsed ? (
+                                    <>
+                                      <div className="mt-4 grid gap-3 md:grid-cols-4">
+                                        <div className="rounded-2xl border border-border bg-white px-4 py-3">
+                                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                                            {isBagStyle ? "Area / Bag" : "Requested Qty"}
+                                          </p>
+                                          <p className="mt-2 text-sm font-semibold text-slate-900">
+                                            {isBagStyle
+                                              ? formatMetric(metrics?.actualAreaPerBagM2 ?? null, 4, " m²")
+                                              : formatMetric(numberOrNull(component.requestedQuantity), 0, " units")}
+                                          </p>
+                                        </div>
+                                        <div className="rounded-2xl border border-border bg-white px-4 py-3">
+                                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                                            {isBagStyle ? "Allocated Area" : "Lead Time"}
+                                          </p>
+                                          <p className="mt-2 text-sm font-semibold text-slate-900">
+                                            {isBagStyle
+                                              ? formatMetric(metrics?.totalAllocatedQtyM2 ?? null, 2, " m²")
+                                              : formatMetric(metrics?.leadTimeDays ?? null, 0, " days")}
+                                          </p>
+                                        </div>
+                                        <div className="rounded-2xl border border-border bg-white px-4 py-3">
+                                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                                            {isBagStyle ? "Cost / Bag" : "Total Cost"}
+                                          </p>
+                                          <p className="mt-2 text-sm font-semibold text-slate-900">
+                                            {isBagStyle
+                                              ? formatMetric(metrics?.materialCostPerBagEgp ?? null, 2, " EGP")
+                                              : formatMetric(metrics?.totalMaterialCostEgp ?? null, 2, " EGP")}
+                                          </p>
+                                        </div>
+                                        <div className="rounded-2xl border border-border bg-white px-4 py-3">
+                                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Selected Sources</p>
+                                          <p className="mt-2 text-sm font-semibold text-slate-900">
+                                            {component.selectedSources.length}
+                                          </p>
+                                        </div>
+                                      </div>
+
+                                      <div className="mt-4 rounded-[1rem] border border-border bg-white p-4">
+                                        <div className="mb-3 flex items-center justify-between gap-3">
+                                          <div>
+                                            <h4 className="text-sm font-semibold text-slate-900">Selected Options</h4>
+                                            <p className="mt-1 text-sm text-muted-foreground">
+                                              Saved options appear as lightweight summary lines.
+                                            </p>
+                                          </div>
+                                          <Badge variant="neutral">{component.selectedSources.length} saved</Badge>
+                                        </div>
+
+                                        {component.selectedSources.length ? (
+                                          <div className="space-y-2">
+                                            {component.selectedSources.map((source, sourceIndex) => {
+                                              const lineMetrics = metrics?.sourceMetrics[sourceIndex];
+
+                                              return (
+                                                <div
+                                                  key={`${component.componentId}-${source.sourceId}-${sourceIndex}`}
+                                                  className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-slate-50 px-4 py-3"
+                                                >
+                                                  <div className="min-w-0">
+                                                    <p className="truncate text-sm font-semibold text-slate-900">
+                                                      {source.sourceName}
+                                                    </p>
+                                                    <p className="mt-1 text-xs text-muted-foreground">
+                                                      {source.sourceType === "stock" ? "Stock" : "Import"} ·{" "}
+                                                      {formatMetric(lineMetrics?.allocatedBags ?? null, 0, isBagStyle ? " bags" : " units")} ·{" "}
+                                                      {formatMetric(lineMetrics?.totalCostEgp ?? null, 2, " EGP")}
+                                                    </p>
+                                                  </div>
+                                                  <div className="flex items-center gap-2">
+                                                    <Badge variant="neutral">
+                                                      {isBagStyle
+                                                        ? formatMetric(lineMetrics?.actualAreaPerBagM2 ?? null, 4, " m²/bag")
+                                                        : formatMetric(numberOrNull(source.leadTimeDays), 0, " days")}
+                                                    </Badge>
+                                                    <Button
+                                                      onClick={() => openSavedSourceDrawer(componentIndex, sourceIndex)}
+                                                      type="button"
+                                                      variant="outline"
+                                                    >
+                                                      Edit
+                                                    </Button>
+                                                    <Button
+                                                      onClick={() => removeSource(componentIndex, sourceIndex)}
+                                                      type="button"
+                                                      variant="ghost"
+                                                    >
+                                                      <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        ) : (
+                                          <div className="rounded-2xl border border-dashed border-border bg-slate-50 px-4 py-6 text-sm text-muted-foreground">
+                                            No sourcing options saved yet. Select a source to review it in the drawer.
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <div className="mt-4 rounded-[1rem] border border-border bg-white p-4">
+                                        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+                                          <div>
+                                            <h4 className="text-sm font-semibold text-slate-900">Source Options</h4>
+                                            <p className="mt-1 text-sm text-muted-foreground">
+                                              Pick a source here to review it in the drawer before saving.
+                                            </p>
+                                          </div>
+                                          <div className="flex gap-2 rounded-2xl border border-border bg-slate-50 p-1">
+                                            {[
+                                              { value: "all", label: "All Sources" },
+                                              { value: "stock", label: "Stock" },
+                                              { value: "import", label: "Import" },
+                                            ].map((tab) => (
+                                              <button
+                                                key={`${component.componentId}-${tab.value}`}
+                                                type="button"
+                                                className={
+                                                  activeTab === tab.value
+                                                    ? "rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white"
+                                                    : "rounded-xl px-4 py-2 text-sm font-medium text-slate-600"
+                                                }
+                                                onClick={() => setActiveTab(tab.value as SourceTab)}
+                                              >
+                                                {tab.label}
+                                              </button>
+                                            ))}
+                                          </div>
+                                        </div>
+
+                                        <div className="mb-4">
+                                          <label className="space-y-2 text-sm font-medium text-slate-700">
+                                            Search supplier
+                                            <Input
+                                              placeholder="Filter by supplier name"
+                                              value={sourceSearch}
+                                              onChange={(event) =>
+                                                updateSourceSearch(component.componentId, event.target.value)
+                                              }
+                                            />
+                                          </label>
+                                        </div>
+
+                                        <div className="space-y-3">
+                                          {visibleSources.length ? (
+                                            visibleSources.map((source) => {
+                                              const previewAvailability =
+                                                source.sourceType === "stock"
+                                                  ? getStockPreviewAvailability(
+                                                      source,
+                                                      metrics?.bagWidthMm ?? null,
+                                                      metrics?.bagLengthWithAllowanceMm ?? null,
+                                                      stockUsageSummary.get(source.sourceId)?.usedBags ?? 0,
+                                                    )
+                                                  : null;
+
+                                              return (
+                                                <div
+                                                  key={`${component.componentId}-${source.sourceId}`}
+                                                  className="flex flex-col gap-3 rounded-2xl border border-border bg-slate-50/70 px-4 py-4 lg:flex-row lg:items-center lg:justify-between"
+                                                >
+                                                  <div>
+                                                    <p className="text-sm font-semibold text-slate-900">{source.sourceName}</p>
+                                                    <p className="mt-1 text-xs text-muted-foreground">
+                                                      {source.sourceType === "stock" ? "In Stock" : "Import"} · {source.availabilityLabel}
+                                                    </p>
+                                                    {isBagStyle && source.sourceType === "stock" ? (
+                                                      <p className="mt-1 text-xs text-blue-700">
+                                                        Remaining: {formatMetric(previewAvailability?.remainingCapacityBags ?? null, 0, " bags")} ·{" "}
+                                                        {formatMetric(previewAvailability?.remainingRollLengthM ?? null, 2, " m length")}
+                                                      </p>
+                                                    ) : null}
+                                                  </div>
+                                                  <div className="flex flex-wrap items-center gap-4 text-sm text-slate-700">
+                                                    <span>{formatMetric(source.rollWidthM, 2, " m")} width</span>
+                                                    <span>{formatMetric(source.rollLengthM, 2, " m")} length</span>
+                                                    <span>{formatMetric(source.unitCostUsdPerM2, 3, " USD/m²")}</span>
+                                                    <Button
+                                                      onClick={() => {
+                                                        openSourceDrawer(componentIndex, source);
+                                                      }}
+                                                      type="button"
+                                                      variant="outline"
+                                                    >
+                                                      <Plus className="h-4 w-4" />
+                                                      Select
+                                                    </Button>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })
+                                          ) : (
+                                            <div className="rounded-2xl border border-dashed border-border bg-slate-50 px-4 py-6 text-sm text-muted-foreground">
+                                              No source options match the current filters.
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </>
+                                  ) : null}
                                 </div>
-                              )})
-                            ) : (
-                              <div className="rounded-2xl border border-dashed border-border bg-white px-4 py-6 text-sm text-muted-foreground">
-                                No source options are available for this material yet.
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="mt-5 overflow-x-auto rounded-[1.15rem] border border-border">
-                          <table className="min-w-full text-sm">
-                            <thead className="bg-slate-50 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                              <tr>
-                                <th className="px-4 py-3">Source</th>
-                                <th className="px-4 py-3">Type</th>
-                                <th className="px-4 py-3">Roll Width</th>
-                                <th className="px-4 py-3">Roll Length</th>
-                                <th className="px-4 py-3">Roll Count</th>
-                                <th className="px-4 py-3">Applied Bags</th>
-                                <th className="px-4 py-3">Across</th>
-                                <th className="px-4 py-3">Along</th>
-                                <th className="px-4 py-3">Actual Area / Bag</th>
-                                <th className="px-4 py-3">Remaining Roll Length</th>
-                                <th className="px-4 py-3">Allocated Bags</th>
-                                <th className="px-4 py-3">Unit Cost</th>
-                                <th className="px-4 py-3">Lead Time</th>
-                                <th className="px-4 py-3">Customs</th>
-                                <th className="px-4 py-3">Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {component.selectedSources.length ? (
-                                component.selectedSources.map((source, sourceIndex) => {
-                                  const lineMetrics = metrics?.sourceMetrics[sourceIndex];
-
-                                  return (
-                                    <tr key={`${component.componentId}-${source.sourceId}-${sourceIndex}`} className="border-t border-border">
-                                      <td className="px-4 py-3 font-medium text-slate-900">{source.sourceName}</td>
-                                      <td className="px-4 py-3">{source.sourceType}</td>
-                                      <td className="px-4 py-3">
-                                        <Input
-                                          inputMode="decimal"
-                                          value={source.rollWidthM}
-                                          onChange={(event) =>
-                                            updateSource(componentIndex, sourceIndex, {
-                                              rollWidthM: event.target.value,
-                                            })
-                                          }
-                                        />
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        <Input
-                                          inputMode="decimal"
-                                          value={source.rollLengthM}
-                                          onChange={(event) =>
-                                            updateSource(componentIndex, sourceIndex, {
-                                              rollLengthM: event.target.value,
-                                            })
-                                          }
-                                        />
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        <Input
-                                          inputMode="numeric"
-                                          disabled={source.sourceType === "stock"}
-                                          value={source.sourceType === "stock" ? "1" : source.rollCount}
-                                          onChange={(event) =>
-                                            updateSource(componentIndex, sourceIndex, {
-                                              rollCount: event.target.value,
-                                            })
-                                          }
-                                        />
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        <Input
-                                          inputMode="numeric"
-                                          value={
-                                            form.sourcingStrategy === "single-source"
-                                              ? component.requestedQuantity
-                                              : source.allocatedBags
-                                          }
-                                          disabled={form.sourcingStrategy === "single-source"}
-                                          onChange={(event) =>
-                                            updateSource(componentIndex, sourceIndex, {
-                                              allocatedBags: event.target.value,
-                                            })
-                                          }
-                                        />
-                                      </td>
-                                      <td className="px-4 py-3">{lineMetrics?.bagsAcrossRollWidth ?? "-"}</td>
-                                      <td className="px-4 py-3">{lineMetrics?.bagsAlongRollLength ?? "-"}</td>
-                                      <td className="px-4 py-3">
-                                        {formatMetric(lineMetrics?.actualAreaPerBagM2 ?? null, 4, " m²")}
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        {formatMetric(lineMetrics?.remainingRollLengthM ?? null, 2, " m")}
-                                      </td>
-                                      <td className="px-4 py-3">{lineMetrics?.allocatedBags ?? "-"}</td>
-                                      <td className="px-4 py-3">
-                                        <Input
-                                          inputMode="decimal"
-                                          value={source.unitCostUsdPerM2}
-                                          onChange={(event) =>
-                                            updateSource(componentIndex, sourceIndex, {
-                                              unitCostUsdPerM2: event.target.value,
-                                            })
-                                          }
-                                        />
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        <Input
-                                          inputMode="decimal"
-                                          value={source.leadTimeDays}
-                                          onChange={(event) =>
-                                            updateSource(componentIndex, sourceIndex, {
-                                              leadTimeDays: event.target.value,
-                                            })
-                                          }
-                                        />
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        <Input
-                                          inputMode="decimal"
-                                          value={source.customsEstimate}
-                                          onChange={(event) =>
-                                            updateSource(componentIndex, sourceIndex, {
-                                              customsEstimate: event.target.value,
-                                            })
-                                          }
-                                        />
-                                      </td>
-                                      <td className="px-4 py-3">
-                                        <Button
-                                          onClick={() => removeSource(componentIndex, sourceIndex)}
-                                          type="button"
-                                          variant="ghost"
-                                        >
-                                          <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                      </td>
-                                    </tr>
-                                  );
-                                })
-                              ) : (
-                                <tr>
-                                  <td colSpan={15} className="px-4 py-6 text-center text-muted-foreground">
-                                    No sources selected yet for this Bag Body.
-                                  </td>
-                                </tr>
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        <div className="mt-5 grid gap-4 md:grid-cols-4">
-                          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Allocated Area</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-900">
-                              {formatMetric(metrics?.totalAllocatedQtyM2 ?? null, 2, " m²")}
-                            </p>
-                          </div>
-                          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Weighted Unit Cost</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-900">
-                              {formatMetric(metrics?.weightedAverageUnitCostUsdPerM2 ?? null, 3, " USD/m²")}
-                            </p>
-                          </div>
-                          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Cost / Bag</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-900">
-                              {formatMetric(metrics?.materialCostPerBagEgp ?? null, 2, " EGP")}
-                            </p>
-                          </div>
-                          <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Lead Time</p>
-                            <p className="mt-2 text-sm font-semibold text-slate-900">
-                              {formatMetric(metrics?.leadTimeDays ?? null, 0, " days")}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                              );
+                            })}
                           </div>
                         ) : null}
                       </div>
@@ -1861,15 +2235,11 @@ export const MaterialSourcingPage = () => {
                   })}
                 </div>
 
-                <MaterialRollSketch count={payload.selectedSources.length} />
               </>
             ) : null}
 
             <div className="flex flex-col gap-4 rounded-[1.2rem] border border-border bg-white p-4 md:flex-row md:items-center md:justify-between">
               <div className="text-sm">
-                <p className="font-medium text-slate-900">
-                  Saving this merged step updates sourcing totals and keeps a compatible roll-calculation snapshot for downstream pages.
-                </p>
                 {message ? <p className="mt-2 text-emerald-600">{message}</p> : null}
                 {error ? <p className="mt-2 text-rose-600">{error}</p> : null}
               </div>
@@ -1891,6 +2261,33 @@ export const MaterialSourcingPage = () => {
           </CardContent>
         </Card>
       </div>
+
+      {drawerState ? (
+        <SourceManagementDrawer
+          component={form.componentSelections[drawerState.componentIndex]}
+          componentIndex={drawerState.componentIndex}
+          draftMetrics={drawerPreviewMetrics ?? calculateSourceLineMetrics({
+            component: form.componentSelections[drawerState.componentIndex],
+            source: drawerState.draftSource,
+            sourcingStrategy: form.sourcingStrategy,
+            requestedQuantity: numberOrNull(form.componentSelections[drawerState.componentIndex]?.requestedQuantity ?? ""),
+            bagWidthMm: componentMetrics[drawerState.componentIndex]?.bagWidthMm ?? null,
+            bagLengthWithAllowanceMm: componentMetrics[drawerState.componentIndex]?.bagLengthWithAllowanceMm ?? null,
+            existingUsedBags: 0,
+            effectiveExchangeRate,
+            freightCostPerM2Egp,
+            otherChargesPerM2Egp,
+          })}
+          draftSource={drawerState.draftSource}
+          metrics={componentMetrics[drawerState.componentIndex]}
+          onClose={() => setDrawerState(null)}
+          onDelete={drawerState.sourceIndex !== undefined ? removeDrawerSource : undefined}
+          onSave={saveDrawerSource}
+          onRemoveSource={removeSource}
+          onUpdateDraft={updateDrawerDraft}
+          sourcingStrategy={form.sourcingStrategy}
+        />
+      ) : null}
     </div>
   );
 };

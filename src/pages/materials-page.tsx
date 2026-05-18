@@ -182,8 +182,6 @@ export const MaterialsPage = () => {
                 <TableRow>
                   <TableHead>Material</TableHead>
                   <TableHead>Category</TableHead>
-                  <TableHead>Roll</TableHead>
-                  <TableHead>Waste %</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -196,12 +194,6 @@ export const MaterialsPage = () => {
                       <p className="text-xs text-muted-foreground">{record.materialId}</p>
                     </TableCell>
                     <TableCell>{record.category}</TableCell>
-                    <TableCell>
-                      {record.category === "FabricMaterial"
-                        ? `${record.rollWidthM ?? "-"} m x ${record.rollLengthM ?? "-"} m`
-                        : "-"}
-                    </TableCell>
-                    <TableCell>{record.defaultWastePercent ?? "-"}</TableCell>
                     <TableCell><StatusBadge active={record.active} /></TableCell>
                     <TableCell className="space-x-2">
                       <Button size="sm" variant="ghost" onClick={() => openEdit(record)} type="button">Edit</Button>
@@ -262,22 +254,6 @@ export const MaterialsPage = () => {
             Chemical Resistance
             <Input value={form.chemicalResistance} onChange={(event) => setForm((current) => ({ ...current, chemicalResistance: event.target.value }))} />
           </label>
-          <label className="space-y-2 text-sm font-medium text-slate-700">
-            Default Waste %
-            <Input value={form.defaultWastePercent} inputMode="decimal" onChange={(event) => setForm((current) => ({ ...current, defaultWastePercent: event.target.value }))} />
-          </label>
-          {form.category === "FabricMaterial" ? (
-            <>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Roll Width (m)
-                <Input value={form.rollWidthM} inputMode="decimal" onChange={(event) => setForm((current) => ({ ...current, rollWidthM: event.target.value }))} />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Roll Length (m)
-                <Input value={form.rollLengthM} inputMode="decimal" onChange={(event) => setForm((current) => ({ ...current, rollLengthM: event.target.value }))} />
-              </label>
-            </>
-          ) : null}
           <label className="flex items-center gap-3 rounded-2xl border border-border bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
             <input checked={form.active} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} type="checkbox" />
             Active

@@ -28,12 +28,16 @@ type TenderIntakeForm = Omit<
   | "knownRequiredPrice"
   | "knownCompetitorPrice"
   | "customerCommissionPercent"
+  | "exchangeRate"
+  | "currencySafetyFactorPercent"
 > & {
   bagDiameterMm: string;
   bagLengthMm: string;
   knownRequiredPrice: string;
   knownCompetitorPrice: string;
   customerCommissionPercent: string;
+  exchangeRate: string;
+  currencySafetyFactorPercent: string;
 };
 
 const initialState: TenderIntakeForm = {
@@ -56,6 +60,8 @@ const initialState: TenderIntakeForm = {
   knownRequiredPrice: "",
   knownCompetitorPrice: "",
   customerCommissionPercent: "",
+  exchangeRate: "",
+  currencySafetyFactorPercent: "",
   priceNegotiationExpected: false,
   requestedDeliveryTime: "",
   deliveryPlace: "factory",
@@ -81,6 +87,8 @@ const requiredFields: Array<keyof TenderIntakeForm> = [
   "internalInquiryNumber",
   "tenderDueDate",
   "requestType",
+  "exchangeRate",
+  "currencySafetyFactorPercent",
   "requestedDeliveryTime",
   "deliveryPlace",
 ];
@@ -90,6 +98,11 @@ const sectionCards = [
     title: "Customer & Tender Information",
     description: "Capture the commercial entry point and reference identifiers for the opportunity.",
     icon: BriefcaseBusiness,
+  },
+  {
+    title: "Currency and Rates",
+    description: "Set the mandatory currency assumptions that feed downstream pricing.",
+    icon: CircleDollarSign,
   },
   {
     title: "Commercial Information",
@@ -191,6 +204,8 @@ export const TenderIntakePage = () => {
           knownRequiredPrice: record.knownRequiredPrice?.toString() ?? "",
           knownCompetitorPrice: record.knownCompetitorPrice?.toString() ?? "",
           customerCommissionPercent: record.customerCommissionPercent?.toString() ?? "",
+          exchangeRate: record.exchangeRate?.toString() ?? "",
+          currencySafetyFactorPercent: record.currencySafetyFactorPercent?.toString() ?? "",
           priceNegotiationExpected: record.priceNegotiationExpected,
           requestedDeliveryTime: record.requestedDeliveryTime,
           deliveryPlace: record.deliveryPlace,
@@ -260,6 +275,9 @@ export const TenderIntakePage = () => {
       form.knownCompetitorPrice === "" ? null : Number(form.knownCompetitorPrice),
     customerCommissionPercent:
       form.customerCommissionPercent === "" ? null : Number(form.customerCommissionPercent),
+    exchangeRate: form.exchangeRate === "" ? null : Number(form.exchangeRate),
+    currencySafetyFactorPercent:
+      form.currencySafetyFactorPercent === "" ? null : Number(form.currencySafetyFactorPercent),
     priceNegotiationExpected: form.priceNegotiationExpected,
     requestedDeliveryTime: form.requestedDeliveryTime.trim(),
     deliveryPlace: form.deliveryPlace,
@@ -435,6 +453,40 @@ export const TenderIntakePage = () => {
                   </div>
                   <div className="grid gap-5 md:grid-cols-2">
                     <label className="space-y-2 text-sm font-medium text-slate-700">
+                      Exchange Rate *
+                      <Input
+                        inputMode="decimal"
+                        value={form.exchangeRate}
+                        onChange={(event) => updateField("exchangeRate", event.target.value)}
+                      />
+                      {renderFieldMessage("exchangeRate")}
+                    </label>
+                    <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Currency Safety Factor % *
+                        <Input
+                          inputMode="decimal"
+                          value={form.currencySafetyFactorPercent}
+                          onChange={(event) =>
+                            updateField("currencySafetyFactorPercent", event.target.value)
+                          }
+                        />
+                        {renderFieldMessage("currencySafetyFactorPercent")}
+                    </label>
+                  </div>
+                </section>
+
+                <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
+                  <div className="mb-4 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-900">{sectionCards[2].title}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">{sectionCards[2].description}</p>
+                    </div>
+                    <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+                      <CircleDollarSign className="h-5 w-5" />
+                    </div>
+                  </div>
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <label className="space-y-2 text-sm font-medium text-slate-700">
                       Known Required Price
                       <Input
                         inputMode="decimal"
@@ -473,8 +525,8 @@ export const TenderIntakePage = () => {
                 <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
                   <div className="mb-4 flex items-start justify-between gap-4">
                     <div>
-                      <h3 className="text-base font-semibold text-slate-900">{sectionCards[2].title}</h3>
-                      <p className="mt-1 text-sm text-muted-foreground">{sectionCards[2].description}</p>
+                      <h3 className="text-base font-semibold text-slate-900">{sectionCards[4].title}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">{sectionCards[4].description}</p>
                     </div>
                     <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
                       <Truck className="h-5 w-5" />
@@ -539,10 +591,6 @@ export const TenderIntakePage = () => {
 
               <div className="flex flex-col gap-4 rounded-[1.2rem] border border-border bg-white p-4 md:flex-row md:items-center md:justify-between">
                 <div className="text-sm">
-                  <p className="font-medium text-slate-900">Required fields are validated before moving forward.</p>
-                  <p className="text-muted-foreground">
-                    Save Draft preserves partial work. Save &amp; Next moves the tender to product configuration.
-                  </p>
                   {message ? <p className="mt-2 text-emerald-600">{message}</p> : null}
                   {error ? <p className="mt-2 text-rose-600">{error}</p> : null}
                 </div>

@@ -54,6 +54,8 @@ export type TenderRequest = EntityEnvelope & {
   knownRequiredPrice: number | null;
   knownCompetitorPrice: number | null;
   customerCommissionPercent: number | null;
+  exchangeRate: number | null;
+  currencySafetyFactorPercent: number | null;
   priceNegotiationExpected: boolean;
   requestedDeliveryTime: string;
   deliveryPlace: DeliveryPlace;
@@ -257,6 +259,9 @@ export type CostBuildUp = EntityEnvelope & {
   alternativeId: string;
   quantity: number | null;
   currency: "EGP";
+  exchangeRate: number | null;
+  currencySafetyFactorPercent: number | null;
+  effectiveExchangeRate: number | null;
   costLines: CostLine[];
   totalMaterialCostPerBag: number | null;
   totalOperatingCostPerBag: number | null;

@@ -131,9 +131,9 @@ export const AppShell = () => {
             </nav>
 
             <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
-              <p className="text-sm font-medium text-white">Deployment Surface</p>
+              <p className="text-sm font-medium text-white">Alimex Group</p>
               <p className="mt-2 text-sm text-blue-100/70">
-                React frontend with API Gateway, Lambda, and a single-table DynamoDB backend.
+                Copyright © 2026 Alimex Group - All Rights Reserved.
               </p>
             </div>
           </div>

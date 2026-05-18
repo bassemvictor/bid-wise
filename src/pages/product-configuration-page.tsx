@@ -1,7 +1,18 @@
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Plus, Save, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  ChevronDown,
+  ChevronRight,
+  Pencil,
+  Plus,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
+import type { Material, Product, ProductConfiguration, TenderRequest } from "../../shared/types";
 import { TenderWorkflowStepper } from "../components/tenders/tender-workflow-stepper";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -9,7 +20,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { api, ApiError, isApiConfigured } from "../lib/api";
-import type { Material, Product, ProductConfiguration, TenderRequest } from "../../shared/types";
 
 type SpecificationFormRow = {
   key: string;
@@ -65,6 +75,16 @@ type ProductConfigurationForm = Omit<
   productSnapshots: ProductSnapshotForm[];
 };
 
+type ComponentDrawerState = {
+  mode: "add" | "edit";
+  productIndex: number;
+  componentIndex: number | null;
+  value: ProductSnapshotComponentForm;
+};
+
+const componentTypeOptions = ["Bag Body", "Ring", "Thread", "Other"] as const;
+type ComponentTypeOption = (typeof componentTypeOptions)[number];
+
 const initialForm = (tenderId: string): ProductConfigurationForm => ({
   tenantId: "alimex-demo",
   tenderId,
@@ -99,11 +119,33 @@ const numberOrNull = (value: string) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const isBagBody = (component: ProductSnapshotComponentForm) =>
-  component.componentType.trim().toLowerCase() === "bag body" ||
-  component.componentName.trim().toLowerCase() === "bag body";
+const createComponentForm = (
+  seed?: Partial<ProductSnapshotComponentForm>,
+): ProductSnapshotComponentForm => ({
+  componentId: seed?.componentId ?? crypto.randomUUID(),
+  componentName: seed?.componentName ?? "",
+  componentType: seed?.componentType ?? "Bag Body",
+  material: seed?.material ?? "",
+  diameter: seed?.diameter ?? "",
+  length: seed?.length ?? "",
+  seamAllowanceMm: seed?.seamAllowanceMm ?? "",
+  topBottomAllowanceMm: seed?.topBottomAllowanceMm ?? "",
+  specificationRows: seed?.specificationRows ?? [],
+});
 
-const specificationsToRows = (specifications: Product["components"][number]["specifications"]) =>
+const createComponentFromType = (componentType: ComponentTypeOption = "Bag Body") =>
+  createComponentForm({
+    componentType,
+    componentName: componentType === "Other" ? "" : componentType,
+  });
+
+const isBagBody = (component: ProductSnapshotComponentForm) =>
+  component.componentType.trim().toLowerCase().includes("bag body") ||
+  component.componentName.trim().toLowerCase().includes("bag body");
+
+const specificationsToRows = (
+  specifications: Product["components"][number]["specifications"],
+) =>
   Object.entries(specifications)
     .filter(
       ([key]) =>
@@ -125,11 +167,13 @@ const toSnapshotComponentForm = (
   componentType: component.componentType,
   material: component.material,
   diameter:
-    component.specifications.diameter === null || component.specifications.diameter === undefined
+    component.specifications.diameter === null ||
+    component.specifications.diameter === undefined
       ? ""
       : String(component.specifications.diameter),
   length:
-    component.specifications.length === null || component.specifications.length === undefined
+    component.specifications.length === null ||
+    component.specifications.length === undefined
       ? ""
       : String(component.specifications.length),
   seamAllowanceMm:
@@ -155,15 +199,18 @@ const toSnapshotForm = (product: Product): ProductSnapshotForm => ({
       ? ""
       : String(product.requestedQuantity),
   factoryOverheadPerBag:
-    product.factoryOverheadPerBag === null || product.factoryOverheadPerBag === undefined
+    product.factoryOverheadPerBag === null ||
+    product.factoryOverheadPerBag === undefined
       ? ""
       : String(product.factoryOverheadPerBag),
   manufacturingOverheadPerBag:
-    product.manufacturingOverheadPerBag === null || product.manufacturingOverheadPerBag === undefined
+    product.manufacturingOverheadPerBag === null ||
+    product.manufacturingOverheadPerBag === undefined
       ? ""
       : String(product.manufacturingOverheadPerBag),
   managementOverheadPerBag:
-    product.managementOverheadPerBag === null || product.managementOverheadPerBag === undefined
+    product.managementOverheadPerBag === null ||
+    product.managementOverheadPerBag === undefined
       ? ""
       : String(product.managementOverheadPerBag),
   active: product.active,
@@ -236,6 +283,19 @@ const normalizeMaterialReference = (value: string, materials: Material[]) => {
   return match?.materialId ?? trimmed;
 };
 
+const resolveMaterialLabel = (value: string, materials: Material[]) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const match = materials.find(
+    (material) => material.materialId === trimmed || material.materialName === trimmed,
+  );
+
+  return match?.materialName ?? trimmed;
+};
+
 const applyDerivedSnapshotValues = (
   current: ProductConfigurationForm,
   snapshots: ProductSnapshotForm[],
@@ -260,9 +320,15 @@ const applyDerivedSnapshotValues = (
     bagLengthMm: bagBody?.length ?? "",
     seamAllowanceMm: bagBody?.seamAllowanceMm ?? "",
     topBottomAllowanceMm: bagBody?.topBottomAllowanceMm ?? "",
-    mainFabricMaterialId: bagBody ? normalizeMaterialReference(bagBody.material, materials) : "",
-    accessoriesMaterialId: ring ? normalizeMaterialReference(ring.material, materials) : "",
-    threadMaterialId: thread ? normalizeMaterialReference(thread.material, materials) : "",
+    mainFabricMaterialId: bagBody
+      ? normalizeMaterialReference(bagBody.material, materials)
+      : "",
+    accessoriesMaterialId: ring
+      ? normalizeMaterialReference(ring.material, materials)
+      : "",
+    threadMaterialId: thread
+      ? normalizeMaterialReference(thread.material, materials)
+      : "",
   };
 };
 
@@ -304,6 +370,280 @@ const toForm = (config: ProductConfiguration): ProductConfigurationForm => ({
   packagingNotes: config.packagingNotes ?? "",
 });
 
+const formatDimension = (label: string, value: string) =>
+  value.trim() ? `${label} ${Number(value).toFixed(2)} m` : "";
+
+const getKeyDimensions = (component: ProductSnapshotComponentForm) => {
+  const values = [
+    formatDimension("Ø", component.diameter),
+    formatDimension("L", component.length),
+  ].filter(Boolean);
+  return values.length ? values.join(" • ") : "-";
+};
+
+const ProductComponentDrawer = ({
+  materials,
+  onClose,
+  onSave,
+  state,
+}: {
+  materials: Material[];
+  onClose: () => void;
+  onSave: (
+    productIndex: number,
+    mode: "add" | "edit",
+    componentIndex: number | null,
+    value: ProductSnapshotComponentForm,
+  ) => void;
+  state: ComponentDrawerState | null;
+}) => {
+  const [draft, setDraft] = useState<ProductSnapshotComponentForm>(
+    state?.value ?? createComponentFromType("Bag Body"),
+  );
+
+  useEffect(() => {
+    if (state) {
+      setDraft(state.value);
+    }
+  }, [state]);
+
+  if (!state) {
+    return null;
+  }
+
+  const addSpecificationRow = () => {
+    setDraft((current) => ({
+      ...current,
+      specificationRows: [...current.specificationRows, { key: "", value: "" }],
+    }));
+  };
+
+  const updateSpecificationRow = (
+    rowIndex: number,
+    patch: Partial<SpecificationFormRow>,
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      specificationRows: current.specificationRows.map((row, currentRowIndex) =>
+        currentRowIndex === rowIndex ? { ...row, ...patch } : row,
+      ),
+    }));
+  };
+
+  const removeSpecificationRow = (rowIndex: number) => {
+    setDraft((current) => ({
+      ...current,
+      specificationRows: current.specificationRows.filter(
+        (_, currentRowIndex) => currentRowIndex !== rowIndex,
+      ),
+    }));
+  };
+
+  const save = () => {
+    if (!draft.componentName.trim()) {
+      return;
+    }
+
+    onSave(state.productIndex, state.mode, state.componentIndex, draft);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex justify-end bg-slate-950/30">
+      <button
+        aria-label="Close component drawer overlay"
+        className="absolute inset-0"
+        onClick={onClose}
+        type="button"
+      />
+      <aside className="relative z-10 flex h-full w-full flex-col border-l border-border bg-white shadow-2xl sm:max-w-xl">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-5">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">
+              {state.mode === "add" ? "Add Component" : "Edit Component"}
+            </h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {draft.componentType || "Select a component type"}
+            </p>
+          </div>
+          <button
+            className="rounded-xl border border-border bg-white p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-5">
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="space-y-2 text-sm font-medium text-slate-700 sm:col-span-2">
+                Component Name
+                <Input
+                  value={draft.componentName}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, componentName: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Component Type
+                <Select
+                  value={draft.componentType}
+                  onChange={(event) => {
+                    const nextType = event.target.value as ComponentTypeOption;
+                    setDraft((current) => ({
+                      ...current,
+                      componentType: nextType,
+                      componentName:
+                        current.componentName.trim() === "" ||
+                        current.componentName === current.componentType
+                          ? nextType === "Other"
+                            ? ""
+                            : nextType
+                          : current.componentName,
+                    }));
+                  }}
+                >
+                  {componentTypeOptions.map((componentType) => (
+                    <option key={componentType} value={componentType}>
+                      {componentType}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Material
+                <Select
+                  value={normalizeMaterialReference(draft.material, materials)}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, material: event.target.value }))
+                  }
+                >
+                  <option value="">Select material</option>
+                  {materials.map((material) => (
+                    <option key={material.materialId} value={material.materialId}>
+                      {material.materialName}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Diameter
+                <Input
+                  inputMode="decimal"
+                  value={draft.diameter}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, diameter: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Length
+                <Input
+                  inputMode="decimal"
+                  value={draft.length}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, length: event.target.value }))
+                  }
+                />
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Seam Allowance
+                <Input
+                  inputMode="decimal"
+                  value={draft.seamAllowanceMm}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      seamAllowanceMm: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="space-y-2 text-sm font-medium text-slate-700">
+                Top / Bottom Allowance
+                <Input
+                  inputMode="decimal"
+                  value={draft.topBottomAllowanceMm}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      topBottomAllowanceMm: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </div>
+
+            <details className="rounded-[1.15rem] border border-border bg-slate-50/70">
+              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-slate-900">
+                Advanced Details
+              </summary>
+              <div className="border-t border-border px-4 py-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="text-sm text-muted-foreground">
+                    Add less common component details as key-value fields.
+                  </p>
+                  <Button onClick={addSpecificationRow} type="button" variant="outline">
+                    <Plus className="h-4 w-4" />
+                    Add Field
+                  </Button>
+                </div>
+                <div className="space-y-3">
+                  {draft.specificationRows.length ? (
+                    draft.specificationRows.map((row, rowIndex) => (
+                      <div
+                        className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+                        key={`${draft.componentId}-${rowIndex}`}
+                      >
+                        <Input
+                          placeholder="Field name"
+                          value={row.key}
+                          onChange={(event) =>
+                            updateSpecificationRow(rowIndex, { key: event.target.value })
+                          }
+                        />
+                        <Input
+                          placeholder="Value"
+                          value={row.value}
+                          onChange={(event) =>
+                            updateSpecificationRow(rowIndex, { value: event.target.value })
+                          }
+                        />
+                        <Button
+                          onClick={() => removeSpecificationRow(rowIndex)}
+                          type="button"
+                          variant="ghost"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No advanced fields added yet.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 border-t border-border px-5 py-4">
+          <Button onClick={onClose} type="button" variant="outline">
+            Cancel
+          </Button>
+          <Button disabled={!draft.componentName.trim()} onClick={save} type="button">
+            Save Component
+          </Button>
+        </div>
+      </aside>
+    </div>
+  );
+};
+
 export const ProductConfigurationPage = () => {
   const navigate = useNavigate();
   const { tenderId = "" } = useParams();
@@ -312,6 +652,7 @@ export const ProductConfigurationPage = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductToAdd, setSelectedProductToAdd] = useState("");
   const [collapsedProducts, setCollapsedProducts] = useState<Record<string, boolean>>({});
+  const [drawerState, setDrawerState] = useState<ComponentDrawerState | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -353,16 +694,27 @@ export const ProductConfigurationPage = () => {
           );
 
           if (isMounted) {
-            setForm(applyDerivedSnapshotValues(toForm(config), toForm(config).productSnapshots, activeMaterials));
+            const nextForm = toForm(config);
+            setForm(
+              applyDerivedSnapshotValues(
+                nextForm,
+                nextForm.productSnapshots,
+                activeMaterials,
+              ),
+            );
           }
         } catch (reason) {
           if (reason instanceof ApiError && reason.status === 404) {
-            const tender = await api.get<TenderRequest>(`/tenders/${tenderId}?tenantId=alimex-demo`);
+            const tender = await api.get<TenderRequest>(
+              `/tenders/${tenderId}?tenantId=alimex-demo`,
+            );
             const tenderSnapshots =
               tender.productSnapshots.length > 0
                 ? tender.productSnapshots.map(toSnapshotForm)
                 : activeProducts
-                    .filter((product) => tender.selectedProductIds.includes(product.productId))
+                    .filter((product) =>
+                      tender.selectedProductIds.includes(product.productId),
+                    )
                     .map(toSnapshotForm);
 
             if (isMounted) {
@@ -384,7 +736,11 @@ export const ProductConfigurationPage = () => {
         }
       } catch (reason) {
         if (isMounted) {
-          setError(reason instanceof Error ? reason.message : "Unable to load product configuration.");
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Unable to load product configuration.",
+          );
         }
       } finally {
         if (isMounted) {
@@ -400,117 +756,86 @@ export const ProductConfigurationPage = () => {
     };
   }, [tenderId]);
 
-  const updateProductSnapshot = (productIndex: number, patch: Partial<ProductSnapshotForm>) => {
+  const updateProductSnapshot = (
+    productIndex: number,
+    patch: Partial<ProductSnapshotForm>,
+  ) => {
     setForm((current) => {
       const nextSnapshots = current.productSnapshots.map((product, index) =>
         index === productIndex ? { ...product, ...patch } : product,
       );
+
       return applyDerivedSnapshotValues(current, nextSnapshots, materials);
     });
   };
 
-  const updateComponent = (
+  const openAddComponentDrawer = (productIndex: number) => {
+    setDrawerState({
+      mode: "add",
+      productIndex,
+      componentIndex: null,
+      value: createComponentFromType("Bag Body"),
+    });
+  };
+
+  const openEditComponentDrawer = (
     productIndex: number,
     componentIndex: number,
-    patch: Partial<ProductSnapshotComponentForm>,
+    component: ProductSnapshotComponentForm,
+  ) => {
+    setDrawerState({
+      mode: "edit",
+      productIndex,
+      componentIndex,
+      value: createComponentForm(component),
+    });
+  };
+
+  const saveComponent = (
+    productIndex: number,
+    mode: "add" | "edit",
+    componentIndex: number | null,
+    value: ProductSnapshotComponentForm,
   ) => {
     setForm((current) => {
-      const nextSnapshots = current.productSnapshots.map((product, index) =>
-        index === productIndex
-          ? {
-              ...product,
-              components: product.components.map((component, currentComponentIndex) =>
-                currentComponentIndex === componentIndex ? { ...component, ...patch } : component,
-              ),
-            }
-          : product,
-      );
+      const nextSnapshots = current.productSnapshots.map((product, index) => {
+        if (index !== productIndex) {
+          return product;
+        }
+
+        return {
+          ...product,
+          components:
+            mode === "edit" && componentIndex !== null
+              ? product.components.map((component, currentComponentIndex) =>
+                  currentComponentIndex === componentIndex ? value : component,
+                )
+              : [...product.components, value],
+        };
+      });
 
       return applyDerivedSnapshotValues(current, nextSnapshots, materials);
     });
+
+    setDrawerState(null);
   };
 
   const removeComponent = (productIndex: number, componentIndex: number) => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("Delete this component from the tender snapshot?")
+    ) {
+      return;
+    }
+
     setForm((current) => {
       const nextSnapshots = current.productSnapshots.map((product, index) =>
         index === productIndex
           ? {
               ...product,
-              components: product.components.filter((_, currentComponentIndex) => currentComponentIndex !== componentIndex),
-            }
-          : product,
-      );
-
-      return applyDerivedSnapshotValues(current, nextSnapshots, materials);
-    });
-  };
-
-  const addSpecificationRow = (productIndex: number, componentIndex: number) => {
-    setForm((current) => {
-      const nextSnapshots = current.productSnapshots.map((product, index) =>
-        index === productIndex
-          ? {
-              ...product,
-              components: product.components.map((component, currentComponentIndex) =>
-                currentComponentIndex === componentIndex
-                  ? {
-                      ...component,
-                      specificationRows: [...component.specificationRows, { key: "", value: "" }],
-                    }
-                  : component,
-              ),
-            }
-          : product,
-      );
-
-      return applyDerivedSnapshotValues(current, nextSnapshots, materials);
-    });
-  };
-
-  const updateSpecificationRow = (
-    productIndex: number,
-    componentIndex: number,
-    rowIndex: number,
-    patch: Partial<SpecificationFormRow>,
-  ) => {
-    setForm((current) => {
-      const nextSnapshots = current.productSnapshots.map((product, index) =>
-        index === productIndex
-          ? {
-              ...product,
-              components: product.components.map((component, currentComponentIndex) =>
-                currentComponentIndex === componentIndex
-                  ? {
-                      ...component,
-                      specificationRows: component.specificationRows.map((row, currentRowIndex) =>
-                        currentRowIndex === rowIndex ? { ...row, ...patch } : row,
-                      ),
-                    }
-                  : component,
-              ),
-            }
-          : product,
-      );
-
-      return applyDerivedSnapshotValues(current, nextSnapshots, materials);
-    });
-  };
-
-  const removeSpecificationRow = (productIndex: number, componentIndex: number, rowIndex: number) => {
-    setForm((current) => {
-      const nextSnapshots = current.productSnapshots.map((product, index) =>
-        index === productIndex
-          ? {
-              ...product,
-              components: product.components.map((component, currentComponentIndex) =>
-                currentComponentIndex === componentIndex
-                  ? {
-                      ...component,
-                      specificationRows: component.specificationRows.filter(
-                        (_, currentRowIndex) => currentRowIndex !== rowIndex,
-                      ),
-                    }
-                  : component,
+              components: product.components.filter(
+                (_, currentComponentIndex) =>
+                  currentComponentIndex !== componentIndex,
               ),
             }
           : product,
@@ -544,9 +869,12 @@ export const ProductConfigurationPage = () => {
 
   const removeProductFromConfiguration = (productId: string) => {
     setForm((current) => {
-      const nextSnapshots = current.productSnapshots.filter((product) => product.productId !== productId);
+      const nextSnapshots = current.productSnapshots.filter(
+        (product) => product.productId !== productId,
+      );
       return applyDerivedSnapshotValues(current, nextSnapshots, materials);
     });
+
     setCollapsedProducts((current) => {
       const next = { ...current };
       delete next[productId];
@@ -581,7 +909,8 @@ export const ProductConfigurationPage = () => {
     if (
       form.productSnapshots.some(
         (product) =>
-          product.requestedQuantity.trim() === "" || numberOrNull(product.requestedQuantity) === null,
+          product.requestedQuantity.trim() === "" ||
+          numberOrNull(product.requestedQuantity) === null,
       )
     ) {
       setError("Provide a requested quantity for each added product.");
@@ -616,9 +945,17 @@ export const ProductConfigurationPage = () => {
       bottomDesign: form.bottomDesign.trim(),
       seamType: form.seamType.trim(),
       includeWearStrip: form.includeWearStrip,
-      wearStripHeightMm: form.includeWearStrip ? numberOrNull(form.wearStripHeightMm) : null,
-      mainFabricMaterialId: normalizeMaterialReference(form.mainFabricMaterialId, materials),
-      accessoriesMaterialId: normalizeMaterialReference(form.accessoriesMaterialId, materials),
+      wearStripHeightMm: form.includeWearStrip
+        ? numberOrNull(form.wearStripHeightMm)
+        : null,
+      mainFabricMaterialId: normalizeMaterialReference(
+        form.mainFabricMaterialId,
+        materials,
+      ),
+      accessoriesMaterialId: normalizeMaterialReference(
+        form.accessoriesMaterialId,
+        materials,
+      ),
       threadMaterialId: normalizeMaterialReference(form.threadMaterialId, materials),
       packagingType: form.packagingType.trim(),
       bagsPerCarton: numberOrNull(form.bagsPerCarton),
@@ -651,12 +988,14 @@ export const ProductConfigurationPage = () => {
         payload,
       );
 
-      const nextForm = applyDerivedSnapshotValues(
-        toForm(response),
-        toForm(response).productSnapshots,
-        materials,
+      const nextForm = toForm(response);
+      setForm(
+        applyDerivedSnapshotValues(
+          nextForm,
+          nextForm.productSnapshots,
+          materials,
+        ),
       );
-      setForm(nextForm);
       setMessage(
         mode === "draft"
           ? "Product configuration snapshot saved."
@@ -667,110 +1006,123 @@ export const ProductConfigurationPage = () => {
         navigate(`/tenders/${tenderId}/material-sourcing`);
       }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to save product configuration.");
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Unable to save product configuration.",
+      );
     } finally {
       setSaveMode(null);
     }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <TenderWorkflowStepper currentStep={2} tenderId={tenderId} />
 
-      <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <div>
-                <CardTitle>Product Configuration</CardTitle>
-                <CardDescription>
-                  Edit tender-specific product snapshots and Product Components without changing the master data records.
-                </CardDescription>
-              </div>
-              <Badge variant="default">PRODUCT_CONFIGURATION</Badge>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {isLoading ? (
-                <div className="rounded-2xl bg-slate-50 p-6 text-sm text-muted-foreground">
-                  Loading product configuration...
-                </div>
-              ) : null}
+      <Card>
+        <CardHeader className="border-b border-border pb-5">
+          <div>
+            <CardTitle>Product Configuration</CardTitle>
+            <CardDescription>
+              Add tender-specific product snapshots and edit reusable component details only when you need them.
+            </CardDescription>
+          </div>
+          <Badge variant="default">PRODUCT_CONFIGURATION</Badge>
+        </CardHeader>
+        <CardContent className="space-y-5 pt-6">
+          {isLoading ? (
+            <div className="rounded-2xl bg-slate-50 p-6 text-sm text-muted-foreground">
+              Loading product configuration...
+            </div>
+          ) : null}
 
-              {!isLoading ? (
-                <>
-                  <div className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
-                    <div className="mb-4">
-                      <h3 className="text-base font-semibold text-slate-900">Selected Products</h3>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Start empty, add one or more products, then edit their snapshot details for this tender.
-                      </p>
-                    </div>
-                    <div className="flex flex-col gap-3 md:flex-row">
-                      <div className="flex-1">
-                        <Select
-                          value={selectedProductToAdd}
-                          onChange={(event) => setSelectedProductToAdd(event.target.value)}
-                        >
-                          <option value="">Select a product</option>
-                          {products.map((product) => (
-                            <option key={product.productId} value={product.productId}>
-                              {product.productName} ({product.productType})
-                            </option>
-                          ))}
-                        </Select>
-                      </div>
-                      <Button onClick={addProductToConfiguration} type="button">
-                        <Plus className="h-4 w-4" />
-                        Add Product
-                      </Button>
-                    </div>
+          {!isLoading ? (
+            <>
+              <section className="rounded-[1.2rem] border border-border bg-slate-50/70 px-5 py-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-base font-semibold text-slate-900">Add Products</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Start with one or more reusable products, then adjust the tender snapshot as needed.
+                    </p>
                   </div>
+                  <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row">
+                    <div className="min-w-[20rem]">
+                      <Select
+                        value={selectedProductToAdd}
+                        onChange={(event) => setSelectedProductToAdd(event.target.value)}
+                      >
+                        <option value="">Select a product</option>
+                        {products.map((product) => (
+                          <option key={product.productId} value={product.productId}>
+                            {product.productName} ({product.productType})
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <Button onClick={addProductToConfiguration} type="button">
+                      <Plus className="h-4 w-4" />
+                      Add Product
+                    </Button>
+                  </div>
+                </div>
+              </section>
 
-                  <div className="space-y-4">
-                    {form.productSnapshots.length ? (
-                      form.productSnapshots.map((product, productIndex) => (
-                        <div key={product.productId} className="rounded-[1.25rem] border border-border bg-white p-5">
-                          <div className="mb-5 flex items-start justify-between gap-4">
-                            <button
-                              className="flex min-w-0 flex-1 items-start gap-3 text-left"
-                              onClick={() => toggleProductCollapse(product.productId)}
-                              type="button"
-                            >
-                              {collapsedProducts[product.productId] ? (
-                                <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
-                              ) : (
-                                <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
-                              )}
-                              <div className="min-w-0">
-                                <p className="text-base font-semibold text-slate-900">
-                                  {product.productName || "Untitled product snapshot"}
-                                </p>
-                                <p className="mt-1 text-sm text-muted-foreground">
-                                  Changes here are saved only on this tender snapshot.
-                                </p>
-                              </div>
-                            </button>
-                            <div className="flex items-center gap-2">
-                              <Badge variant="default">{product.components.length} component(s)</Badge>
-                              <Button
-                                onClick={() => removeProductFromConfiguration(product.productId)}
-                                type="button"
-                                variant="ghost"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                                Remove Product
-                              </Button>
+              <section className="space-y-4">
+                {form.productSnapshots.length ? (
+                  form.productSnapshots.map((product, productIndex) => (
+                    <div
+                      className="rounded-[1.2rem] border border-border bg-white"
+                      key={product.productId}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
+                        <button
+                          className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                          onClick={() => toggleProductCollapse(product.productId)}
+                          type="button"
+                        >
+                          {collapsedProducts[product.productId] ? (
+                            <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                          ) : (
+                            <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-base font-semibold text-slate-900">
+                                {product.productName || "Untitled product snapshot"}
+                              </p>
+                              <Badge variant="default">{product.productType}</Badge>
+                              <Badge variant="neutral">
+                                {product.components.length} component(s)
+                              </Badge>
                             </div>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              Tender snapshot only. Master product data stays unchanged.
+                            </p>
                           </div>
+                        </button>
+                        <Button
+                          onClick={() => removeProductFromConfiguration(product.productId)}
+                          type="button"
+                          variant="ghost"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Remove Product
+                        </Button>
+                      </div>
 
-                          {!collapsedProducts[product.productId] ? (
-                            <>
-                          <div className="grid gap-4 md:grid-cols-2">
+                      {!collapsedProducts[product.productId] ? (
+                        <div className="space-y-5 px-5 py-5">
+                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                             <label className="space-y-2 text-sm font-medium text-slate-700">
                               Product Name
                               <Input
                                 value={product.productName}
                                 onChange={(event) =>
-                                  updateProductSnapshot(productIndex, { productName: event.target.value })
+                                  updateProductSnapshot(productIndex, {
+                                    productName: event.target.value,
+                                  })
                                 }
                               />
                             </label>
@@ -788,7 +1140,7 @@ export const ProductConfigurationPage = () => {
                                 <option value="Other">Other</option>
                               </Select>
                             </label>
-                            <label className="space-y-2 text-sm font-medium text-slate-700 md:col-span-2">
+                            <label className="space-y-2 text-sm font-medium text-slate-700">
                               Requested Quantity
                               <Input
                                 inputMode="decimal"
@@ -800,259 +1152,201 @@ export const ProductConfigurationPage = () => {
                                 }
                               />
                             </label>
+                            <label className="space-y-2 text-sm font-medium text-slate-700">
+                              Factory Overhead
+                              <Input
+                                inputMode="decimal"
+                                value={product.factoryOverheadPerBag}
+                                onChange={(event) =>
+                                  updateProductSnapshot(productIndex, {
+                                    factoryOverheadPerBag: event.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="space-y-2 text-sm font-medium text-slate-700">
+                              Manufacturing Overhead
+                              <Input
+                                inputMode="decimal"
+                                value={product.manufacturingOverheadPerBag}
+                                onChange={(event) =>
+                                  updateProductSnapshot(productIndex, {
+                                    manufacturingOverheadPerBag: event.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="space-y-2 text-sm font-medium text-slate-700 xl:col-span-2">
+                              Management Overhead
+                              <Input
+                                inputMode="decimal"
+                                value={product.managementOverheadPerBag}
+                                onChange={(event) =>
+                                  updateProductSnapshot(productIndex, {
+                                    managementOverheadPerBag: event.target.value,
+                                  })
+                                }
+                              />
+                            </label>
                           </div>
 
-                          <div className="mt-5 space-y-4">
-                            {product.components.length ? (
-                              product.components.map((component, componentIndex) => (
-                                <div
-                                  key={component.componentId}
-                                  className="rounded-2xl border border-border bg-slate-50 p-4"
-                                >
-                                  <div className="mb-4 flex items-center justify-between gap-3">
-                                    <div>
-                                      <p className="text-sm font-semibold text-slate-900">
-                                        {component.componentName || `Component ${componentIndex + 1}`}
-                                      </p>
-                                      <p className="text-xs text-muted-foreground">
-                                        Edit this Product Component for the tender snapshot.
-                                      </p>
-                                    </div>
-                                    <Button
-                                      onClick={() => removeComponent(productIndex, componentIndex)}
-                                      type="button"
-                                      variant="ghost"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </div>
+                          <div className="space-y-4">
+                            <div className="flex flex-wrap items-start justify-between gap-4">
+                              <div>
+                                <h4 className="text-sm font-semibold text-slate-900">Components</h4>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                  Keep the tender view light. Open a component only when you need to edit details.
+                                </p>
+                              </div>
+                              <Button
+                                onClick={() => openAddComponentDrawer(productIndex)}
+                                type="button"
+                              >
+                                <Plus className="h-4 w-4" />
+                                Add Component
+                              </Button>
+                            </div>
 
-                                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                                    <label className="space-y-2 text-sm font-medium text-slate-700">
-                                      Component Name
-                                      <Input
-                                        value={component.componentName}
-                                        onChange={(event) =>
-                                          updateComponent(productIndex, componentIndex, {
-                                            componentName: event.target.value,
-                                          })
-                                        }
-                                      />
-                                    </label>
-                                    <label className="space-y-2 text-sm font-medium text-slate-700">
-                                      Component Type
-                                      <Input
-                                        value={component.componentType}
-                                        onChange={(event) =>
-                                          updateComponent(productIndex, componentIndex, {
-                                            componentType: event.target.value,
-                                          })
-                                        }
-                                      />
-                                    </label>
-                                    <label className="space-y-2 text-sm font-medium text-slate-700">
-                                      Material
-                                      <Select
-                                        value={normalizeMaterialReference(component.material, materials)}
-                                        onChange={(event) =>
-                                          updateComponent(productIndex, componentIndex, {
-                                            material: event.target.value,
-                                          })
-                                        }
+                            <div className="overflow-x-auto rounded-[1.15rem] border border-border">
+                              <table className="min-w-full text-sm">
+                                <thead className="bg-slate-50 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                                  <tr>
+                                    <th className="px-4 py-3">Component Name</th>
+                                    <th className="px-4 py-3">Component Type</th>
+                                    <th className="px-4 py-3">Material</th>
+                                    <th className="px-4 py-3">Key Dimensions</th>
+                                    <th className="px-4 py-3 text-right">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {product.components.length ? (
+                                    product.components.map((component, componentIndex) => (
+                                      <tr
+                                        className="border-t border-border"
+                                        key={component.componentId}
                                       >
-                                        <option value="">Select material</option>
-                                        {materials.map((material) => (
-                                          <option key={material.materialId} value={material.materialId}>
-                                            {material.materialName}
-                                          </option>
-                                        ))}
-                                      </Select>
-                                    </label>
-                                  </div>
-
-                                  {isBagBody(component) ? (
-                                    <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                      <label className="space-y-2 text-sm font-medium text-slate-700">
-                                        Diameter (m)
-                                        <Input
-                                          inputMode="decimal"
-                                          value={component.diameter}
-                                          onChange={(event) =>
-                                            updateComponent(productIndex, componentIndex, {
-                                              diameter: event.target.value,
-                                            })
-                                          }
-                                        />
-                                      </label>
-                                      <label className="space-y-2 text-sm font-medium text-slate-700">
-                                        Length (m)
-                                        <Input
-                                          inputMode="decimal"
-                                          value={component.length}
-                                          onChange={(event) =>
-                                            updateComponent(productIndex, componentIndex, {
-                                              length: event.target.value,
-                                            })
-                                          }
-                                        />
-                                      </label>
-                                      <label className="space-y-2 text-sm font-medium text-slate-700">
-                                        Seam Allowance (m)
-                                        <Input
-                                          inputMode="decimal"
-                                          value={component.seamAllowanceMm}
-                                          onChange={(event) =>
-                                            updateComponent(productIndex, componentIndex, {
-                                              seamAllowanceMm: event.target.value,
-                                            })
-                                          }
-                                        />
-                                      </label>
-                                      <label className="space-y-2 text-sm font-medium text-slate-700">
-                                        Top / Bottom Allowance (m)
-                                        <Input
-                                          inputMode="decimal"
-                                          value={component.topBottomAllowanceMm}
-                                          onChange={(event) =>
-                                            updateComponent(productIndex, componentIndex, {
-                                              topBottomAllowanceMm: event.target.value,
-                                            })
-                                          }
-                                        />
-                                      </label>
-                                    </div>
-                                  ) : null}
-
-                                  <div className="mt-4 rounded-2xl border border-border bg-white p-4">
-                                    <div className="mb-3 flex items-center justify-between gap-3">
-                                      <div>
-                                        <p className="text-sm font-semibold text-slate-900">Specifications</p>
-                                        <p className="text-xs text-muted-foreground">
-                                          Add flexible key-value details for this component snapshot.
-                                        </p>
-                                      </div>
-                                      <Button
-                                        onClick={() => addSpecificationRow(productIndex, componentIndex)}
-                                        type="button"
-                                        variant="outline"
-                                      >
-                                        <Plus className="h-4 w-4" />
-                                        Add Field
-                                      </Button>
-                                    </div>
-                                    <div className="space-y-3">
-                                      {component.specificationRows.length ? (
-                                        component.specificationRows.map((row, rowIndex) => (
-                                          <div
-                                            key={`${component.componentId}-${rowIndex}`}
-                                            className="grid gap-3 md:grid-cols-[1fr_1fr_auto]"
-                                          >
-                                            <Input
-                                              value={row.key}
-                                              placeholder="Specification name"
-                                              onChange={(event) =>
-                                                updateSpecificationRow(
-                                                  productIndex,
-                                                  componentIndex,
-                                                  rowIndex,
-                                                  { key: event.target.value },
-                                                )
-                                              }
-                                            />
-                                            <Input
-                                              value={row.value}
-                                              placeholder="Specification value"
-                                              onChange={(event) =>
-                                                updateSpecificationRow(
-                                                  productIndex,
-                                                  componentIndex,
-                                                  rowIndex,
-                                                  { value: event.target.value },
-                                                )
-                                              }
-                                            />
+                                        <td className="px-4 py-3 font-medium text-slate-900">
+                                          {component.componentName || "-"}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                          {component.componentType || "-"}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                          {resolveMaterialLabel(component.material, materials) || "-"}
+                                        </td>
+                                        <td className="px-4 py-3 text-muted-foreground">
+                                          {getKeyDimensions(component)}
+                                        </td>
+                                        <td className="px-4 py-3">
+                                          <div className="flex justify-end gap-2">
                                             <Button
+                                              className="h-8 px-3"
                                               onClick={() =>
-                                                removeSpecificationRow(productIndex, componentIndex, rowIndex)
+                                                openEditComponentDrawer(
+                                                  productIndex,
+                                                  componentIndex,
+                                                  component,
+                                                )
                                               }
+                                              size="sm"
                                               type="button"
                                               variant="ghost"
                                             >
-                                              <Trash2 className="h-4 w-4" />
+                                              <Pencil className="h-3.5 w-3.5" />
+                                              Edit
+                                            </Button>
+                                            <Button
+                                              className="h-8 px-3"
+                                              onClick={() =>
+                                                removeComponent(productIndex, componentIndex)
+                                              }
+                                              size="sm"
+                                              type="button"
+                                              variant="ghost"
+                                            >
+                                              <Trash2 className="h-3.5 w-3.5" />
+                                              Delete
                                             </Button>
                                           </div>
-                                        ))
-                                      ) : (
-                                        <p className="text-sm text-muted-foreground">
-                                          No extra specification fields added.
-                                        </p>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              ))
-                            ) : (
-                              <div className="rounded-2xl border border-dashed border-border bg-white px-4 py-6 text-center text-sm text-muted-foreground">
-                                This product snapshot has no Product Components yet.
-                              </div>
-                            )}
+                                        </td>
+                                      </tr>
+                                    ))
+                                  ) : (
+                                    <tr>
+                                      <td
+                                        className="px-4 py-8 text-center text-muted-foreground"
+                                        colSpan={5}
+                                      >
+                                        No components added yet.
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
-                            </>
-                          ) : null}
                         </div>
-                      ))
-                    ) : (
-                      <div className="rounded-2xl border border-dashed border-border bg-white px-4 py-10 text-center text-sm text-muted-foreground">
-                        No products added yet. Choose a product above to create a tender-specific snapshot.
-                      </div>
-                    )}
+                      ) : null}
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-[1.2rem] border border-dashed border-border bg-slate-50/70 px-5 py-12 text-center text-sm text-muted-foreground">
+                    No products added to this tender yet.
                   </div>
+                )}
+              </section>
 
-                </>
+              {message ? (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                  {message}
+                </div>
+              ) : null}
+
+              {error ? (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {error}
+                </div>
               ) : null}
 
               <div className="flex flex-col gap-4 rounded-[1.2rem] border border-border bg-white p-4 md:flex-row md:items-center md:justify-between">
                 <div className="text-sm">
-                  <p className="font-medium text-slate-900">
-                    Save the tender-specific product snapshot before roll calculations.
-                  </p>
-                  <p className="text-muted-foreground">
-                    Saving this section also updates the tender status to `PRODUCT_CONFIGURATION`.
-                  </p>
                   {message ? <p className="mt-2 text-emerald-600">{message}</p> : null}
                   {error ? <p className="mt-2 text-rose-600">{error}</p> : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
+                    onClick={() => navigate(`/tenders/intake/${tenderId}`)}
                     type="button"
                     variant="ghost"
-                    onClick={() => navigate(`/tenders/intake/${tenderId}`)}
                   >
                     <ArrowLeft className="h-4 w-4" />
                     Back
                   </Button>
                   <Button
+                    onClick={() => void save("draft")}
                     type="button"
                     variant="outline"
-                    disabled={saveMode !== null}
-                    onClick={() => void save("draft")}
                   >
                     <Save className="h-4 w-4" />
                     {saveMode === "draft" ? "Saving..." : "Save Draft"}
                   </Button>
-                  <Button
-                    type="button"
-                    disabled={saveMode !== null}
-                    onClick={() => void save("continue")}
-                  >
+                  <Button onClick={() => void save("continue")} type="button">
                     <ArrowRight className="h-4 w-4" />
                     {saveMode === "continue" ? "Saving..." : "Save & Continue"}
                   </Button>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-      </div>
+            </>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <ProductComponentDrawer
+        materials={materials}
+        onClose={() => setDrawerState(null)}
+        onSave={saveComponent}
+        state={drawerState}
+      />
     </div>
   );
 };
