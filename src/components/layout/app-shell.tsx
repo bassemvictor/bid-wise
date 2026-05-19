@@ -23,7 +23,7 @@ const navigation = [
     label: "Master Data",
     items: [
       { label: "Customers", href: "/customers" },
-      { label: "Products", href: "/products" },
+      { label: "Suppliers", href: "/suppliers" },
       {
         label: "Materials",
         href: "/materials",
@@ -32,7 +32,7 @@ const navigation = [
           { label: "Import", href: "/import-presets" },
         ],
       },
-      { label: "Suppliers", href: "/suppliers" },
+      { label: "Products", href: "/products" },
       { label: "Accessories", href: "/accessories" },
     ],
   },

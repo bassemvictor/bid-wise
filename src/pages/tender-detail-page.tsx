@@ -1,18 +1,19 @@
 import {
+  ArrowRight,
   Calculator,
   ChevronDown,
   ChevronRight,
   CircleDollarSign,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { useLocation, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { NestedTenderGrid } from "../components/tenders/nested-tender-grid";
-import { RouteTabs } from "../components/ui/tabs";
 import { api, ApiError, isApiConfigured } from "../lib/api";
-import { getPageTitle, getTenderSectionTabs } from "../lib/route-metadata";
+import { getPageTitle } from "../lib/route-metadata";
 import { PricingApprovalPage } from "./pricing-approval-page";
 import type {
   CostBuildUp,
@@ -23,6 +24,7 @@ import type {
   ScenarioAlternative,
   TenderActivity,
   TenderRequest,
+  TenderStatus,
 } from "../../shared/types";
 
 type SectionPayloads = {
@@ -84,6 +86,63 @@ const formatAuditValue = (value: string | number | boolean | null) => {
   return String(value);
 };
 
+const getWorkflowPath = ({
+  tenderId,
+  status,
+  section,
+}: {
+  tenderId: string;
+  status?: TenderStatus | null;
+  section?: keyof SectionPayloads;
+}) => {
+  if (status) {
+    switch (status) {
+      case "DRAFT_INTAKE":
+      case "MISSING_INFORMATION":
+        return `/tenders/intake/${tenderId}`;
+      case "TECHNICAL_REVIEW":
+        return `/tenders/${tenderId}/technical-review`;
+      case "READY_FOR_PRICING":
+        return `/tenders/${tenderId}/product-configuration`;
+      case "PRODUCT_CONFIGURATION":
+        return `/tenders/${tenderId}/material-sourcing`;
+      case "MATERIAL_ROLL_CALCULATION":
+      case "MATERIAL_SOURCING":
+        return `/tenders/${tenderId}/cost-build-up`;
+      case "COST_BUILDUP":
+        return `/tenders/${tenderId}/alternatives`;
+      case "ALTERNATIVES":
+      case "PENDING_APPROVAL":
+        return `/tenders/${tenderId}/pricing-approval`;
+      case "APPROVED":
+      case "OFFER_SUBMITTED":
+      case "NEGOTIATION":
+      case "WON":
+      case "LOST":
+      case "CANCELLED":
+      case "PRICING_IN_PROGRESS":
+      case "SOURCING_REVIEW":
+      case "PRICE_READY":
+        return `/tenders/${tenderId}`;
+      default:
+        return `/tenders/${tenderId}`;
+    }
+  }
+
+  switch (section) {
+    case "material-sourcing":
+      return `/tenders/${tenderId}/material-sourcing`;
+    case "cost-build-up":
+      return `/tenders/${tenderId}/cost-build-up`;
+    case "alternatives":
+      return `/tenders/${tenderId}/alternatives`;
+    case "pricing-approval":
+      return `/tenders/${tenderId}/pricing-approval`;
+    default:
+      return `/tenders/intake/${tenderId}`;
+  }
+};
+
 const TenderDetailContent = ({
   section,
   tenderId,
@@ -100,6 +159,12 @@ const TenderDetailContent = ({
     () => getPageTitle(section === "overview" ? `/tenders/${tenderId}` : `/tenders/${tenderId}/${section}`),
     [section, tenderId],
   );
+  const navigate = useNavigate();
+  const workflowPath = getWorkflowPath({
+    tenderId,
+    status: overview?.tender?.status,
+    section,
+  });
 
   useEffect(() => {
     if (!isApiConfigured || !tenderId) {
@@ -196,7 +261,12 @@ const TenderDetailContent = ({
   if (section !== "overview") {
     return (
       <div className="space-y-6">
-        <RouteTabs items={getTenderSectionTabs(tenderId || "TDR-1001")} />
+        <div className="flex justify-end">
+          <Button onClick={() => navigate(workflowPath)} type="button">
+            Edit Tender Workflow
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+        </div>
         <Card>
           <CardHeader>
             <div>
@@ -220,7 +290,12 @@ const TenderDetailContent = ({
 
   return (
     <div className="space-y-6">
-      <RouteTabs items={getTenderSectionTabs(tenderId || "TDR-1001")} />
+      <div className="flex justify-end">
+        <Button onClick={() => navigate(workflowPath)} type="button">
+          Edit Tender Workflow
+          <ArrowRight className="h-4 w-4" />
+        </Button>
+      </div>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {summaryCards.map((card) => {
