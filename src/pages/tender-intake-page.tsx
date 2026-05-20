@@ -362,9 +362,6 @@ export const TenderIntakePage = () => {
           <CardHeader>
             <div>
               <CardTitle>Tender Intake</CardTitle>
-              <CardDescription>
-                Capture the information received when Alimex is invited to participate in a tender or submit an offer.
-              </CardDescription>
             </div>
             <Badge variant="default">{form.status}</Badge>
           </CardHeader>
