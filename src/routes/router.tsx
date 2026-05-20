@@ -31,6 +31,10 @@ export const router = createBrowserRouter([
     element: <Navigate replace to="/tenders" />,
   },
   {
+    path: "/dashboard",
+    element: <Navigate replace to="/tenders" />,
+  },
+  {
     path: "/auth",
     element: <AuthPage />,
   },

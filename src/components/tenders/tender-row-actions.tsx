@@ -1,7 +1,7 @@
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { NavLink } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import { Button } from "../ui/button";
 import type { TenderSummary } from "../../../shared/types";
@@ -21,6 +21,7 @@ export const TenderRowActions = ({
   onDuplicate,
   record,
 }: TenderRowActionsProps) => {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ left: 0, top: 0 });
   const buttonRef = useRef<HTMLButtonElement | null>(null);
@@ -91,13 +92,16 @@ export const TenderRowActions = ({
               ref={menuRef}
               style={{ left: position.left, top: position.top }}
             >
-              <NavLink
-                className="block rounded-xl px-3 py-2 text-sm hover:bg-slate-50"
-                onClick={() => setOpen(false)}
-                to={`/tenders/${record.tenderId}`}
+              <button
+                className="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50"
+                onClick={() => {
+                  setOpen(false);
+                  navigate(`/tenders/${record.tenderId}`);
+                }}
+                type="button"
               >
                 View Tender
-              </NavLink>
+              </button>
               <button
                 className="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-slate-50"
                 onClick={() => {

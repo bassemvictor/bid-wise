@@ -332,9 +332,9 @@ const SourceSelectionDrawer = ({
   onRemoveAddedSource,
   onUpdateAddedSource,
   onSearchChange,
+  onSelectAndConfirm,
   onSelectSource,
   onTabChange,
-  onConfirm,
 }: {
   component: ComponentSourcingForm;
   metrics: ComponentMetrics | undefined;
@@ -352,9 +352,9 @@ const SourceSelectionDrawer = ({
   onRemoveAddedSource: (sourceIndex: number) => void;
   onUpdateAddedSource: (sourceIndex: number, patch: Partial<SelectedSourceForm>) => void;
   onSearchChange: (value: string) => void;
+  onSelectAndConfirm: (sourceId: string) => void;
   onSelectSource: (sourceId: string) => void;
   onTabChange: (tab: SourceTab) => void;
-  onConfirm: () => void;
 }) => {
   const title = `Select Source - ${component.componentName}`;
   const totals = getRequestedAndAppliedTotals(component, metrics);
@@ -550,17 +550,26 @@ const SourceSelectionDrawer = ({
                         : "Available in stock"
                       : source.availabilityLabel;
                   const isSelected = selectedSourceId === source.sourceId;
+                  const isAlreadyAdded = component.selectedSources.some(
+                    (selectedSource) => selectedSource.sourceId === source.sourceId,
+                  );
 
                   return (
                     <button
                       key={source.sourceId}
+                      disabled={isAlreadyAdded}
                       className={cn(
                         "w-full rounded-2xl border px-4 py-4 text-left transition-colors",
+                        isAlreadyAdded && "border-slate-200 bg-slate-100/80 opacity-70",
                         isSelected
                           ? "border-primary bg-primary/5 shadow-sm"
                           : "border-border bg-white hover:bg-slate-50",
                       )}
-                      onClick={() => onSelectSource(source.sourceId)}
+                      onClick={() => {
+                        if (!isAlreadyAdded) {
+                          onSelectSource(source.sourceId);
+                        }
+                      }}
                       type="button"
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -583,18 +592,20 @@ const SourceSelectionDrawer = ({
                           </p>
                           <p className="mt-2 text-sm text-muted-foreground">Availability: {availability}</p>
                         </div>
-                        <div
-                          className={cn(
-                            "mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
-                            isSelected ? "border-primary" : "border-slate-300",
-                          )}
-                        >
-                          <span
-                            className={cn(
-                              "h-2.5 w-2.5 rounded-full",
-                              isSelected ? "bg-primary" : "bg-transparent",
-                            )}
-                          />
+                        <div className="flex shrink-0 flex-col items-end gap-3">
+                          <Button
+                            disabled={isAlreadyAdded}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (!isAlreadyAdded) {
+                                onSelectAndConfirm(source.sourceId);
+                              }
+                            }}
+                            type="button"
+                            variant={isSelected ? "default" : "outline"}
+                          >
+                            {isAlreadyAdded ? "Added" : "Select"}
+                          </Button>
                         </div>
                       </div>
                     </button>
@@ -615,10 +626,7 @@ const SourceSelectionDrawer = ({
               Cancel
             </Button>
             <Button onClick={onDone} type="button" variant="outline">
-              Done Adding Sources
-            </Button>
-            <Button disabled={!selectedSourceId} onClick={onConfirm} type="button">
-              Select Source
+              Done
             </Button>
           </div>
         </div>
@@ -1274,11 +1282,11 @@ const SourceManagementDrawer = ({
         </div>
 
         <div className="border-t border-border px-5 py-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-3">
             <div className="text-sm text-muted-foreground">
               {onDelete ? "Save this option to add or update its summary line." : "Save this option to add its summary line."}
             </div>
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center justify-end gap-3">
               {onDelete ? (
                 <Button onClick={onDelete} type="button" variant="ghost">
                   <Trash2 className="h-4 w-4" />
@@ -1985,6 +1993,14 @@ export const MaterialSourcingPage = () => {
       return;
     }
 
+    confirmPickerSourceById(sourcePickerState.selectedSourceId);
+  };
+
+  const confirmPickerSourceById = (sourceId: string) => {
+    if (!sourcePickerState) {
+      return;
+    }
+
     const component = form.componentSelections[sourcePickerState.componentIndex];
     if (!component) {
       return;
@@ -1998,7 +2014,7 @@ export const MaterialSourcingPage = () => {
       materials,
       component.materialId || productConfiguration?.mainFabricMaterialId || "",
     );
-    const selectedOption = sourceOptions.find((source) => source.sourceId === sourcePickerState.selectedSourceId);
+    const selectedOption = sourceOptions.find((source) => source.sourceId === sourceId);
 
     if (!selectedOption) {
       return;
@@ -2630,7 +2646,6 @@ export const MaterialSourcingPage = () => {
           metrics={componentMetrics[sourcePickerState.componentIndex]}
           onClose={() => setSourcePickerState(null)}
           onDone={() => setSourcePickerState(null)}
-          onConfirm={confirmPickerSource}
           onOpenAddedSource={(sourceIndex) => {
             setSourcePickerState(null);
             openSavedSourceDrawer(sourcePickerState.componentIndex, sourceIndex);
@@ -2640,6 +2655,7 @@ export const MaterialSourcingPage = () => {
             updateAddedSource(sourcePickerState.componentIndex, sourceIndex, patch)
           }
           onSearchChange={setPickerSearch}
+          onSelectAndConfirm={confirmPickerSourceById}
           onSelectSource={(sourceId) =>
             setSourcePickerState((current) => (current ? { ...current, selectedSourceId: sourceId } : current))
           }

@@ -81,6 +81,14 @@ const requestTypeOptions: TenderRequestType[] = [
   "direct order",
 ];
 
+const requestTypeLabelMap: Record<TenderRequestType, string> = {
+  inquiry: "Inquiry",
+  "public tender": "Public Tender",
+  "budget offer": "Budget Offer",
+  "limited tender": "Limited Tender",
+  "direct order": "Direct Order",
+};
+
 const requiredFields: Array<keyof TenderIntakeForm> = [
   "customerName",
   "tenderNumber",
@@ -428,7 +436,7 @@ export const TenderIntakePage = () => {
                         >
                           {requestTypeOptions.map((option) => (
                             <option key={option} value={option}>
-                              {option}
+                              {requestTypeLabelMap[option]}
                             </option>
                           ))}
                         </Select>

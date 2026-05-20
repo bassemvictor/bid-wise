@@ -17,7 +17,6 @@ type SortField =
   | "internalInquiryNumber"
   | "customerName"
   | "requestType"
-  | "requestedMaterial"
   | "tenderDueDate"
   | "requestedDeliveryTime"
   | "status"
@@ -155,7 +154,6 @@ export const AllTendersPage = () => {
       "Internal Inquiry Number",
       "Customer",
       "Request Type",
-      "Product / Material",
       "Due Date",
       "Delivery Time",
       "Status",
@@ -167,7 +165,6 @@ export const AllTendersPage = () => {
       item.internalInquiryNumber,
       item.customerName,
       item.requestType,
-      item.requestedMaterial,
       item.tenderDueDate,
       item.requestedDeliveryTime,
       item.status,
@@ -190,7 +187,6 @@ export const AllTendersPage = () => {
       "Internal Inquiry Number",
       "Customer",
       "Request Type",
-      "Product / Material",
       "Due Date",
       "Delivery Time",
       "Status",
@@ -206,7 +202,6 @@ export const AllTendersPage = () => {
             <td>${escapeHtml(item.internalInquiryNumber)}</td>
             <td>${escapeHtml(item.customerName)}</td>
             <td>${escapeHtml(item.requestType)}</td>
-            <td>${escapeHtml(item.requestedMaterial)}</td>
             <td>${escapeHtml(item.tenderDueDate)}</td>
             <td>${escapeHtml(item.requestedDeliveryTime)}</td>
             <td>${escapeHtml(item.status)}</td>

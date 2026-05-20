@@ -1,4 +1,3 @@
-import { KeyRound, LogIn, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 
@@ -21,7 +20,13 @@ export const AuthPage = () => {
 
   const redirectTo = useMemo(() => {
     const state = location.state as { from?: { pathname?: string } } | null;
-    return state?.from?.pathname ?? "/tenders";
+    const nextPath = state?.from?.pathname;
+
+    if (!nextPath || nextPath === "/" || nextPath.startsWith("/dashboard")) {
+      return "/tenders";
+    }
+
+    return nextPath;
   }, [location.state]);
 
   if (status === "authenticated") {
@@ -74,28 +79,11 @@ export const AuthPage = () => {
         <div className="rounded-[2rem] border border-blue-100/80 bg-gradient-to-br from-slate-950 via-blue-950 to-blue-700 p-8 text-white panel-shadow sm:p-10">
           <p className="text-xs uppercase tracking-[0.22em] text-blue-200/80">Alimex</p>
           <h1 className="mt-5 max-w-xl text-4xl font-semibold leading-tight">
-            Secure tender pricing for sales, sourcing, and approvals.
+            BidWise - Secure tender pricing, sourcing, and approvals.
           </h1>
           <p className="mt-5 max-w-2xl text-base text-blue-100/80">
-            Sign in with your Cognito account to access the full Alimex pricing workflow and the right permissions for your team role.
+            Sign in with your Cognito account to access the full tender pricing workflow.
           </p>
-          <div className="mt-8 grid gap-4 sm:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-white/8 p-4">
-              <ShieldCheck className="h-5 w-5 text-blue-100" />
-              <p className="mt-3 text-sm font-medium">Cognito secured</p>
-              <p className="mt-2 text-sm text-blue-100/70">Email sign-in with protected API access.</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/8 p-4">
-              <KeyRound className="h-5 w-5 text-blue-100" />
-              <p className="mt-3 text-sm font-medium">Temporary passwords supported</p>
-              <p className="mt-2 text-sm text-blue-100/70">First-time users can complete the required password reset here.</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/8 p-4">
-              <LogIn className="h-5 w-5 text-blue-100" />
-              <p className="mt-3 text-sm font-medium">Audit friendly</p>
-              <p className="mt-2 text-sm text-blue-100/70">Signed-in identity flows into tender activity logs.</p>
-            </div>
-          </div>
         </div>
 
         <Card className="self-start">

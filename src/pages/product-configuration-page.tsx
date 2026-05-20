@@ -1164,7 +1164,7 @@ export const ProductConfigurationPage = () => {
 
                       {!collapsedProducts[product.productId] ? (
                         <div className="space-y-5 px-5 py-5">
-                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
                             <label className="space-y-2 text-sm font-medium text-slate-700">
                               Product Name
                               <Input
@@ -1226,7 +1226,7 @@ export const ProductConfigurationPage = () => {
                                 }
                               />
                             </label>
-                            <label className="space-y-2 text-sm font-medium text-slate-700 xl:col-span-2">
+                            <label className="space-y-2 text-sm font-medium text-slate-700">
                               Management Overhead
                               <Input
                                 inputMode="decimal"

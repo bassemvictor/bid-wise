@@ -12,7 +12,6 @@ type SortField =
   | "internalInquiryNumber"
   | "customerName"
   | "requestType"
-  | "requestedMaterial"
   | "tenderDueDate"
   | "requestedDeliveryTime"
   | "status"
@@ -62,7 +61,6 @@ export const TenderTable = ({
             ["Internal Inquiry Number", "internalInquiryNumber"],
             ["Customer", "customerName"],
             ["Request Type", "requestType"],
-            ["Product / Material", "requestedMaterial"],
             ["Due Date", "tenderDueDate"],
             ["Delivery Time", "requestedDeliveryTime"],
             ["Status", "status"],
@@ -92,7 +90,6 @@ export const TenderTable = ({
               <TableCell>{record.internalInquiryNumber}</TableCell>
               <TableCell>{record.customerName}</TableCell>
               <TableCell><TenderTypeBadge type={record.requestType} /></TableCell>
-              <TableCell>{record.requestedMaterial || "-"}</TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">
                   <span>{record.tenderDueDate || "-"}</span>

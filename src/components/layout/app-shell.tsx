@@ -13,13 +13,6 @@ const navigation = [
     items: [{ label: "All Tenders", href: "/tenders" }],
   },
   {
-    label: "Pricing",
-    items: [
-      { label: "Price Scenarios", href: "/price-scenarios" },
-      { label: "Price Comparisons", href: "/price-scenarios/SCN-1001" },
-    ],
-  },
-  {
     label: "Master Data",
     items: [
       { label: "Customers", href: "/customers" },
@@ -34,6 +27,13 @@ const navigation = [
       },
       { label: "Products", href: "/products" },
       { label: "Accessories", href: "/accessories" },
+    ],
+  },
+  {
+    label: "Pricing",
+    items: [
+      { label: "Price Scenarios", href: "/price-scenarios" },
+      { label: "Price Comparisons", href: "/price-scenarios/SCN-1001" },
     ],
   },
   {
