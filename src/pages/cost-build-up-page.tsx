@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Calculator, ChevronDown, MoreHorizontal, Package, Save } from "lucide-react";
+import { ArrowLeft, ArrowRight, Calculator, ChevronDown, Package, Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
@@ -66,6 +66,27 @@ type MaterialLineOverrides = {
   C: number | null;
 };
 
+const productOverheadLineCode = (baseCode: "F" | "G" | "G2", productId: string) =>
+  `${baseCode}::${productId}`;
+
+const productOverheadLineDefinitions = {
+  F: {
+    category: "Factory Overhead",
+    description: "Factory overhead allocation for this product.",
+    calculationBasis: "Editable per product row",
+  },
+  G: {
+    category: "Manufacturing Overhead",
+    description: "Manufacturing overhead allocation for this product.",
+    calculationBasis: "Editable per product row",
+  },
+  G2: {
+    category: "Management Overhead",
+    description: "Management overhead allocation for this product.",
+    calculationBasis: "Editable per product row",
+  },
+} as const;
+
 const lineDefinitions: Array<Omit<CostLine, "costPerBag"> & { costPerBag?: number | null }> = [
   {
     code: "A",
@@ -105,23 +126,23 @@ const lineDefinitions: Array<Omit<CostLine, "costPerBag"> & { costPerBag?: numbe
   {
     code: "F",
     category: "Factory Overhead",
-    description: "Factory overhead allocation pulled from the product default when available.",
-    calculationBasis: "Factory overhead per bag",
-    editable: true,
+    description: "Weighted factory overhead calculated from the editable product rows.",
+    calculationBasis: "Weighted average of product overhead rows",
+    editable: false,
   },
   {
     code: "G",
     category: "Manufacturing Overhead",
-    description: "Manufacturing overhead allocation pulled from the product default when available.",
-    calculationBasis: "Manufacturing overhead per bag",
-    editable: true,
+    description: "Weighted manufacturing overhead calculated from the editable product rows.",
+    calculationBasis: "Weighted average of product overhead rows",
+    editable: false,
   },
   {
     code: "G2",
     category: "Management Overhead",
-    description: "Management overhead absorbed per bag.",
-    calculationBasis: "Management overhead per bag",
-    editable: true,
+    description: "Weighted management overhead calculated from the editable product rows.",
+    calculationBasis: "Weighted average of product overhead rows",
+    editable: false,
   },
   {
     code: "H",
@@ -162,7 +183,7 @@ const lineDefinitions: Array<Omit<CostLine, "costPerBag"> & { costPerBag?: numbe
     code: "III_TOTAL",
     category: "Total Additional Cost",
     description: "Subtotal of rush, transportation, and installation cost.",
-    calculationBasis: "I + J + K",
+    calculationBasis: "I_RUSH + J + K",
     editable: false,
   },
 ];
@@ -319,8 +340,29 @@ const calculateMaterialLineOverrides = ({
   };
 };
 
-const buildDefaultLines = (materialLineOverrides: MaterialLineOverrides, defaults?: CostDefaults) =>
-  lineDefinitions.map((line) => ({
+const buildProductOverheadLines = (products: ProductConfiguration["productSnapshots"] = []) =>
+  products.flatMap((product) =>
+    (["F", "G", "G2"] as const).map((baseCode) => ({
+      code: productOverheadLineCode(baseCode, product.productId),
+      category: `${productOverheadLineDefinitions[baseCode].category} · ${product.productName || product.productId}`,
+      description: productOverheadLineDefinitions[baseCode].description,
+      calculationBasis: productOverheadLineDefinitions[baseCode].calculationBasis,
+      editable: true,
+      costPerBag:
+        baseCode === "F"
+          ? product.factoryOverheadPerBag ?? null
+          : baseCode === "G"
+            ? product.manufacturingOverheadPerBag ?? null
+            : product.managementOverheadPerBag ?? null,
+    })),
+  );
+
+const buildDefaultLines = (
+  materialLineOverrides: MaterialLineOverrides,
+  defaults?: CostDefaults,
+  products: ProductConfiguration["productSnapshots"] = [],
+) => [
+  ...lineDefinitions.map((line) => ({
     ...line,
     costPerBag:
       line.code === "A"
@@ -333,10 +375,12 @@ const buildDefaultLines = (materialLineOverrides: MaterialLineOverrides, default
           ? defaults?.factoryOverheadPerBag ?? null
           : line.code === "G"
           ? defaults?.manufacturingOverheadPerBag ?? null
-          : line.code === "G2"
-            ? defaults?.managementOverheadPerBag ?? null
-            : line.costPerBag ?? null,
-  }));
+        : line.code === "G2"
+          ? defaults?.managementOverheadPerBag ?? null
+          : line.costPerBag ?? null,
+  })),
+  ...buildProductOverheadLines(products),
+];
 
 const initialForm = (tenderId: string): CostBuildUpForm => ({
   tenantId: "alimex-demo",
@@ -421,14 +465,15 @@ const mergeCostLines = (
   savedLines: CostLine[] | undefined,
   materialLineOverrides: MaterialLineOverrides,
   defaults?: CostDefaults,
+  products: ProductConfiguration["productSnapshots"] = [],
 ): CostLineForm[] => {
-  const defaultLines = buildDefaultLines(materialLineOverrides, defaults);
+  const defaultLines = buildDefaultLines(materialLineOverrides, defaults, products);
   const savedByCode = new Map((savedLines ?? []).map((line) => [line.code, line]));
 
   return defaultLines.map((line) => {
     const saved = savedByCode.get(line.code);
     const costPerBag =
-      ["A", "B", "C"].includes(line.code)
+      ["A", "B", "C", "F", "G", "G2"].includes(line.code)
         ? line.costPerBag ?? null
         : saved?.editable
           ? saved.costPerBag
@@ -449,6 +494,7 @@ const toForm = (
   payload: CostBuildUp,
   materialLineOverrides: MaterialLineOverrides,
   defaults?: CostDefaults,
+  products: ProductConfiguration["productSnapshots"] = [],
 ): CostBuildUpForm => ({
   tenantId: payload.tenantId,
   tenderId: payload.tenderId,
@@ -459,7 +505,7 @@ const toForm = (
   exchangeRate: payload.exchangeRate?.toString() ?? "",
   currencySafetyFactorPercent: payload.currencySafetyFactorPercent?.toString() ?? "",
   effectiveExchangeRate: payload.effectiveExchangeRate?.toString() ?? "",
-  costLines: mergeCostLines(payload.costLines, materialLineOverrides, defaults),
+  costLines: mergeCostLines(payload.costLines, materialLineOverrides, defaults, products),
   totalMaterialCostPerBag: payload.totalMaterialCostPerBag?.toString() ?? "",
   totalOperatingCostPerBag: payload.totalOperatingCostPerBag?.toString() ?? "",
   totalAdditionalCostPerBag: payload.totalAdditionalCostPerBag?.toString() ?? "",
@@ -505,6 +551,7 @@ export const CostBuildUpPage = () => {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [saveMode, setSaveMode] = useState<"draft" | "continue" | null>(null);
+  const [isMaterialSourcingDetailOpen, setIsMaterialSourcingDetailOpen] = useState(false);
 
   useEffect(() => {
     setForm(initialForm(tenderId));
@@ -581,7 +628,7 @@ export const CostBuildUpPage = () => {
         });
         const costDefaults = deriveCostDefaults(loadedConfiguration);
         if (saved) {
-          setForm(toForm(saved, materialLineOverrides, costDefaults));
+          setForm(toForm(saved, materialLineOverrides, costDefaults, loadedConfiguration.productSnapshots ?? []));
           return;
         }
 
@@ -602,7 +649,12 @@ export const CostBuildUpPage = () => {
                   (1 + loadedTender.currencySafetyFactorPercent / 100)
                 ).toString()
               : "",
-          costLines: mergeCostLines(undefined, materialLineOverrides, costDefaults),
+          costLines: mergeCostLines(
+            undefined,
+            materialLineOverrides,
+            costDefaults,
+            loadedConfiguration.productSnapshots ?? [],
+          ),
         });
       } catch (reason) {
         if (isMounted) {
@@ -639,20 +691,85 @@ export const CostBuildUpPage = () => {
       }),
     [materialSourcing, exchangeRate, currencySafetyFactorPercent, materials],
   );
+  const productSnapshots = productConfiguration?.productSnapshots ?? [];
+
+  const productOverheadValues = useMemo(
+    () =>
+      productSnapshots.map((product) => {
+        const readProductValue = (baseCode: "F" | "G" | "G2", fallback: number | null | undefined) => {
+          const savedValue = form.costLines.find(
+            (line) => line.code === productOverheadLineCode(baseCode, product.productId),
+          )?.costPerBag;
+          return savedValue !== undefined ? numberOrNull(savedValue) : fallback ?? null;
+        };
+
+        return {
+          productId: product.productId,
+          productName: product.productName || "Untitled product",
+          requestedQuantity: product.requestedQuantity ?? null,
+          factoryOverheadPerBag: readProductValue("F", product.factoryOverheadPerBag),
+          manufacturingOverheadPerBag: readProductValue("G", product.manufacturingOverheadPerBag),
+          managementOverheadPerBag: readProductValue("G2", product.managementOverheadPerBag),
+        };
+      }),
+    [form.costLines, productSnapshots],
+  );
 
   const calculatedLines = useMemo(() => {
     const editableByCode = new Map(
       form.costLines.map((line) => [line.code, { ...line, costPerBag: numberOrNull(line.costPerBag) }]),
     );
 
-    const read = (code: string) => editableByCode.get(code)?.costPerBag ?? 0;
+    const readNullable = (code: string) => editableByCode.get(code)?.costPerBag ?? null;
+    const read = (code: string) => readNullable(code) ?? 0;
+    const resolveWeightedProductOverhead = (
+      selector: (
+        product: (typeof productOverheadValues)[number],
+      ) => number | null,
+      fallbackCode: "F" | "G" | "G2",
+    ) => {
+      let weightedTotal = 0;
+      let totalQuantity = 0;
+
+      productOverheadValues.forEach((product) => {
+        const quantity = product.requestedQuantity ?? 0;
+        const value = selector(product);
+        if (quantity > 0 && value !== null) {
+          weightedTotal += value * quantity;
+          totalQuantity += quantity;
+        }
+      });
+
+      if (totalQuantity > 0) {
+        return weightedTotal / totalQuantity;
+      }
+
+      return readNullable(fallbackCode);
+    };
+
     const fabricMaterialCost = materialLineOverrides.A ?? 0;
     const ringMaterialCost = materialLineOverrides.B ?? 0;
     const threadingMaterialCost = materialLineOverrides.C ?? 0;
     const packagingMaterialCost = read("D");
+    const factoryOverheadPerBag = resolveWeightedProductOverhead(
+      (product) => product.factoryOverheadPerBag,
+      "F",
+    );
+    const manufacturingOverheadPerBag = resolveWeightedProductOverhead(
+      (product) => product.manufacturingOverheadPerBag,
+      "G",
+    );
+    const managementOverheadPerBag = resolveWeightedProductOverhead(
+      (product) => product.managementOverheadPerBag,
+      "G2",
+    );
     const materialCostPerBag =
       fabricMaterialCost + ringMaterialCost + threadingMaterialCost + packagingMaterialCost;
-    const operatingCostPerBag = read("F") + read("G") + read("G2") + read("H");
+    const operatingCostPerBag =
+      (factoryOverheadPerBag ?? 0) +
+      (manufacturingOverheadPerBag ?? 0) +
+      (managementOverheadPerBag ?? 0) +
+      read("H");
     const additionalCostPerBag = read("I_RUSH") + read("J") + read("K");
     const totalCostPricePerBag = materialCostPerBag + operatingCostPerBag + additionalCostPerBag;
     const totalCostPriceForOrder =
@@ -667,6 +784,12 @@ export const CostBuildUpPage = () => {
         value = materialLineOverrides.B;
       } else if (line.code === "C") {
         value = materialLineOverrides.C;
+      } else if (line.code === "F") {
+        value = factoryOverheadPerBag;
+      } else if (line.code === "G") {
+        value = manufacturingOverheadPerBag;
+      } else if (line.code === "G2") {
+        value = managementOverheadPerBag;
       } else if (line.code === "I_TOTAL") {
         value = materialCostPerBag;
       } else if (line.code === "II_TOTAL") {
@@ -682,7 +805,7 @@ export const CostBuildUpPage = () => {
           totalCostPricePerBag > 0 && value !== null ? (value / totalCostPricePerBag) * 100 : 0,
       };
     });
-  }, [form.costLines, materialLineOverrides, quantity]);
+  }, [form.costLines, materialLineOverrides, productOverheadValues, quantity]);
 
   const totals = useMemo(() => {
     const findValue = (code: string) =>
@@ -779,7 +902,7 @@ export const CostBuildUpPage = () => {
 
   const productCards = useMemo(
     () =>
-      (productConfiguration?.productSnapshots ?? []).map((product) => ({
+      productSnapshots.map((product) => ({
         productId: product.productId,
         productName: product.productName || "Untitled product",
         productType: product.productType,
@@ -794,7 +917,7 @@ export const CostBuildUpPage = () => {
         manufacturingOverheadPerBag: product.manufacturingOverheadPerBag ?? null,
         managementOverheadPerBag: product.managementOverheadPerBag ?? null,
       })),
-    [productConfiguration],
+    [productSnapshots],
   );
 
   const productCostCards = useMemo(
@@ -810,11 +933,12 @@ export const CostBuildUpPage = () => {
           requestedQuantity && requestedQuantity > 0 ? sourcedMaterialTotal / requestedQuantity : null;
 
         const packagingCost = currentLineValues.get("D") ?? 0;
-        const factoryOverhead = product.factoryOverheadPerBag ?? (currentLineValues.get("F") ?? 0);
+        const productOverheads = productOverheadValues.find((item) => item.productId === product.productId);
+        const factoryOverhead = productOverheads?.factoryOverheadPerBag ?? (currentLineValues.get("F") ?? 0);
         const manufacturingOverhead =
-          product.manufacturingOverheadPerBag ?? (currentLineValues.get("G") ?? 0);
+          productOverheads?.manufacturingOverheadPerBag ?? (currentLineValues.get("G") ?? 0);
         const managementOverhead =
-          product.managementOverheadPerBag ?? (currentLineValues.get("G2") ?? 0);
+          productOverheads?.managementOverheadPerBag ?? (currentLineValues.get("G2") ?? 0);
         const salesCost = currentLineValues.get("H") ?? 0;
         const rushCost = currentLineValues.get("I_RUSH") ?? 0;
         const transportationCost = currentLineValues.get("J") ?? 0;
@@ -834,60 +958,56 @@ export const CostBuildUpPage = () => {
           totalPerBag,
         };
       }),
-    [currentLineValues, productCards, sourcingBreakdown],
+    [currentLineValues, productCards, productOverheadValues, sourcingBreakdown],
   );
 
-  const breakdownSections = useMemo(
-    () => [
-      {
-        id: "material",
-        title: "Material Cost Breakdown",
-        description: "Review material cost grouped by type and adjust only the manual inputs.",
-        totalCode: "I_TOTAL",
-        rows: calculatedLines.filter((line) => ["A", "B", "C", "D"].includes(line.code)),
-      },
-      {
-        id: "operating",
-        title: "Operating Cost Breakdown",
-        description: "Labour and overhead defaults come from product master data and stay editable here.",
-        totalCode: "II_TOTAL",
-        rows: calculatedLines.filter((line) => ["F", "G", "G2", "H"].includes(line.code)),
-      },
-      {
-        id: "additional",
-        title: "Additional Cost Breakdown",
-        description: "Use this section for rush, transportation, and installation charges that vary by order.",
-        totalCode: "III_TOTAL",
-        rows: calculatedLines.filter((line) => ["I_RUSH", "J", "K"].includes(line.code)),
-      },
-    ],
-    [calculatedLines],
+  const tenderMaterialTotalCost = useMemo(
+    () => sourcingBreakdown.reduce((total, selection) => total + (selection.totalMaterialCostEgp ?? 0), 0),
+    [sourcingBreakdown],
   );
 
-  const materialTypeGroups = useMemo(
-    () => [
-      {
-        id: "fabric-material",
-        title: "Fabric Material",
-        rows: calculatedLines.filter((line) => ["A"].includes(line.code)),
-      },
-      {
-        id: "ring-material",
-        title: "Ring Material",
-        rows: calculatedLines.filter((line) => ["B"].includes(line.code)),
-      },
-      {
-        id: "threading-material",
-        title: "Threading Material",
-        rows: calculatedLines.filter((line) => ["C"].includes(line.code)),
-      },
-      {
-        id: "packaging",
-        title: "Packaging",
-        rows: calculatedLines.filter((line) => ["D"].includes(line.code)),
-      },
-    ].filter((group) => group.rows.length > 0),
-    [calculatedLines],
+  const materialBreakdownGrid = useMemo(
+    () =>
+      productCards.map((product) => {
+        const components = sourcingBreakdown
+          .filter((selection) => selection.productId === product.productId)
+          .map((selection) => {
+            const specification = formatComponentSpecification(selection);
+            const unitCost =
+              selection.materialCostPerBagEgp ??
+              ((selection.totalMaterialCostEgp ?? null) !== null &&
+              selection.requestedQuantity !== null &&
+              selection.requestedQuantity > 0
+                ? (selection.totalMaterialCostEgp ?? 0) / selection.requestedQuantity
+                : null);
+
+            return {
+              componentId: selection.componentId,
+              componentName: selection.componentName,
+              materialId: specification.primary,
+              detail: specification.secondary,
+              requestedQuantity: selection.requestedQuantity ?? null,
+              unitCost,
+              totalCost: selection.totalMaterialCostEgp ?? null,
+            };
+          });
+
+        const productMaterialTotalCost = components.reduce((sum, component) => sum + (component.totalCost ?? 0), 0);
+        const productMaterialUnitCost =
+          product.requestedQuantity !== null && product.requestedQuantity !== undefined && product.requestedQuantity > 0
+            ? productMaterialTotalCost / product.requestedQuantity
+            : null;
+        const overheads = productOverheadValues.find((item) => item.productId === product.productId);
+
+        return {
+          ...product,
+          components,
+          productMaterialUnitCost,
+          productMaterialTotalCost,
+          overheads,
+        };
+      }),
+    [productCards, productOverheadValues, sourcingBreakdown],
   );
 
   const costCompletion = useMemo(() => {
@@ -981,6 +1101,7 @@ export const CostBuildUpPage = () => {
           response,
           nextMaterialLineOverrides,
           deriveCostDefaults(productConfiguration),
+          productConfiguration?.productSnapshots ?? [],
         ),
       );
       setMessage(
@@ -1021,115 +1142,6 @@ export const CostBuildUpPage = () => {
                 <Badge variant="default">COST_BUILDUP</Badge>
               </CardHeader>
               <CardContent className="space-y-6 pt-6">
-                  <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
-                    <div className="mb-4 flex items-start justify-between gap-4">
-                      <div>
-                        <h3 className="text-base font-semibold text-slate-900">Material Sourcing Detail</h3>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          This section shows how the sourced material cost flows into the final cost price.
-                        </p>
-                      </div>
-                      <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
-                        <Package className="h-5 w-5" />
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      {sourcingBreakdown.length ? (
-                        sourcingBreakdown.map((component) => (
-                          <div key={component.componentId} className="rounded-2xl border border-border bg-white p-4">
-                            <div className="flex flex-wrap items-start justify-between gap-4">
-                              <div>
-                                <p className="text-sm font-semibold text-slate-900">
-                                  {component.productName} · {component.componentName}
-                                </p>
-                                <p className="mt-1 text-sm text-muted-foreground">
-                                  Material ID: {component.materialId || "Not set"} · Requested quantity:{" "}
-                                  {component.requestedQuantity?.toLocaleString() ?? "Not set"}
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-                              <table className="min-w-full text-sm">
-                                <thead className="bg-slate-50 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                                  <tr>
-                                    <th className="px-4 py-3">Source</th>
-                                    <th className="px-4 py-3">Type</th>
-                                    <th className="px-4 py-3">Allocated Bags</th>
-                                    <th className="px-4 py-3">Actual Area / Bag</th>
-                                    <th className="px-4 py-3">Qty Used</th>
-                                    <th className="px-4 py-3">Unit Cost</th>
-                                    <th className="px-4 py-3">Total Cost</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {component.selectedSources.length ? (
-                                    component.selectedSources.map((source) => (
-                                      <tr key={`${component.componentId}-${source.sourceId}`} className="border-t border-border">
-                                        <td className="px-4 py-3 font-medium text-slate-900">{source.sourceName}</td>
-                                        <td className="px-4 py-3">{source.sourceType}</td>
-                                        <td className="px-4 py-3">{source.allocatedBags?.toLocaleString() ?? "-"}</td>
-                                        <td className="px-4 py-3">{formatMetric(source.actualAreaPerBagM2 ?? null, 4, " m²")}</td>
-                                        <td className="px-4 py-3">{formatMetric(source.qtyUsedM2 ?? null, 4, " m²")}</td>
-                                        <td className="px-4 py-3">
-                                          {source.actualAreaPerBagM2 !== null
-                                            ? (
-                                                <div className="space-y-1">
-                                                  <p>{formatMetric(source.unitCostUsdPerM2 ?? null, 3, " USD/m²")}</p>
-                                                  <p className="text-xs text-muted-foreground">
-                                                    {formatMetric(
-                                                      source.unitCostUsdPerM2 !== null && effectiveExchangeRate !== null
-                                                        ? source.unitCostUsdPerM2 * effectiveExchangeRate
-                                                        : null,
-                                                      2,
-                                                      " EGP/m²",
-                                                    )}
-                                                  </p>
-                                                </div>
-                                              )
-                                            : formatMetric(source.unitCostUsdPerM2 ?? null, 2, " EGP/bag")}
-                                        </td>
-                                        <td className="px-4 py-3">
-                                          {source.actualAreaPerBagM2 !== null
-                                            ? (
-                                                <div className="space-y-1">
-                                                  <p>{formatMetric(source.totalCostUsd ?? null, 2, " USD")}</p>
-                                                  <p className="text-xs text-muted-foreground">
-                                                    {formatMetric(
-                                                      source.totalCostUsd !== null && effectiveExchangeRate !== null
-                                                        ? source.totalCostUsd * effectiveExchangeRate
-                                                        : null,
-                                                      2,
-                                                      " EGP",
-                                                    )}
-                                                  </p>
-                                                </div>
-                                              )
-                                            : formatMetric(source.allocatedBags != null && source.unitCostUsdPerM2 !== null ? source.allocatedBags * source.unitCostUsdPerM2 : null, 2, " EGP")}
-                                        </td>
-                                      </tr>
-                                    ))
-                                  ) : (
-                                    <tr>
-                                      <td className="px-4 py-5 text-center text-muted-foreground" colSpan={7}>
-                                        No sourcing lines saved for this component yet.
-                                      </td>
-                                    </tr>
-                                  )}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="rounded-2xl border border-dashed border-border bg-white px-4 py-8 text-center text-sm text-muted-foreground">
-                          No material sourcing detail is available yet.
-                        </div>
-                      )}
-                    </div>
-                  </section>
-
                   <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
                     <div className="mb-4 flex items-start justify-between gap-4">
                       <div>
@@ -1194,11 +1206,131 @@ export const CostBuildUpPage = () => {
                   </section>
 
                   <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
+                    <button
+                      aria-expanded={isMaterialSourcingDetailOpen}
+                      className="flex w-full items-start justify-between gap-4 text-left"
+                      onClick={() => setIsMaterialSourcingDetailOpen((current) => !current)}
+                      type="button"
+                    >
+                      <div>
+                        <h3 className="text-base font-semibold text-slate-900">Material Sourcing Detail</h3>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          This section shows how the sourced material cost flows into the final cost price.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+                          <ChevronDown
+                            className={`h-5 w-5 transition-transform ${isMaterialSourcingDetailOpen ? "rotate-180" : ""}`}
+                          />
+                        </div>
+                      </div>
+                    </button>
+
+                    {isMaterialSourcingDetailOpen ? (
+                      <div className="mt-4 space-y-4">
+                        {sourcingBreakdown.length ? (
+                          sourcingBreakdown.map((component) => (
+                            <div key={component.componentId} className="rounded-2xl border border-border bg-white p-4">
+                              <div className="flex flex-wrap items-start justify-between gap-4">
+                                <div>
+                                  <p className="text-sm font-semibold text-slate-900">
+                                    {component.productName} · {component.componentName}
+                                  </p>
+                                  <p className="mt-1 text-sm text-muted-foreground">
+                                    Material ID: {component.materialId || "Not set"} · Requested quantity:{" "}
+                                    {component.requestedQuantity?.toLocaleString() ?? "Not set"}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
+                                <table className="min-w-full text-sm">
+                                  <thead className="bg-slate-50 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                                    <tr>
+                                      <th className="px-4 py-3">Source</th>
+                                      <th className="px-4 py-3">Type</th>
+                                      <th className="px-4 py-3">Allocated Bags</th>
+                                      <th className="px-4 py-3">Actual Area / Bag</th>
+                                      <th className="px-4 py-3">Qty Used</th>
+                                      <th className="px-4 py-3">Unit Cost</th>
+                                      <th className="px-4 py-3">Total Cost</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {component.selectedSources.length ? (
+                                      component.selectedSources.map((source) => (
+                                        <tr key={`${component.componentId}-${source.sourceId}`} className="border-t border-border">
+                                          <td className="px-4 py-3 font-medium text-slate-900">{source.sourceName}</td>
+                                          <td className="px-4 py-3">{source.sourceType}</td>
+                                          <td className="px-4 py-3">{source.allocatedBags?.toLocaleString() ?? "-"}</td>
+                                          <td className="px-4 py-3">{formatMetric(source.actualAreaPerBagM2 ?? null, 4, " m²")}</td>
+                                          <td className="px-4 py-3">{formatMetric(source.qtyUsedM2 ?? null, 4, " m²")}</td>
+                                          <td className="px-4 py-3">
+                                            {source.actualAreaPerBagM2 !== null
+                                              ? (
+                                                  <div className="space-y-1">
+                                                    <p>{formatMetric(source.unitCostUsdPerM2 ?? null, 3, " USD/m²")}</p>
+                                                    <p className="text-xs text-muted-foreground">
+                                                      {formatMetric(
+                                                        source.unitCostUsdPerM2 !== null && effectiveExchangeRate !== null
+                                                          ? source.unitCostUsdPerM2 * effectiveExchangeRate
+                                                          : null,
+                                                        2,
+                                                        " EGP/m²",
+                                                      )}
+                                                    </p>
+                                                  </div>
+                                                )
+                                              : formatMetric(source.unitCostUsdPerM2 ?? null, 2, " EGP/bag")}
+                                          </td>
+                                          <td className="px-4 py-3">
+                                            {source.actualAreaPerBagM2 !== null
+                                              ? (
+                                                  <div className="space-y-1">
+                                                    <p>{formatMetric(source.totalCostUsd ?? null, 2, " USD")}</p>
+                                                    <p className="text-xs text-muted-foreground">
+                                                      {formatMetric(
+                                                        source.totalCostUsd !== null && effectiveExchangeRate !== null
+                                                          ? source.totalCostUsd * effectiveExchangeRate
+                                                          : null,
+                                                        2,
+                                                        " EGP",
+                                                      )}
+                                                    </p>
+                                                  </div>
+                                                )
+                                              : formatMetric(source.allocatedBags != null && source.unitCostUsdPerM2 !== null ? source.allocatedBags * source.unitCostUsdPerM2 : null, 2, " EGP")}
+                                          </td>
+                                        </tr>
+                                      ))
+                                    ) : (
+                                      <tr>
+                                        <td className="px-4 py-5 text-center text-muted-foreground" colSpan={7}>
+                                          No sourcing lines saved for this component yet.
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-border bg-white px-4 py-8 text-center text-sm text-muted-foreground">
+                            No material sourcing detail is available yet.
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </section>
+
+                  <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
                     <div className="mb-4 flex items-start justify-between gap-4">
                       <div>
                         <h3 className="text-base font-semibold text-slate-900">Cost Breakdown Per Bag</h3>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          Review the cost in business-friendly sections and adjust only the lines that need manual input.
+                          Review material, product overhead, and tender-level charges in one hierarchy grid.
                         </p>
                       </div>
                       <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
@@ -1207,103 +1339,277 @@ export const CostBuildUpPage = () => {
                     </div>
 
                     <div className="space-y-4">
-                      {breakdownSections.map((section) => {
-                        const subtotal = calculatedLines.find((line) => line.code === section.totalCode)?.costPerBag ?? null;
-
-                        return (
-                          <div key={section.id} className="rounded-2xl border border-border bg-white p-4">
-                            <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-                              <div>
-                                <h4 className="text-sm font-semibold text-slate-900">{section.title}</h4>
-                                <p className="mt-1 text-sm text-muted-foreground">{section.description}</p>
-                              </div>
-                              <div className="rounded-2xl bg-slate-50 px-4 py-3 text-right">
-                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Subtotal / Bag</p>
-                                <div className="mt-1 flex items-center justify-end gap-2">
-                                  <p className="text-lg font-semibold text-slate-900">
-                                    {formatMetric(subtotal, 2, " EGP")}
-                                  </p>
+                      <div className="overflow-hidden rounded-[1.25rem] border border-border bg-white">
+                        <div className="overflow-x-auto">
+                          <div className="min-w-[1420px]">
+                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] border-b border-border bg-slate-50/90 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                              {[
+                                "Hierarchy",
+                                "Quantity",
+                                "Unit Cost",
+                                "Total Cost",
+                                "Factory Overhead",
+                                "Manufacturing Overhead",
+                                "Management Overhead",
+                                "Overtime / Rush Order",
+                                "Transportation",
+                                "Installation",
+                                "Sales",
+                              ].map((label) => (
+                                <div key={label} className="px-4 py-3.5 leading-5">
+                                  {label}
                                 </div>
-                              </div>
+                              ))}
                             </div>
 
-                            <div className="space-y-3">
-                              {(section.id === "material"
-                                ? materialTypeGroups.flatMap((group) =>
-                                    group.rows.map((line, index) => ({
-                                      groupTitle: index === 0 ? group.title : null,
-                                      line,
-                                    })),
-                                  )
-                                : section.rows.map((line) => ({ groupTitle: null, line }))).map(
-                                ({ groupTitle, line }) => (
-                                  <div key={line.code} className="space-y-2">
-                                    {groupTitle ? (
-                                      <div className="px-1">
-                                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                                          {groupTitle}
-                                        </p>
-                                      </div>
-                                    ) : null}
-                                    <div className="grid gap-3 rounded-2xl border border-border bg-slate-50/80 p-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)_180px_110px]">
-                                      <div>
-                                        <p className="text-sm font-semibold text-slate-900">{line.category}</p>
-                                        <p className="mt-1 text-sm text-muted-foreground">{line.description}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Calculation Basis</p>
-                                        <p className="mt-1 text-sm text-slate-700">{line.calculationBasis}</p>
-                                      </div>
-                                      <div>
-                                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Cost / Bag</p>
-                                        <div className="mt-1">
-                                          {line.editable ? (
-                                            <Input
-                                              inputMode="decimal"
-                                              value={form.costLines.find((item) => item.code === line.code)?.costPerBag ?? ""}
-                                              onChange={(event) => updateLineCost(line.code, event.target.value)}
-                                            />
-                                          ) : (
-                                            <div className="flex items-center gap-2 rounded-xl border border-border bg-white px-3 py-2.5 text-sm font-medium text-slate-700">
-                                              <span>
-                                                {line.costPerBag === null ? "Calculated" : `${line.costPerBag.toFixed(2)} EGP`}
-                                              </span>
-                                              {line.code === "A" ? (
-                                                <button
-                                                  className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-slate-50 text-xs font-medium text-muted-foreground transition hover:border-slate-300 hover:text-slate-700"
-                                                  onClick={() =>
-                                                    setActiveLineHelp({
-                                                      code: line.code,
-                                                      title: `${line.code} · ${line.category}`,
-                                                      total: lineABreakdown.total,
-                                                      totalCost: lineABreakdown.totalCost,
-                                                      totalRequestedQuantity: lineABreakdown.totalRequestedQuantity,
-                                                      components: lineABreakdown.components,
-                                                    })
-                                                  }
-                                                  type="button"
-                                                >
-                                                  ?
-                                                </button>
-                                              ) : null}
-                                            </div>
-                                          )}
+                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] border-b border-border bg-white">
+                              <div className="px-4 py-4.5">
+                                <div className="flex items-start gap-3">
+                                  <ChevronDown className="mt-1 h-4 w-4 text-slate-500" />
+                                  <div>
+                                    <p className="text-base font-semibold text-slate-900">
+                                      {tender?.tenderNumber || tenderId}
+                                    </p>
+                                    <p className="mt-1 text-sm text-muted-foreground">
+                                      {tender?.customerName || "Tender"} · COST_BUILDUP
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="px-4 py-4.5 text-base text-slate-700">
+                                {quantity !== null ? quantity.toLocaleString() : "-"}
+                              </div>
+                              <div className="px-4 py-4.5">
+                                <div className="flex items-center gap-2 text-base text-slate-700">
+                                  <span>{formatMetric(totals.totalMaterialCostPerBag, 2, " EGP")}</span>
+                                  {lineABreakdown.components.length ? (
+                                    <button
+                                      className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-slate-50 text-[11px] font-medium text-muted-foreground transition hover:border-slate-300 hover:text-slate-700"
+                                      onClick={() =>
+                                        setActiveLineHelp({
+                                          code: "A",
+                                          title: "A · Material - Fabric",
+                                          total: lineABreakdown.total,
+                                          totalCost: lineABreakdown.totalCost,
+                                          totalRequestedQuantity: lineABreakdown.totalRequestedQuantity,
+                                          components: lineABreakdown.components,
+                                        })
+                                      }
+                                      type="button"
+                                    >
+                                      ?
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <div className="px-4 py-4.5 text-base font-semibold text-slate-900">
+                                {formatMetric(tenderMaterialTotalCost, 2, " EGP")}
+                              </div>
+                              <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
+                              <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
+                              <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
+                              {[
+                                { code: "I_RUSH", label: "Overtime / Rush Order" },
+                                { code: "J", label: "Transportation" },
+                                { code: "K", label: "Installation" },
+                                { code: "H", label: "Sales" },
+                              ].map((item) => (
+                                <div key={item.code} className="px-3 py-3">
+                                  <div className="rounded-xl bg-slate-50 p-2">
+                                    <Input
+                                      aria-label={item.label}
+                                      className="h-10 rounded-xl border-slate-200 bg-white px-3 text-base"
+                                      inputMode="decimal"
+                                      value={form.costLines.find((line) => line.code === item.code)?.costPerBag ?? ""}
+                                      onChange={(event) => updateLineCost(item.code, event.target.value)}
+                                    />
+                                    <p className="mt-1 text-xs text-muted-foreground">EGP / bag</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {materialBreakdownGrid.map((product, productIndex) => (
+                              <div key={product.productId}>
+                                <div className={productIndex % 2 === 0 ? "bg-white" : "bg-slate-50/35"}>
+                                  <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] border-b border-border">
+                                    <div className="px-4 py-4.5">
+                                      <div className="flex items-start gap-3 pl-8">
+                                        <ChevronDown className="mt-1 h-4 w-4 text-slate-500" />
+                                        <div>
+                                          <p className="text-base font-semibold text-slate-900">{product.productName}</p>
+                                          <p className="mt-1 text-sm text-muted-foreground">{product.productId}</p>
                                         </div>
                                       </div>
-                                      <div>
-                                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">% of Total</p>
-                                        <p className="mt-2 text-sm font-semibold text-slate-900">
-                                          {line.percentOfTotal.toFixed(1)}%
+                                    </div>
+                                    <div className="px-4 py-4.5 text-base text-slate-700">
+                                      {product.requestedQuantity !== null && product.requestedQuantity !== undefined
+                                        ? product.requestedQuantity.toLocaleString()
+                                        : "-"}
+                                    </div>
+                                    <div className="px-4 py-4.5 text-base text-slate-700">
+                                      {formatMetric(product.productMaterialUnitCost, 2, " EGP")}
+                                    </div>
+                                    <div className="px-4 py-4.5 text-base font-semibold text-slate-900">
+                                      {formatMetric(product.productMaterialTotalCost, 2, " EGP")}
+                                    </div>
+                                    {[
+                                      {
+                                        code: productOverheadLineCode("F", product.productId),
+                                        label: `Factory overhead for ${product.productName}`,
+                                      },
+                                      {
+                                        code: productOverheadLineCode("G", product.productId),
+                                        label: `Manufacturing overhead for ${product.productName}`,
+                                      },
+                                      {
+                                        code: productOverheadLineCode("G2", product.productId),
+                                        label: `Management overhead for ${product.productName}`,
+                                      },
+                                    ].map((item) => (
+                                      <div key={item.code} className="px-3 py-3">
+                                        <div className="rounded-xl bg-white p-2 ring-1 ring-slate-100">
+                                          <Input
+                                            aria-label={item.label}
+                                            className="h-10 rounded-xl border-slate-200 bg-white px-3 text-base"
+                                            inputMode="decimal"
+                                            value={form.costLines.find((line) => line.code === item.code)?.costPerBag ?? ""}
+                                            onChange={(event) => updateLineCost(item.code, event.target.value)}
+                                          />
+                                          <p className="mt-1 text-xs text-muted-foreground">EGP / bag</p>
+                                        </div>
+                                      </div>
+                                    ))}
+                                    <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
+                                    <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
+                                    <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
+                                    <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
+                                  </div>
+                                </div>
+
+                                {product.components.map((component) => (
+                                  <div
+                                    key={component.componentId}
+                                    className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] border-b border-border bg-white"
+                                  >
+                                    <div className="px-4 py-4">
+                                      <div className="pl-12">
+                                        <p className="text-[15px] font-medium text-slate-900">{component.componentName}</p>
+                                        <p className="mt-1 text-sm text-muted-foreground">
+                                          {component.materialId}
+                                        </p>
+                                        <p className="mt-1 max-w-[210px] text-sm leading-5 text-muted-foreground">
+                                          {component.detail}
                                         </p>
                                       </div>
                                     </div>
+                                    <div className="px-4 py-4 text-base text-slate-700">
+                                      {component.requestedQuantity !== null
+                                        ? component.requestedQuantity.toLocaleString()
+                                        : "-"}
+                                    </div>
+                                    <div className="px-4 py-4 text-base text-slate-700">
+                                      {formatMetric(component.unitCost, 2, " EGP")}
+                                    </div>
+                                    <div className="px-4 py-4 text-base font-semibold text-slate-900">
+                                      {formatMetric(component.totalCost, 2, " EGP")}
+                                    </div>
+                                    {Array.from({ length: 7 }).map((_, index) => (
+                                      <div key={index} className="px-4 py-4 text-sm text-slate-300">
+                                        -
+                                      </div>
+                                    ))}
                                   </div>
-                                ),
-                              )}
+                                ))}
+
+                                <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] border-b border-border bg-slate-50/70">
+                                  <div className="px-4 py-4 pl-12 text-[15px] font-semibold text-slate-900">
+                                    Product Subtotal
+                                  </div>
+                                  <div className="px-4 py-4 text-base text-slate-700">
+                                    {product.requestedQuantity !== null && product.requestedQuantity !== undefined
+                                      ? product.requestedQuantity.toLocaleString()
+                                      : "-"}
+                                  </div>
+                                  <div className="px-4 py-4 text-base text-slate-700">
+                                    {formatMetric(product.productMaterialUnitCost, 2, " EGP")}
+                                  </div>
+                                  <div className="px-4 py-4 text-base font-semibold text-slate-900">
+                                    {formatMetric(product.productMaterialTotalCost, 2, " EGP")}
+                                  </div>
+                                  {Array.from({ length: 7 }).map((_, index) => (
+                                    <div key={index} className="px-4 py-4 text-sm text-slate-300">
+                                      -
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+
+                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] bg-slate-50/90">
+                              <div className="px-4 py-4 text-[15px] font-semibold text-slate-900">Tender Total</div>
+                              <div className="px-4 py-4 text-base text-slate-700">
+                                {quantity !== null ? quantity.toLocaleString() : "-"}
+                              </div>
+                              <div className="px-4 py-4 text-base text-slate-700">
+                                {formatMetric(totals.totalCostPricePerBag, 2, " EGP")}
+                              </div>
+                              <div className="px-4 py-4 text-base font-semibold text-slate-900">
+                                {formatMetric(totals.totalCostPriceForOrder, 2, " EGP")}
+                              </div>
+                              <div className="px-4 py-4 text-sm text-slate-700">
+                                {formatMetric(currentLineValues.get("F") ?? null, 2, " EGP")}
+                              </div>
+                              <div className="px-4 py-4 text-sm text-slate-700">
+                                {formatMetric(currentLineValues.get("G") ?? null, 2, " EGP")}
+                              </div>
+                              <div className="px-4 py-4 text-sm text-slate-700">
+                                {formatMetric(currentLineValues.get("G2") ?? null, 2, " EGP")}
+                              </div>
+                              <div className="px-4 py-4 text-sm text-slate-700">
+                                {formatMetric(currentLineValues.get("I_RUSH") ?? null, 2, " EGP")}
+                              </div>
+                              <div className="px-4 py-4 text-sm text-slate-700">
+                                {formatMetric(currentLineValues.get("J") ?? null, 2, " EGP")}
+                              </div>
+                              <div className="px-4 py-4 text-sm text-slate-700">
+                                {formatMetric(currentLineValues.get("K") ?? null, 2, " EGP")}
+                              </div>
+                              <div className="px-4 py-4 text-sm text-slate-700">
+                                {formatMetric(currentLineValues.get("H") ?? null, 2, " EGP")}
+                              </div>
                             </div>
                           </div>
-                        );
-                      })}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        {[
+                          {
+                            label: "Material Cost / Bag",
+                            value: formatMetric(totals.totalMaterialCostPerBag, 2, " EGP"),
+                          },
+                          {
+                            label: "Operating Cost / Bag",
+                            value: formatMetric(totals.totalOperatingCostPerBag, 2, " EGP"),
+                          },
+                          {
+                            label: "Additional Cost / Bag",
+                            value: formatMetric(totals.totalAdditionalCostPerBag, 2, " EGP"),
+                          },
+                          {
+                            label: "Total Cost / Bag",
+                            value: formatMetric(totals.totalCostPricePerBag, 2, " EGP"),
+                          },
+                        ].map((item) => (
+                          <div key={item.label} className="rounded-2xl border border-border bg-white px-4 py-4">
+                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                              {item.label}
+                            </p>
+                            <p className="mt-2 text-lg font-semibold text-slate-900">{item.value}</p>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </section>
 
@@ -1344,33 +1650,8 @@ export const CostBuildUpPage = () => {
                   <div>
                     <p className="text-sm font-medium text-blue-100">Total Cost Overview</p>
                     <h3 className="mt-2 text-3xl font-semibold tracking-tight">
-                      {formatMetric(totals.totalCostPricePerBag, 2, " EGP / bag")}
+                      {formatMetric(totals.totalCostPricePerBag, 2, " EGP")}
                     </h3>
-                    <p className="mt-2 text-sm text-blue-100">
-                      Final cost price built from sourced material, operating overhead, and order-specific charges.
-                    </p>
-                  </div>
-
-                  <div className="grid gap-3">
-                    {[
-                      {
-                        label: "Material",
-                        value: formatMetric(totals.totalMaterialCostPerBag, 2, " EGP"),
-                      },
-                      {
-                        label: "Operating",
-                        value: formatMetric(totals.totalOperatingCostPerBag, 2, " EGP"),
-                      },
-                      {
-                        label: "Additional",
-                        value: formatMetric(totals.totalAdditionalCostPerBag, 2, " EGP"),
-                      },
-                    ].map((item) => (
-                      <div key={item.label} className="rounded-2xl bg-white/12 px-4 py-4 backdrop-blur-sm">
-                        <p className="text-xs uppercase tracking-[0.16em] text-blue-100">{item.label}</p>
-                        <p className="mt-2 text-lg font-semibold text-white">{item.value}</p>
-                      </div>
-                    ))}
                   </div>
 
                   <div className="rounded-[1.5rem] bg-white/8 p-4 ring-1 ring-white/10 backdrop-blur-sm">
