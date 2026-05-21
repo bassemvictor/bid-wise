@@ -552,6 +552,7 @@ export const CostBuildUpPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [saveMode, setSaveMode] = useState<"draft" | "continue" | null>(null);
   const [isMaterialSourcingDetailOpen, setIsMaterialSourcingDetailOpen] = useState(false);
+  const [collapsedProducts, setCollapsedProducts] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setForm(initialForm(tenderId));
@@ -692,6 +693,12 @@ export const CostBuildUpPage = () => {
     [materialSourcing, exchangeRate, currencySafetyFactorPercent, materials],
   );
   const productSnapshots = productConfiguration?.productSnapshots ?? [];
+
+  useEffect(() => {
+    setCollapsedProducts(
+      Object.fromEntries(productSnapshots.map((product) => [product.productId, true])),
+    );
+  }, [productSnapshots]);
 
   const productOverheadValues = useMemo(
     () =>
@@ -998,6 +1005,15 @@ export const CostBuildUpPage = () => {
             ? productMaterialTotalCost / product.requestedQuantity
             : null;
         const overheads = productOverheadValues.find((item) => item.productId === product.productId);
+        const costSummary = productCostCards.find((item) => item.productId === product.productId);
+        const totalUnitCost = costSummary?.totalPerBag ?? productMaterialUnitCost;
+        const totalCost =
+          totalUnitCost !== null &&
+          product.requestedQuantity !== null &&
+          product.requestedQuantity !== undefined &&
+          product.requestedQuantity > 0
+            ? totalUnitCost * product.requestedQuantity
+            : productMaterialTotalCost;
 
         return {
           ...product,
@@ -1005,9 +1021,11 @@ export const CostBuildUpPage = () => {
           productMaterialUnitCost,
           productMaterialTotalCost,
           overheads,
+          totalUnitCost,
+          totalCost,
         };
       }),
-    [productCards, productOverheadValues, sourcingBreakdown],
+    [productCards, productCostCards, productOverheadValues, sourcingBreakdown],
   );
 
   const costCompletion = useMemo(() => {
@@ -1022,10 +1040,12 @@ export const CostBuildUpPage = () => {
   }, [calculatedLines]);
 
   const updateLineCost = (code: string, value: string) => {
+    const nextValue = value.trim() === "" ? "0" : value;
+
     setForm((current) => ({
       ...current,
       costLines: current.costLines.map((line) =>
-        line.code === code ? { ...line, costPerBag: value } : line,
+        line.code === code ? { ...line, costPerBag: nextValue } : line,
       ),
     }));
   };
@@ -1033,6 +1053,19 @@ export const CostBuildUpPage = () => {
   const updateField = <K extends keyof CostBuildUpForm>(key: K, value: CostBuildUpForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
+
+  const toggleProductCollapse = (productId: string) => {
+    setCollapsedProducts((current) => ({
+      ...current,
+      [productId]: !current[productId],
+    }));
+  };
+
+  const rowCellClassName = (
+    base: string,
+    rowBackground: string,
+    withBottomBorder = true,
+  ) => `${rowBackground} ${withBottomBorder ? "border-b border-border" : ""} ${base}`;
 
   const payload = useMemo<CostBuildUp>(
     () => ({
@@ -1342,7 +1375,7 @@ export const CostBuildUpPage = () => {
                       <div className="overflow-hidden rounded-[1.25rem] border border-border bg-white">
                         <div className="overflow-x-auto">
                           <div className="min-w-[1420px]">
-                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] border-b border-border bg-slate-50/90 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] bg-slate-50/90 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                               {[
                                 "Hierarchy",
                                 "Quantity",
@@ -1355,15 +1388,33 @@ export const CostBuildUpPage = () => {
                                 "Transportation",
                                 "Installation",
                                 "Sales",
-                              ].map((label) => (
-                                <div key={label} className="px-4 py-3.5 leading-5">
+                              ].map((label, index, allLabels) => (
+                                <div
+                                  key={label}
+                                  className={`border-b border-border bg-slate-50/90 px-4 py-3.5 leading-5 ${
+                                    index === allLabels.length - 1 ? "rounded-tr-[1.25rem]" : ""
+                                  }`}
+                                >
                                   {label}
+                                  {[
+                                    "Factory Overhead",
+                                    "Manufacturing Overhead",
+                                    "Management Overhead",
+                                    "Overtime / Rush Order",
+                                    "Transportation",
+                                    "Installation",
+                                    "Sales",
+                                  ].includes(label) ? (
+                                    <span className="mt-1 block text-[10px] normal-case tracking-normal text-slate-400">
+                                      EGP / bag
+                                    </span>
+                                  ) : null}
                                 </div>
                               ))}
                             </div>
 
-                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] border-b border-border bg-white">
-                              <div className="px-4 py-4.5">
+                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] bg-white">
+                              <div className={rowCellClassName("px-4 py-4.5", "bg-white")}>
                                 <div className="flex items-start gap-3">
                                   <ChevronDown className="mt-1 h-4 w-4 text-slate-500" />
                                   <div>
@@ -1376,12 +1427,12 @@ export const CostBuildUpPage = () => {
                                   </div>
                                 </div>
                               </div>
-                              <div className="px-4 py-4.5 text-base text-slate-700">
+                              <div className={rowCellClassName("px-4 py-4.5 text-base text-slate-700", "bg-white")}>
                                 {quantity !== null ? quantity.toLocaleString() : "-"}
                               </div>
-                              <div className="px-4 py-4.5">
+                              <div className={rowCellClassName("px-4 py-4.5", "bg-white")}>
                                 <div className="flex items-center gap-2 text-base text-slate-700">
-                                  <span>{formatMetric(totals.totalMaterialCostPerBag, 2, " EGP")}</span>
+                                  <span>{formatMetric(totals.totalCostPricePerBag, 2, " EGP")}</span>
                                   {lineABreakdown.components.length ? (
                                     <button
                                       className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-slate-50 text-[11px] font-medium text-muted-foreground transition hover:border-slate-300 hover:text-slate-700"
@@ -1402,29 +1453,26 @@ export const CostBuildUpPage = () => {
                                   ) : null}
                                 </div>
                               </div>
-                              <div className="px-4 py-4.5 text-base font-semibold text-slate-900">
-                                {formatMetric(tenderMaterialTotalCost, 2, " EGP")}
+                              <div className={rowCellClassName("px-4 py-4.5 text-base font-semibold text-slate-900", "bg-white")}>
+                                {formatMetric(totals.totalCostPriceForOrder, 2, " EGP")}
                               </div>
-                              <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
-                              <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
-                              <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
+                              <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", "bg-white")}>-</div>
+                              <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", "bg-white")}>-</div>
+                              <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", "bg-white")}>-</div>
                               {[
                                 { code: "I_RUSH", label: "Overtime / Rush Order" },
                                 { code: "J", label: "Transportation" },
                                 { code: "K", label: "Installation" },
                                 { code: "H", label: "Sales" },
                               ].map((item) => (
-                                <div key={item.code} className="px-3 py-3">
-                                  <div className="rounded-xl bg-slate-50 p-2">
-                                    <Input
-                                      aria-label={item.label}
-                                      className="h-10 rounded-xl border-slate-200 bg-white px-3 text-base"
-                                      inputMode="decimal"
-                                      value={form.costLines.find((line) => line.code === item.code)?.costPerBag ?? ""}
-                                      onChange={(event) => updateLineCost(item.code, event.target.value)}
-                                    />
-                                    <p className="mt-1 text-xs text-muted-foreground">EGP / bag</p>
-                                  </div>
+                                <div key={item.code} className={rowCellClassName("px-3 py-3", "bg-white")}>
+                                  <Input
+                                    aria-label={item.label}
+                                    className="h-10 rounded-xl border-slate-200 bg-white px-3 text-base"
+                                    inputMode="decimal"
+                                    value={form.costLines.find((line) => line.code === item.code)?.costPerBag || "0"}
+                                    onChange={(event) => updateLineCost(item.code, event.target.value)}
+                                  />
                                 </div>
                               ))}
                             </div>
@@ -1432,26 +1480,38 @@ export const CostBuildUpPage = () => {
                             {materialBreakdownGrid.map((product, productIndex) => (
                               <div key={product.productId}>
                                 <div className={productIndex % 2 === 0 ? "bg-white" : "bg-slate-50/35"}>
-                                  <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] border-b border-border">
-                                    <div className="px-4 py-4.5">
+                                  {(() => {
+                                    const rowBackground = productIndex % 2 === 0 ? "bg-white" : "bg-slate-50/35";
+                                    return (
+                                  <button
+                                    aria-expanded={!collapsedProducts[product.productId]}
+                                    className="grid w-full grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] text-left"
+                                    onClick={() => toggleProductCollapse(product.productId)}
+                                    type="button"
+                                  >
+                                    <div className={rowCellClassName("px-4 py-4.5", rowBackground)}>
                                       <div className="flex items-start gap-3 pl-8">
-                                        <ChevronDown className="mt-1 h-4 w-4 text-slate-500" />
+                                        <ChevronDown
+                                          className={`mt-1 h-4 w-4 text-slate-500 transition-transform ${
+                                            collapsedProducts[product.productId] ? "-rotate-90" : ""
+                                          }`}
+                                        />
                                         <div>
                                           <p className="text-base font-semibold text-slate-900">{product.productName}</p>
                                           <p className="mt-1 text-sm text-muted-foreground">{product.productId}</p>
                                         </div>
                                       </div>
                                     </div>
-                                    <div className="px-4 py-4.5 text-base text-slate-700">
+                                    <div className={rowCellClassName("px-4 py-4.5 text-base text-slate-700", rowBackground)}>
                                       {product.requestedQuantity !== null && product.requestedQuantity !== undefined
                                         ? product.requestedQuantity.toLocaleString()
                                         : "-"}
                                     </div>
-                                    <div className="px-4 py-4.5 text-base text-slate-700">
-                                      {formatMetric(product.productMaterialUnitCost, 2, " EGP")}
+                                    <div className={rowCellClassName("px-4 py-4.5 text-base text-slate-700", rowBackground)}>
+                                      {formatMetric(product.totalUnitCost, 2, " EGP")}
                                     </div>
-                                    <div className="px-4 py-4.5 text-base font-semibold text-slate-900">
-                                      {formatMetric(product.productMaterialTotalCost, 2, " EGP")}
+                                    <div className={rowCellClassName("px-4 py-4.5 text-base font-semibold text-slate-900", rowBackground)}>
+                                      {formatMetric(product.totalCost, 2, " EGP")}
                                     </div>
                                     {[
                                       {
@@ -1467,115 +1527,129 @@ export const CostBuildUpPage = () => {
                                         label: `Management overhead for ${product.productName}`,
                                       },
                                     ].map((item) => (
-                                      <div key={item.code} className="px-3 py-3">
-                                        <div className="rounded-xl bg-white p-2 ring-1 ring-slate-100">
-                                          <Input
-                                            aria-label={item.label}
-                                            className="h-10 rounded-xl border-slate-200 bg-white px-3 text-base"
-                                            inputMode="decimal"
-                                            value={form.costLines.find((line) => line.code === item.code)?.costPerBag ?? ""}
-                                            onChange={(event) => updateLineCost(item.code, event.target.value)}
-                                          />
-                                          <p className="mt-1 text-xs text-muted-foreground">EGP / bag</p>
+                                      <div key={item.code} className={rowCellClassName("px-3 py-3", rowBackground)}>
+                                        <Input
+                                          aria-label={item.label}
+                                          className="h-10 rounded-xl border-slate-200 bg-white px-3 text-base"
+                                          inputMode="decimal"
+                                          value={form.costLines.find((line) => line.code === item.code)?.costPerBag || "0"}
+                                          onChange={(event) => updateLineCost(item.code, event.target.value)}
+                                        />
+                                      </div>
+                                    ))}
+                                    <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", rowBackground)}>-</div>
+                                    <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", rowBackground)}>-</div>
+                                    <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", rowBackground)}>-</div>
+                                    <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", rowBackground, true)}>-</div>
+                                  </button>
+                                    );
+                                  })()}
+                                </div>
+
+                                {!collapsedProducts[product.productId] ? (
+                                  <>
+                                    {product.components.map((component) => (
+                                      <div
+                                        key={component.componentId}
+                                        className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] bg-white"
+                                      >
+                                        <div className={rowCellClassName("px-4 py-4", "bg-white")}>
+                                          <div className="pl-12">
+                                            <p className="text-[15px] font-medium text-slate-900">{component.componentName}</p>
+                                            <p className="mt-1 text-sm text-muted-foreground">
+                                              {component.materialId}
+                                            </p>
+                                            <p className="mt-1 max-w-[210px] text-sm leading-5 text-muted-foreground">
+                                              {component.detail}
+                                            </p>
+                                          </div>
                                         </div>
+                                        <div className={rowCellClassName("px-4 py-4 text-base text-slate-700", "bg-white")}>
+                                          {component.requestedQuantity !== null
+                                            ? component.requestedQuantity.toLocaleString()
+                                            : "-"}
+                                        </div>
+                                        <div className={rowCellClassName("px-4 py-4 text-base text-slate-700", "bg-white")}>
+                                          {formatMetric(component.unitCost, 2, " EGP")}
+                                        </div>
+                                        <div className={rowCellClassName("px-4 py-4 text-base font-semibold text-slate-900", "bg-white")}>
+                                          {formatMetric(component.totalCost, 2, " EGP")}
+                                        </div>
+                                        {Array.from({ length: 7 }).map((_, index) => (
+                                          <div
+                                            key={index}
+                                            className={rowCellClassName("px-4 py-4 text-sm text-slate-300", "bg-white")}
+                                          >
+                                            -
+                                          </div>
+                                        ))}
                                       </div>
                                     ))}
-                                    <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
-                                    <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
-                                    <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
-                                    <div className="px-4 py-4.5 text-sm text-slate-300">-</div>
-                                  </div>
-                                </div>
 
-                                {product.components.map((component) => (
-                                  <div
-                                    key={component.componentId}
-                                    className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] border-b border-border bg-white"
-                                  >
-                                    <div className="px-4 py-4">
-                                      <div className="pl-12">
-                                        <p className="text-[15px] font-medium text-slate-900">{component.componentName}</p>
-                                        <p className="mt-1 text-sm text-muted-foreground">
-                                          {component.materialId}
-                                        </p>
-                                        <p className="mt-1 max-w-[210px] text-sm leading-5 text-muted-foreground">
-                                          {component.detail}
-                                        </p>
+                                    <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] bg-slate-50/70">
+                                      <div className={rowCellClassName("px-4 py-4 pl-12 text-[15px] font-semibold text-slate-900", "bg-slate-50/70")}>
+                                        Product Subtotal
                                       </div>
-                                    </div>
-                                    <div className="px-4 py-4 text-base text-slate-700">
-                                      {component.requestedQuantity !== null
-                                        ? component.requestedQuantity.toLocaleString()
-                                        : "-"}
-                                    </div>
-                                    <div className="px-4 py-4 text-base text-slate-700">
-                                      {formatMetric(component.unitCost, 2, " EGP")}
-                                    </div>
-                                    <div className="px-4 py-4 text-base font-semibold text-slate-900">
-                                      {formatMetric(component.totalCost, 2, " EGP")}
-                                    </div>
-                                    {Array.from({ length: 7 }).map((_, index) => (
-                                      <div key={index} className="px-4 py-4 text-sm text-slate-300">
-                                        -
+                                      <div className={rowCellClassName("px-4 py-4 text-base text-slate-700", "bg-slate-50/70")}>
+                                        {product.requestedQuantity !== null && product.requestedQuantity !== undefined
+                                          ? product.requestedQuantity.toLocaleString()
+                                          : "-"}
                                       </div>
-                                    ))}
-                                  </div>
-                                ))}
-
-                                <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] border-b border-border bg-slate-50/70">
-                                  <div className="px-4 py-4 pl-12 text-[15px] font-semibold text-slate-900">
-                                    Product Subtotal
-                                  </div>
-                                  <div className="px-4 py-4 text-base text-slate-700">
-                                    {product.requestedQuantity !== null && product.requestedQuantity !== undefined
-                                      ? product.requestedQuantity.toLocaleString()
-                                      : "-"}
-                                  </div>
-                                  <div className="px-4 py-4 text-base text-slate-700">
-                                    {formatMetric(product.productMaterialUnitCost, 2, " EGP")}
-                                  </div>
-                                  <div className="px-4 py-4 text-base font-semibold text-slate-900">
-                                    {formatMetric(product.productMaterialTotalCost, 2, " EGP")}
-                                  </div>
-                                  {Array.from({ length: 7 }).map((_, index) => (
-                                    <div key={index} className="px-4 py-4 text-sm text-slate-300">
-                                      -
+                                      <div className={rowCellClassName("px-4 py-4 text-base text-slate-700", "bg-slate-50/70")}>
+                                        {formatMetric(product.totalUnitCost, 2, " EGP")}
+                                      </div>
+                                      <div className={rowCellClassName("px-4 py-4 text-base font-semibold text-slate-900", "bg-slate-50/70")}>
+                                        {formatMetric(product.totalCost, 2, " EGP")}
+                                      </div>
+                                      {Array.from({ length: 7 }).map((_, index) => (
+                                        <div
+                                          key={index}
+                                          className={rowCellClassName(
+                                            "px-4 py-4 text-sm text-slate-300",
+                                            "bg-slate-50/70",
+                                          )}
+                                        >
+                                          -
+                                        </div>
+                                      ))}
                                     </div>
-                                  ))}
-                                </div>
+                                  </>
+                                ) : null}
                               </div>
                             ))}
 
-                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] bg-slate-50/90">
-                              <div className="px-4 py-4 text-[15px] font-semibold text-slate-900">Tender Total</div>
-                              <div className="px-4 py-4 text-base text-slate-700">
+                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))]">
+                              <div className={rowCellClassName("px-4 py-4 text-[15px] font-semibold text-slate-900", "bg-slate-50/90", false)}>
+                                Tender Total
+                              </div>
+                              <div className={rowCellClassName("px-4 py-4 text-base text-slate-700", "bg-slate-50/90", false)}>
                                 {quantity !== null ? quantity.toLocaleString() : "-"}
                               </div>
-                              <div className="px-4 py-4 text-base text-slate-700">
+                              <div className={rowCellClassName("px-4 py-4 text-base text-slate-700", "bg-slate-50/90", false)}>
                                 {formatMetric(totals.totalCostPricePerBag, 2, " EGP")}
                               </div>
-                              <div className="px-4 py-4 text-base font-semibold text-slate-900">
+                              <div className={rowCellClassName("px-4 py-4 text-base font-semibold text-slate-900", "bg-slate-50/90", false)}>
                                 {formatMetric(totals.totalCostPriceForOrder, 2, " EGP")}
                               </div>
-                              <div className="px-4 py-4 text-sm text-slate-700">
+                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700", "bg-slate-50/90", false)}>
                                 {formatMetric(currentLineValues.get("F") ?? null, 2, " EGP")}
                               </div>
-                              <div className="px-4 py-4 text-sm text-slate-700">
+                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700", "bg-slate-50/90", false)}>
                                 {formatMetric(currentLineValues.get("G") ?? null, 2, " EGP")}
                               </div>
-                              <div className="px-4 py-4 text-sm text-slate-700">
+                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700", "bg-slate-50/90", false)}>
                                 {formatMetric(currentLineValues.get("G2") ?? null, 2, " EGP")}
                               </div>
-                              <div className="px-4 py-4 text-sm text-slate-700">
+                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700", "bg-slate-50/90", false)}>
                                 {formatMetric(currentLineValues.get("I_RUSH") ?? null, 2, " EGP")}
                               </div>
-                              <div className="px-4 py-4 text-sm text-slate-700">
+                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700", "bg-slate-50/90", false)}>
                                 {formatMetric(currentLineValues.get("J") ?? null, 2, " EGP")}
                               </div>
-                              <div className="px-4 py-4 text-sm text-slate-700">
+                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700", "bg-slate-50/90", false)}>
                                 {formatMetric(currentLineValues.get("K") ?? null, 2, " EGP")}
                               </div>
-                              <div className="px-4 py-4 text-sm text-slate-700">
+                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700 rounded-br-[1.25rem]", "bg-slate-50/90", false)}>
                                 {formatMetric(currentLineValues.get("H") ?? null, 2, " EGP")}
                               </div>
                             </div>
@@ -1583,33 +1657,6 @@ export const CostBuildUpPage = () => {
                         </div>
                       </div>
 
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        {[
-                          {
-                            label: "Material Cost / Bag",
-                            value: formatMetric(totals.totalMaterialCostPerBag, 2, " EGP"),
-                          },
-                          {
-                            label: "Operating Cost / Bag",
-                            value: formatMetric(totals.totalOperatingCostPerBag, 2, " EGP"),
-                          },
-                          {
-                            label: "Additional Cost / Bag",
-                            value: formatMetric(totals.totalAdditionalCostPerBag, 2, " EGP"),
-                          },
-                          {
-                            label: "Total Cost / Bag",
-                            value: formatMetric(totals.totalCostPricePerBag, 2, " EGP"),
-                          },
-                        ].map((item) => (
-                          <div key={item.label} className="rounded-2xl border border-border bg-white px-4 py-4">
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                              {item.label}
-                            </p>
-                            <p className="mt-2 text-lg font-semibold text-slate-900">{item.value}</p>
-                          </div>
-                        ))}
-                      </div>
                     </div>
                   </section>
 

@@ -1894,58 +1894,78 @@ export const MaterialSourcingPage = () => {
     }));
   };
 
-  const syncProductWithProductConfiguration = (productId: string) => {
-    if (!productConfiguration) {
-      setError("Load Product Configuration before syncing a product.");
+  const syncProductWithProductConfiguration = async (productId: string) => {
+    if (!isApiConfigured || !tenderId) {
+      setError("Set VITE_API_BASE_URL before syncing from Product Configuration.");
       return;
     }
 
-    const currentProductComponents = form.componentSelections.filter(
-      (component) => component.productId === productId,
-    );
-    if (!currentProductComponents.length) {
-      return;
-    }
+    try {
+      const [latestConfiguration, latestTender] = await Promise.all([
+        api.get<ProductConfiguration>(`/tenders/${tenderId}/product-configuration?tenantId=alimex-demo`),
+        api.get<TenderRequest>(`/tenders/${tenderId}?tenantId=alimex-demo`),
+      ]);
 
-    const productSnapshot = productConfiguration.productSnapshots.find(
-      (product) => product.productId === productId,
-    );
-    const sourcedComponents = productSnapshot?.components.filter(isSourcedComponent) ?? [];
+      setProductConfiguration(latestConfiguration);
+      setTender(latestTender);
 
-    if (!productSnapshot || !sourcedComponents.length) {
-      setForm((current) => ({
-        ...current,
-        componentSelections: current.componentSelections.filter(
-          (component) => component.productId !== productId,
+      const currentProductComponents = form.componentSelections.filter(
+        (component) => component.productId === productId,
+      );
+      const productSnapshot = latestConfiguration.productSnapshots.find(
+        (product) => product.productId === productId,
+      );
+      const sourcedComponents = productSnapshot?.components.filter(isSourcedComponent) ?? [];
+
+      if (!productSnapshot || !sourcedComponents.length) {
+        setForm((current) =>
+          applyTenderRateDefaults(
+            {
+              ...current,
+              productConfigId: latestConfiguration.productConfigId,
+              componentSelections: current.componentSelections.filter(
+                (component) => component.productId !== productId,
+              ),
+            },
+            latestTender,
+          ),
+        );
+        setMessage(
+          `${currentProductComponents[0]?.productName ?? "This product"} no longer exists upstream, so its sourcing snapshot was removed.`,
+        );
+        setError("");
+        return;
+      }
+
+      const syncedComponents = sourcedComponents.map((component) =>
+        buildComponentSelectionFromSnapshot(
+          productSnapshot,
+          component,
+          latestConfiguration,
+          materials,
         ),
-      }));
+      );
+
+      setForm((current) =>
+        applyTenderRateDefaults(
+          {
+            ...current,
+            productConfigId: latestConfiguration.productConfigId,
+            componentSelections: [
+              ...current.componentSelections.filter((component) => component.productId !== productId),
+              ...syncedComponents,
+            ],
+          },
+          latestTender,
+        ),
+      );
       setMessage(
-        `${currentProductComponents[0]?.productName ?? "This product"} no longer has sourceable components in Product Configuration, so its sourcing snapshot was removed.`,
+        `${productSnapshot.productName} reloaded from Product Configuration. Existing sourcing rows for this product were reset.`,
       );
       setError("");
-      return;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to sync product from Product Configuration.");
     }
-
-    const syncedComponents = sourcedComponents.map((component) =>
-      buildComponentSelectionFromSnapshot(
-        productSnapshot,
-        component,
-        productConfiguration,
-        materials,
-      ),
-    );
-
-    setForm((current) => ({
-      ...current,
-      componentSelections: [
-        ...current.componentSelections.filter((component) => component.productId !== productId),
-        ...syncedComponents,
-      ],
-    }));
-    setMessage(
-      `${productSnapshot.productName} synced from Product Configuration. Save sourcing to rebuild downstream pricing.`,
-    );
-    setError("");
   };
 
   const openSourceDrawer = (componentIndex: number, option: SourceOption) => {
@@ -2200,10 +2220,43 @@ export const MaterialSourcingPage = () => {
     }));
   };
 
-  const syncAllProducts = () => {
-    componentGroups.forEach((group) => {
-      syncProductWithProductConfiguration(group.productId);
-    });
+  const syncAllProducts = async () => {
+    if (!isApiConfigured || !tenderId) {
+      setError("Set VITE_API_BASE_URL before syncing from Product Configuration.");
+      return;
+    }
+
+    try {
+      const [latestConfiguration, latestTender] = await Promise.all([
+        api.get<ProductConfiguration>(`/tenders/${tenderId}/product-configuration?tenantId=alimex-demo`),
+        api.get<TenderRequest>(`/tenders/${tenderId}?tenantId=alimex-demo`),
+      ]);
+
+      setProductConfiguration(latestConfiguration);
+      setTender(latestTender);
+      setCollapsedProducts({});
+      setDrawerState(null);
+      setSourcePickerState(null);
+      setCostBreakdownComponentIndex(null);
+
+      setForm((current) =>
+        applyTenderRateDefaults(
+          {
+            ...current,
+            productConfigId: latestConfiguration.productConfigId,
+            componentSelections: buildComponentSelectionsFromProducts(latestConfiguration, materials),
+          },
+          latestTender,
+        ),
+      );
+
+      setMessage(
+        "Material sourcing was refreshed from the latest Product Configuration. Product rows were reset to match upstream changes.",
+      );
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to sync products from Product Configuration.");
+    }
   };
 
   const payload = useMemo<MaterialSourceSelection>(() => {
