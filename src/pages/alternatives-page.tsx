@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Plus, Save, Trash2, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -48,7 +48,10 @@ type CalculatedScenario = {
   customerCommissionPercent: number | null;
   salesPersonCommissionPercent: number | null;
   markupPercent: number | null;
+  marginPercent: number | null;
   pricePerBag: number | null;
+  totalCost: number | null;
+  profitValue: number | null;
   totalPrice: number | null;
   notes: string;
 };
@@ -175,9 +178,9 @@ const ScenarioDrawer = ({
                 </p>
               </div>
               <div className="rounded-2xl border border-border bg-slate-50 px-4 py-3">
-                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Price / Bag</p>
+                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Cost</p>
                 <p className="mt-2 text-sm font-semibold text-slate-900">
-                  {formatMetric(preview.pricePerBag, 2, " EGP")}
+                  {formatMetric(preview.totalCost, 2, " EGP")}
                 </p>
               </div>
               <div className="rounded-2xl border border-border bg-slate-50 px-4 py-3">
@@ -374,8 +377,16 @@ export const AlternativesPage = () => {
           salesPersonCommissionPercent;
         const pricePerBag =
           baseCostPerBag !== null ? baseCostPerBag * (1 + markupPercent / 100) : null;
+        const totalCost =
+          baseCostPerBag !== null && quantity !== null ? baseCostPerBag * quantity : null;
         const totalPrice =
           pricePerBag !== null && quantity !== null ? pricePerBag * quantity : null;
+        const profitValue =
+          totalPrice !== null && totalCost !== null ? totalPrice - totalCost : null;
+        const marginPercent =
+          pricePerBag !== null && baseCostPerBag !== null && pricePerBag > 0
+            ? ((pricePerBag - baseCostPerBag) / pricePerBag) * 100
+            : null;
 
         return {
           ...scenario,
@@ -384,19 +395,14 @@ export const AlternativesPage = () => {
           customerCommissionPercent,
           salesPersonCommissionPercent,
           markupPercent,
+          marginPercent,
           pricePerBag,
+          totalCost,
+          profitValue,
           totalPrice,
         };
       }),
     [baseCostPerBag, form.scenarios, quantity],
-  );
-
-  const topScenario = useMemo(
-    () =>
-      [...scenarios]
-        .filter((scenario) => scenario.pricePerBag !== null)
-        .sort((left, right) => (right.pricePerBag ?? 0) - (left.pricePerBag ?? 0))[0] ?? null,
-    [scenarios],
   );
 
   const activeDrawerScenario = useMemo(
@@ -591,91 +597,19 @@ export const AlternativesPage = () => {
 
           {!isLoading ? (
             <>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Tender</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-900">{tender?.tenderNumber || tenderId}</p>
-                </div>
-                <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Quantity</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-900">{formatMetric(quantity, 0, " bags")}</p>
-                </div>
-                <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Base Cost / Bag</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-900">{formatMetric(baseCostPerBag, 2, " EGP")}</p>
-                </div>
-                <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Top Scenario</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-900">{topScenario?.label || "Not set"}</p>
-                </div>
-              </div>
-
-              <div className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-                  <div>
-                    <h3 className="text-base font-semibold text-slate-900">Scenarios</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Keep the page focused on scenario summaries, then open a side drawer to add or edit details.
-                    </p>
-                  </div>
-                  <Button onClick={addScenario} type="button">
-                    <Plus className="h-4 w-4" />
-                    Add Scenario
-                  </Button>
-                </div>
-
-                <div className="space-y-3">
-                  {scenarios.map((scenario, index) => (
-                    <div
-                      key={scenario.scenarioId}
-                      className="rounded-2xl border border-border bg-white px-4 py-4"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-900">
-                            {scenario.label || `Scenario ${index + 1}`}
-                          </p>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            Markup {formatMetric(scenario.markupPercent, 2, "%")} · Profit{" "}
-                            {formatMetric(scenario.profitPercent, 2, "%")} · Safety{" "}
-                            {formatMetric(scenario.factorOfSafetyPercent, 2, "%")}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="neutral">
-                            {formatMetric(scenario.pricePerBag, 2, " EGP / bag")}
-                          </Badge>
-                          <Badge variant="default">
-                            {formatMetric(scenario.totalPrice, 2, " EGP")}
-                          </Badge>
-                          <Button
-                            onClick={() => openScenarioDrawer(scenario.scenarioId)}
-                            type="button"
-                            variant="outline"
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            onClick={() => removeScenario(scenario.scenarioId)}
-                            type="button"
-                            variant="ghost"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
               <Card className="border-border/80 shadow-none">
                 <CardHeader>
-                  <div>
-                    <CardTitle>Scenario Comparison</CardTitle>
-                    <CardDescription>
-                      Side-by-side comparison of final price per bag and total order value for each scenario.
-                    </CardDescription>
+                  <div className="grid w-full gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+                    <div>
+                      <CardTitle>Scenario Comparison</CardTitle>
+                      <CardDescription>
+                        Side-by-side comparison of final price per bag and total order value for each scenario.
+                      </CardDescription>
+                    </div>
+                    <Button className="justify-self-end" onClick={addScenario} type="button">
+                      <Plus className="h-4 w-4" />
+                      Add Scenario
+                    </Button>
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -687,8 +621,10 @@ export const AlternativesPage = () => {
                         <TableHead>Safety %</TableHead>
                         <TableHead>Customer Comm. %</TableHead>
                         <TableHead>Sales Comm. %</TableHead>
-                        <TableHead>Price / Bag</TableHead>
-                        <TableHead>Total</TableHead>
+                        <TableHead>Order Cost</TableHead>
+                        <TableHead>Order Price</TableHead>
+                        <TableHead>Order Profit</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -699,8 +635,31 @@ export const AlternativesPage = () => {
                           <TableCell>{formatMetric(scenario.factorOfSafetyPercent, 2, "%")}</TableCell>
                           <TableCell>{formatMetric(scenario.customerCommissionPercent, 2, "%")}</TableCell>
                           <TableCell>{formatMetric(scenario.salesPersonCommissionPercent, 2, "%")}</TableCell>
-                          <TableCell>{formatMetric(scenario.pricePerBag, 2, " EGP")}</TableCell>
+                          <TableCell>{formatMetric(scenario.totalCost, 2, " EGP")}</TableCell>
                           <TableCell>{formatMetric(scenario.totalPrice, 2, " EGP")}</TableCell>
+                          <TableCell>{formatMetric(scenario.profitValue, 2, " EGP")}</TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                aria-label={`Edit ${scenario.label || "scenario"}`}
+                                onClick={() => openScenarioDrawer(scenario.scenarioId)}
+                                size="icon"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                aria-label={`Delete ${scenario.label || "scenario"}`}
+                                onClick={() => removeScenario(scenario.scenarioId)}
+                                size="icon"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

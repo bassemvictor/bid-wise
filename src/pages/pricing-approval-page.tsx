@@ -200,6 +200,17 @@ export const PricingApprovalPage = () => {
     [form],
   );
 
+  const orderTotalCost = useMemo(
+    () =>
+      alternatives?.baseCostPerBag !== null &&
+      alternatives?.baseCostPerBag !== undefined &&
+      alternatives?.quantity !== null &&
+      alternatives?.quantity !== undefined
+        ? alternatives.baseCostPerBag * alternatives.quantity
+        : null,
+    [alternatives],
+  );
+
   const hasApprovedScenario = decisionCounts.approved > 0;
 
   const updateDecision = (scenarioId: string, patch: Partial<DecisionForm>) => {
@@ -207,9 +218,19 @@ export const PricingApprovalPage = () => {
       current
         ? {
             ...current,
-            decisions: current.decisions.map((decision) =>
-              decision.scenarioId === scenarioId ? { ...decision, ...patch } : decision,
-            ),
+            decisions: current.decisions.map((decision) => {
+              if (patch.status === "approved") {
+                if (decision.scenarioId === scenarioId) {
+                  return { ...decision, ...patch };
+                }
+
+                if (decision.status === "approved") {
+                  return { ...decision, status: "pending" };
+                }
+              }
+
+              return decision.scenarioId === scenarioId ? { ...decision, ...patch } : decision;
+            }),
           }
         : current,
     );
@@ -382,8 +403,15 @@ export const PricingApprovalPage = () => {
                           <Badge variant={getStatusTone(decision.status)}>{decision.status.toUpperCase()}</Badge>
                         </div>
                         <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
-                          <span>Price / Bag: {formatCurrency(decision.pricePerBag)}</span>
-                          <span>Total: {formatCurrency(decision.totalPrice)}</span>
+                          <span>Total Cost: {formatCurrency(orderTotalCost)}</span>
+                          <span>Total Price: {formatCurrency(decision.totalPrice)}</span>
+                          <span>
+                            Profit: {formatCurrency(
+                              decision.totalPrice !== null && orderTotalCost !== null
+                                ? decision.totalPrice - orderTotalCost
+                                : null,
+                            )}
+                          </span>
                         </div>
                       </div>
 
@@ -442,12 +470,22 @@ export const PricingApprovalPage = () => {
                         </p>
                       </div>
                       <div className="rounded-2xl border border-border bg-white px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Price Per Bag</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-900">{formatCurrency(decision.pricePerBag)}</p>
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Cost</p>
+                        <p className="mt-2 text-sm font-semibold text-slate-900">{formatCurrency(orderTotalCost)}</p>
                       </div>
                       <div className="rounded-2xl border border-border bg-white px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Scenario Value</p>
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Price</p>
                         <p className="mt-2 text-sm font-semibold text-slate-900">{formatCurrency(decision.totalPrice)}</p>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-white px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Profit</p>
+                        <p className="mt-2 text-sm font-semibold text-slate-900">
+                          {formatCurrency(
+                            decision.totalPrice !== null && orderTotalCost !== null
+                              ? decision.totalPrice - orderTotalCost
+                              : null,
+                          )}
+                        </p>
                       </div>
                       <label className="space-y-2 text-sm font-medium text-slate-700 lg:col-span-2">
                         Approval Notes
