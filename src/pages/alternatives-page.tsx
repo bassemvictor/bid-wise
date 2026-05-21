@@ -642,8 +642,9 @@ export const AlternativesPage = () => {
                             <div className="flex justify-end gap-1">
                               <Button
                                 aria-label={`Edit ${scenario.label || "scenario"}`}
+                                className="h-9 w-9 px-0"
                                 onClick={() => openScenarioDrawer(scenario.scenarioId)}
-                                size="icon"
+                                size="sm"
                                 type="button"
                                 variant="ghost"
                               >
@@ -651,8 +652,9 @@ export const AlternativesPage = () => {
                               </Button>
                               <Button
                                 aria-label={`Delete ${scenario.label || "scenario"}`}
+                                className="h-9 w-9 px-0"
                                 onClick={() => removeScenario(scenario.scenarioId)}
-                                size="icon"
+                                size="sm"
                                 type="button"
                                 variant="ghost"
                               >
