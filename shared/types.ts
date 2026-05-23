@@ -190,6 +190,7 @@ export type SelectedMaterialSource = {
   rollWidthM?: number | null;
   rollLengthM?: number | null;
   rollCount?: number | null;
+  landedCostEgp?: number | null;
   customsEstimate?: number | null;
   customsPercent?: number | null;
   freightCostPerM2Egp?: number | null;

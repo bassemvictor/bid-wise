@@ -54,6 +54,7 @@ type SelectedSourceForm = {
   rollCount: string;
   allocatedBags: string;
   unitCostUsdPerM2: string;
+  landedCostEgp: string;
   leadTimeDays: string;
   freightCostPerM2Egp: string;
   clearanceCostPerM2Egp: string;
@@ -99,6 +100,7 @@ type SourceOption = {
   rollWidthMm: number | null;
   rollLengthMm: number | null;
   unitCostUsdPerM2: number | null;
+  landedCostEgp: number | null;
   leadTimeDays: number | null;
   freightCostPerM2Egp: number | null;
   clearanceCostPerM2Egp: number | null;
@@ -169,28 +171,6 @@ const getStockPreviewAvailability = (
   bagLengthWithAllowanceMm: number | null,
   existingUsedBags: number,
 ) => {
-  const missingInputs = [
-    source.rollWidthMm === null ? "rollWidthMm" : null,
-    source.rollLengthMm === null ? "rollLengthMm" : null,
-    bagWidthMm === null || bagWidthMm <= 0 ? "bagWidthMm" : null,
-    bagLengthWithAllowanceMm === null || bagLengthWithAllowanceMm <= 0
-      ? "bagLengthWithAllowanceMm"
-      : null,
-  ].filter(Boolean);
-
-  if (missingInputs.length && typeof window !== "undefined") {
-    console.warn("[Material Sourcing] Stock availability preview missing inputs", {
-      sourceId: source.sourceId,
-      sourceName: source.sourceName,
-      missingInputs,
-      rollWidthMm: source.rollWidthMm,
-      rollLengthMm: source.rollLengthMm,
-      bagWidthMm,
-      bagLengthWithAllowanceMm,
-      existingUsedBags,
-    });
-  }
-
   const bagsAcrossRollWidth =
     source.rollWidthMm !== null && bagWidthMm !== null && bagWidthMm > 0
       ? Math.floor(source.rollWidthMm / bagWidthMm)
@@ -535,7 +515,9 @@ const SourceSelectionDrawer = ({
                           <span className="text-slate-300">•</span>
                           <span className="text-sm text-slate-500">
                             {isBagStyleComponent(component)
-                              ? `${source.unitCostUsdPerM2 || "-"} USD/m²`
+                              ? source.sourceType === "stock"
+                                ? `${source.unitCostUsdPerM2 || "-"} USD/m² • ${source.landedCostEgp || "-"} EGP/m² landing`
+                                : `${source.unitCostUsdPerM2 || "-"} USD/m²`
                               : `${source.unitCostUsdPerM2 || "-"} EGP/bag`}
                           </span>
                         </div>
@@ -659,34 +641,13 @@ const SourceSelectionDrawer = ({
                       !previewAvailability ||
                       previewAvailability.remainingCapacityBags === null ||
                       previewAvailability.remainingRollLengthMm === null);
-
-                  if (usesStockAvailabilityFallback && typeof window !== "undefined") {
-                    console.warn("[Material Sourcing] Stock availability preview fell back", {
-                      sourceId: source.sourceId,
-                      sourceName: source.sourceName,
-                      materialCategory: source.materialCategory,
-                      reason: !isFabricSource
-                        ? "non-fabric-stock-source"
-                        : !previewAvailability
-                          ? "preview-unavailable"
-                          : previewAvailability.remainingCapacityBags === null
-                            ? "remainingCapacityBags-null"
-                            : "remainingRollLengthMm-null",
-                      rollWidthMm: source.rollWidthMm,
-                      rollLengthMm: source.rollLengthMm,
-                      bagWidthMm: previewBagWidthMm,
-                      bagLengthWithAllowanceMm: previewBagLengthWithAllowanceMm,
-                      existingUsedBags: stockUsageSummary.get(source.sourceId)?.usedBags ?? 0,
-                      previewAvailability,
-                    });
-                  }
                   const availability =
                     source.sourceType === "stock"
                       ? isFabricSource
                         ? previewAvailability &&
                           previewAvailability.remainingCapacityBags !== null &&
                           previewAvailability.remainingRollLengthMm !== null
-                          ? `${formatMetric(previewAvailability.remainingCapacityBags, 0, " bags")} / ${formatMillimeters(previewAvailability.remainingRollLengthMm)} remaining`
+                          ? `${formatMetric(previewAvailability.remainingCapacityBags, 0, " bags")} - Leftover usable roll length: ${formatMillimeters(previewAvailability.remainingRollLengthMm)}`
                           : "Available in stock"
                         : "Available in stock"
                       : source.availabilityLabel;
@@ -728,7 +689,9 @@ const SourceSelectionDrawer = ({
                           </p>
                           <p className="mt-2 text-base font-semibold text-slate-900">
                             {isFabricSource
-                              ? formatMetric(source.unitCostUsdPerM2, 3, " USD/m²")
+                              ? source.sourceType === "stock"
+                                ? `${formatMetric(source.unitCostUsdPerM2, 3, " USD/m²")} • ${formatMetric(source.landedCostEgp, 2, " EGP/m² landing")}`
+                                : formatMetric(source.unitCostUsdPerM2, 3, " USD/m²")
                               : formatMetric(source.unitCostUsdPerM2, 2, " EGP/bag")}
                           </p>
                           <p className="mt-2 text-sm text-muted-foreground">Availability: {availability}</p>
@@ -787,12 +750,70 @@ const buildSelectedSourceFromOption = (option: SourceOption): SelectedSourceForm
   rollCount: "1",
   allocatedBags: "",
   unitCostUsdPerM2: option.unitCostUsdPerM2?.toString() ?? "",
+  landedCostEgp: option.landedCostEgp?.toString() ?? "",
   leadTimeDays: option.leadTimeDays?.toString() ?? "",
   freightCostPerM2Egp: option.freightCostPerM2Egp?.toString() ?? "",
   clearanceCostPerM2Egp: option.clearanceCostPerM2Egp?.toString() ?? "",
   customsPercent: option.customsPercent?.toString() ?? "",
   customsEstimate: option.customsEstimate?.toString() ?? "",
 });
+
+const hydrateSelectedSourceFromOption = (
+  source: SelectedSourceForm,
+  option: SourceOption | null | undefined,
+): SelectedSourceForm => {
+  if (!option) {
+    return source;
+  }
+
+  return {
+    ...source,
+    sourceName: source.sourceName || option.sourceName,
+    supplierId: source.supplierId || option.supplierId,
+    materialId: source.materialId || option.materialId,
+    rollWidthM: source.rollWidthM || (option.rollWidthMm?.toString() ?? ""),
+    rollLengthM: source.rollLengthM || (option.rollLengthMm?.toString() ?? ""),
+    unitCostUsdPerM2: source.unitCostUsdPerM2 || (option.unitCostUsdPerM2?.toString() ?? ""),
+    landedCostEgp: source.landedCostEgp || (option.landedCostEgp?.toString() ?? ""),
+    leadTimeDays: source.leadTimeDays || (option.leadTimeDays?.toString() ?? ""),
+    freightCostPerM2Egp:
+      source.freightCostPerM2Egp || (option.freightCostPerM2Egp?.toString() ?? ""),
+    clearanceCostPerM2Egp:
+      source.clearanceCostPerM2Egp || (option.clearanceCostPerM2Egp?.toString() ?? ""),
+    customsPercent: source.customsPercent || (option.customsPercent?.toString() ?? ""),
+    customsEstimate: source.customsEstimate || (option.customsEstimate?.toString() ?? ""),
+  };
+};
+
+const hydrateComponentSourcesFromOptions = (
+  component: ComponentSourcingForm,
+  stockItems: StockItem[],
+  importPresets: ImportPreset[],
+  suppliers: Supplier[],
+  materials: Material[],
+  fallbackMaterialId?: string,
+): ComponentSourcingForm => {
+  const sourceOptions = buildSourceOptions(
+    component,
+    stockItems,
+    importPresets,
+    suppliers,
+    materials,
+    fallbackMaterialId,
+  );
+
+  return {
+    ...component,
+    selectedSources: component.selectedSources.map((source) => {
+      const matchingOption =
+        sourceOptions.find(
+          (option) => option.sourceId === source.sourceId && option.sourceType === source.sourceType,
+        ) ?? null;
+
+      return hydrateSelectedSourceFromOption(source, matchingOption);
+    }),
+  };
+};
 
 const upsertSelectedSource = (
   component: ComponentSourcingForm,
@@ -861,6 +882,7 @@ const calculateSourceLineMetrics = ({
   const rollWidthMm = numberOrNull(source.rollWidthM);
   const rollLengthMm = numberOrNull(source.rollLengthM);
   const unitCostUsdPerM2 = numberOrNull(source.unitCostUsdPerM2);
+  const landedCostEgp = numberOrNull(source.landedCostEgp);
   const freightCostPerM2Egp = numberOrNull(source.freightCostPerM2Egp) ?? 0;
   const clearanceCostPerM2Egp = numberOrNull(source.clearanceCostPerM2Egp) ?? 0;
   const customsPercent = numberOrNull(source.customsPercent) ?? 0;
@@ -908,16 +930,20 @@ const calculateSourceLineMetrics = ({
       ? unitCostUsdPerM2 * effectiveExchangeRate
       : null;
   const customsCostPerM2Egp =
-    convertedCostPerM2Egp !== null
-      ? convertedCostPerM2Egp * (customsPercent / 100)
-      : null;
+    source.sourceType === "stock"
+      ? 0
+      : convertedCostPerM2Egp !== null
+        ? convertedCostPerM2Egp * (customsPercent / 100)
+        : null;
   const landedCostPerM2Egp =
-    convertedCostPerM2Egp !== null
-      ? convertedCostPerM2Egp +
-        customsCostPerM2Egp! +
-        freightCostPerM2Egp +
-        clearanceCostPerM2Egp
-      : null;
+    source.sourceType === "stock"
+      ? landedCostEgp
+      : convertedCostPerM2Egp !== null
+        ? convertedCostPerM2Egp +
+          (customsCostPerM2Egp ?? 0) +
+          freightCostPerM2Egp +
+          clearanceCostPerM2Egp
+        : null;
   const totalCostEgp =
     isFabricMaterial
       ? qtyUsedM2 !== null && landedCostPerM2Egp !== null
@@ -1169,21 +1195,22 @@ const toForm = (payload: MaterialSourceSelection): MaterialSourcingForm => ({
         rollWidthM: toMillimeterInputValue(source.rollWidthM),
         rollLengthM: toMillimeterInputValue(source.rollLengthM),
         rollCount: source.rollCount?.toString() ?? (source.sourceType === "stock" ? "1" : ""),
-      allocatedBags: source.allocatedBags?.toString() ?? "",
-      unitCostUsdPerM2: source.unitCostUsdPerM2?.toString() ?? "",
-      leadTimeDays: source.leadTimeDays?.toString() ?? "",
-      freightCostPerM2Egp:
-        source.freightCostPerM2Egp?.toString() ??
-        payload.freightCostPerM2Egp?.toString() ??
-        "",
-      clearanceCostPerM2Egp:
-        source.clearanceCostPerM2Egp?.toString() ??
-        payload.otherChargesPerM2Egp?.toString() ??
-        "",
-      customsPercent: source.customsPercent?.toString() ?? "",
-      customsEstimate: source.customsEstimate?.toString() ?? "",
-    })),
-  })) ?? [],
+        allocatedBags: source.allocatedBags?.toString() ?? "",
+        unitCostUsdPerM2: source.unitCostUsdPerM2?.toString() ?? "",
+        landedCostEgp: source.landedCostEgp?.toString() ?? "",
+        leadTimeDays: source.leadTimeDays?.toString() ?? "",
+        freightCostPerM2Egp:
+          source.freightCostPerM2Egp?.toString() ??
+          payload.freightCostPerM2Egp?.toString() ??
+          "",
+        clearanceCostPerM2Egp:
+          source.clearanceCostPerM2Egp?.toString() ??
+          payload.otherChargesPerM2Egp?.toString() ??
+          "",
+        customsPercent: source.customsPercent?.toString() ?? "",
+        customsEstimate: source.customsEstimate?.toString() ?? "",
+      })),
+    })) ?? [],
 });
 
 const enrichComponentSelectionsFromConfiguration = (
@@ -1253,6 +1280,7 @@ const buildSourceOptions = (
         rollWidthMm: item.rollWidthM !== null ? item.rollWidthM * 1000 : null,
         rollLengthMm: item.rollLengthM !== null ? item.rollLengthM * 1000 : null,
         unitCostUsdPerM2: item.unitCostUsdPerM2 ?? null,
+        landedCostEgp: item.landedCostEgp ?? null,
         leadTimeDays: 0,
         freightCostPerM2Egp: 0,
         clearanceCostPerM2Egp: 0,
@@ -1278,6 +1306,7 @@ const buildSourceOptions = (
         rollWidthMm: item.rollWidthM !== null ? item.rollWidthM * 1000 : null,
         rollLengthMm: item.rollLengthM !== null ? item.rollLengthM * 1000 : null,
         unitCostUsdPerM2: item.unitCostUsdPerM2,
+        landedCostEgp: null,
         leadTimeDays: item.leadTimeDays,
         freightCostPerM2Egp: item.freightCostPerM2Egp ?? 0,
         clearanceCostPerM2Egp: item.clearanceCostPerM2Egp ?? 0,
@@ -1320,6 +1349,7 @@ const SourceManagementDrawer = ({
   isFabricMaterial: boolean;
 }) => {
   const isBagStyle = isBagStyleComponent(component) && isFabricMaterial;
+  const isStockSource = draftSource.sourceType === "stock";
   const allocatedQuantity =
     metrics?.sourceMetrics.reduce((total, line) => total + (line.allocatedBags ?? 0), 0) ?? 0;
   const quantityCoverageBadge = getQuantityCoverageBadge(metrics?.requestedQuantity ?? null, allocatedQuantity);
@@ -1462,6 +1492,16 @@ const SourceManagementDrawer = ({
                     />
                   </label>
                 ) : null}
+                {isFabricMaterial && isStockSource ? (
+                  <label className="space-y-2 text-sm font-medium text-slate-700">
+                    Landing Cost (EGP/m²)
+                    <Input
+                      inputMode="decimal"
+                      value={draftSource.landedCostEgp}
+                      onChange={(event) => onUpdateDraft({ landedCostEgp: event.target.value })}
+                    />
+                  </label>
+                ) : null}
                 <label className="space-y-2 text-sm font-medium text-slate-700">
                   Lead Time (days)
                   <Input
@@ -1470,7 +1510,7 @@ const SourceManagementDrawer = ({
                     onChange={(event) => onUpdateDraft({ leadTimeDays: event.target.value })}
                   />
                 </label>
-                {isFabricMaterial ? (
+                {isFabricMaterial && !isStockSource ? (
                   <label className="space-y-2 text-sm font-medium text-slate-700">
                     Freight / m² (EGP)
                     <Input
@@ -1480,7 +1520,7 @@ const SourceManagementDrawer = ({
                     />
                   </label>
                 ) : null}
-                {isFabricMaterial ? (
+                {isFabricMaterial && !isStockSource ? (
                   <label className="space-y-2 text-sm font-medium text-slate-700">
                     Clearance / m² (EGP)
                     <Input
@@ -1490,7 +1530,7 @@ const SourceManagementDrawer = ({
                     />
                   </label>
                 ) : null}
-                {isFabricMaterial ? (
+                {isFabricMaterial && !isStockSource ? (
                   <label className="space-y-2 text-sm font-medium text-slate-700">
                     Customes %
                     <Input
@@ -1627,20 +1667,36 @@ export const MaterialSourcingPage = () => {
         }
 
         const activeMaterials = loadedMaterials.filter((item) => item.active);
+        const activeStockItems = loadedStock.filter((item) => item.active);
+        const activeImportPresets = loadedImportPresets.filter((item) => item.active);
+        const activeSuppliers = loadedSuppliers.filter((item) => item.active);
         setTender(loadedTender);
         setProductConfiguration(loadedConfiguration);
         setMaterials(activeMaterials);
-        setStockItems(loadedStock.filter((item) => item.active));
-        setImportPresets(loadedImportPresets.filter((item) => item.active));
-        setSuppliers(loadedSuppliers.filter((item) => item.active));
+        setStockItems(activeStockItems);
+        setImportPresets(activeImportPresets);
+        setSuppliers(activeSuppliers);
 
         if (saved?.componentSelections?.length) {
+          const savedForm = enrichComponentSelectionsFromConfiguration(
+            toForm(saved),
+            loadedConfiguration,
+            activeMaterials,
+          );
           const nextForm = applyTenderRateDefaults(
-            enrichComponentSelectionsFromConfiguration(
-              toForm(saved),
-              loadedConfiguration,
-              activeMaterials,
-            ),
+            {
+              ...savedForm,
+              componentSelections: savedForm.componentSelections.map((component) =>
+                hydrateComponentSourcesFromOptions(
+                  component,
+                  activeStockItems,
+                  activeImportPresets,
+                  activeSuppliers,
+                  activeMaterials,
+                  component.materialId || loadedConfiguration.mainFabricMaterialId || "",
+                ),
+              ),
+            },
             loadedTender,
           );
           setForm(nextForm);
@@ -1738,6 +1794,7 @@ export const MaterialSourcingPage = () => {
         const rollWidthMm = numberOrNull(source.rollWidthM);
         const rollLengthMm = numberOrNull(source.rollLengthM);
         const unitCostUsdPerM2 = numberOrNull(source.unitCostUsdPerM2);
+        const landedCostEgp = numberOrNull(source.landedCostEgp);
         const leadTimeDays = numberOrNull(source.leadTimeDays);
         const freightCostPerM2EgpForSource = numberOrNull(source.freightCostPerM2Egp) ?? 0;
         const clearanceCostPerM2EgpForSource = numberOrNull(source.clearanceCostPerM2Egp) ?? 0;
@@ -1798,16 +1855,20 @@ export const MaterialSourcingPage = () => {
             ? unitCostUsdPerM2 * effectiveExchangeRate
             : null;
         const customsCostPerM2EgpForSource =
-          convertedCostPerM2Egp !== null
-            ? convertedCostPerM2Egp * (customsPercentForSource / 100)
-            : null;
+          source.sourceType === "stock"
+            ? 0
+            : convertedCostPerM2Egp !== null
+              ? convertedCostPerM2Egp * (customsPercentForSource / 100)
+              : null;
         const landedCostPerM2Egp =
-          convertedCostPerM2Egp !== null
-            ? convertedCostPerM2Egp +
-              (customsCostPerM2EgpForSource ?? 0) +
-              freightCostPerM2EgpForSource +
-              clearanceCostPerM2EgpForSource
-            : null;
+          source.sourceType === "stock"
+            ? landedCostEgp
+            : convertedCostPerM2Egp !== null
+              ? convertedCostPerM2Egp +
+                (customsCostPerM2EgpForSource ?? 0) +
+                freightCostPerM2EgpForSource +
+                clearanceCostPerM2EgpForSource
+              : null;
         const totalCostEgpForLine =
           isFabricMaterial
             ? qtyUsedM2 !== null && landedCostPerM2Egp !== null
@@ -2094,22 +2155,59 @@ export const MaterialSourcingPage = () => {
     costBreakdownComponentIndex === null ? null : form.componentSelections[costBreakdownComponentIndex] ?? null;
   const costBreakdownMetrics =
     costBreakdownComponentIndex === null ? null : componentMetrics[costBreakdownComponentIndex] ?? null;
+  const requestedQuantityForBreakdown = costBreakdownMetrics?.requestedQuantity ?? null;
   const totalCostUsdForBreakdown =
     costBreakdownMetrics?.sourceMetrics.length
-      ? costBreakdownMetrics.sourceMetrics.reduce((total, line) => total + (line.totalCostUsd ?? 0), 0)
+      ? costBreakdownMetrics.sourceMetrics.reduce((total, line, index) => {
+          const source = costBreakdownComponent?.selectedSources[index];
+          if (source?.sourceType === "stock") {
+            return total;
+          }
+
+          return total + (line.totalCostUsd ?? 0);
+        }, 0)
       : null;
   const totalCostEgpForBreakdown =
     costBreakdownMetrics?.sourceMetrics.length
       ? costBreakdownMetrics.sourceMetrics.reduce((total, line) => total + (line.totalCostEgp ?? 0), 0)
       : costBreakdownMetrics?.totalMaterialCostEgp ?? null;
-  const usdCostPerBagForBreakdown =
+  const importUsdCostPerBagForBreakdown =
     costBreakdownMetrics?.requestedQuantity && totalCostUsdForBreakdown !== null
       ? totalCostUsdForBreakdown / costBreakdownMetrics.requestedQuantity
       : null;
-  const convertedCostPerBagForBreakdown =
-    usdCostPerBagForBreakdown !== null && effectiveExchangeRate !== null
-      ? usdCostPerBagForBreakdown * effectiveExchangeRate
+  const stockEgpCostPerBagForBreakdown =
+    costBreakdownMetrics?.requestedQuantity
+      ? (costBreakdownMetrics.sourceMetrics.reduce((total, line, index) => {
+          const source = costBreakdownComponent?.selectedSources[index];
+          if (source?.sourceType !== "stock") {
+            return total;
+          }
+
+          return total + ((line.actualAreaPerBagM2 ?? 0) * (line.landedCostPerM2Egp ?? 0));
+        }, 0))
       : null;
+  const convertedCostPerBagForBreakdown =
+    importUsdCostPerBagForBreakdown !== null || stockEgpCostPerBagForBreakdown !== null
+      ? (importUsdCostPerBagForBreakdown !== null && effectiveExchangeRate !== null
+          ? importUsdCostPerBagForBreakdown * effectiveExchangeRate
+          : 0) + (stockEgpCostPerBagForBreakdown ?? 0)
+      : null;
+  const hasImportBreakdown =
+    Boolean(costBreakdownComponent?.selectedSources.some((source) => source.sourceType !== "stock"));
+  const hasStockBreakdown =
+    Boolean(costBreakdownComponent?.selectedSources.some((source) => source.sourceType === "stock"));
+  const pricePerBagValue =
+    hasImportBreakdown && hasStockBreakdown
+      ? `${formatMetric(importUsdCostPerBagForBreakdown, 4, " USD")} + ${formatMetric(stockEgpCostPerBagForBreakdown, 2, " EGP")}`
+      : hasStockBreakdown
+        ? formatMetric(stockEgpCostPerBagForBreakdown, 2, " EGP")
+        : formatMetric(importUsdCostPerBagForBreakdown, 4, " USD");
+  const baseCostPerBagLabel =
+    hasImportBreakdown && hasStockBreakdown
+      ? "converted import + stock price / bag"
+      : hasStockBreakdown
+        ? "stock price / bag"
+        : "converted price / bag";
   const freightPerBagForBreakdown =
     costBreakdownMetrics?.requestedQuantity
       ? (costBreakdownMetrics.sourceMetrics.reduce(
@@ -2136,16 +2234,93 @@ export const MaterialSourcingPage = () => {
     isFabricMaterialCategory(
       getMaterialCategoryById(costBreakdownComponent?.materialId ?? "", materials),
     );
+  const bagBodySourceBreakdown =
+    isBagBodyCostBreakdown && costBreakdownComponent && costBreakdownMetrics?.sourceMetrics.length
+      ? costBreakdownComponent.selectedSources.map((source, index) => {
+          const lineMetrics = costBreakdownMetrics.sourceMetrics[index];
+          const areaPerBag = lineMetrics?.actualAreaPerBagM2 ?? null;
+          const allocatedBags = lineMetrics?.allocatedBags ?? null;
+          const shareOfRequested =
+            requestedQuantityForBreakdown && allocatedBags !== null
+              ? allocatedBags / requestedQuantityForBreakdown
+              : null;
+          const unitCostUsdPerM2 = numberOrNull(source.unitCostUsdPerM2);
+          const landedCostPerM2Egp = lineMetrics?.landedCostPerM2Egp ?? null;
+          const landedCostInputEgp = numberOrNull(source.landedCostEgp);
+          const basePricePerBagUsd =
+            source.sourceType !== "stock" && areaPerBag !== null && unitCostUsdPerM2 !== null
+              ? areaPerBag * unitCostUsdPerM2
+              : null;
+          const basePricePerBagEgp =
+            source.sourceType === "stock" && areaPerBag !== null && landedCostPerM2Egp !== null
+              ? areaPerBag * landedCostPerM2Egp
+              : null;
+          const convertedPricePerBagEgp =
+            source.sourceType === "stock"
+              ? basePricePerBagEgp
+              : basePricePerBagUsd !== null && effectiveExchangeRate !== null
+                ? basePricePerBagUsd * effectiveExchangeRate
+                : null;
+          const freightPerBag =
+            areaPerBag !== null && lineMetrics?.freightCostPerM2Egp !== null
+              ? areaPerBag * lineMetrics.freightCostPerM2Egp
+              : null;
+          const customsPerBag =
+            areaPerBag !== null && lineMetrics?.customsCostPerM2Egp !== null
+              ? areaPerBag * lineMetrics.customsCostPerM2Egp
+              : null;
+          const clearancePerBag =
+            areaPerBag !== null && lineMetrics?.clearanceCostPerM2Egp !== null
+              ? areaPerBag * lineMetrics.clearanceCostPerM2Egp
+              : null;
+          const finalSourceBagCostEgp =
+            convertedPricePerBagEgp !== null
+              ? convertedPricePerBagEgp +
+                (freightPerBag ?? 0) +
+                (customsPerBag ?? 0) +
+                (clearancePerBag ?? 0)
+              : null;
+          const contributionToTotalPerBagEgp =
+            requestedQuantityForBreakdown && lineMetrics?.totalCostEgp !== null
+              ? lineMetrics.totalCostEgp / requestedQuantityForBreakdown
+              : null;
+
+          return {
+            source,
+            lineMetrics,
+            areaPerBag,
+            allocatedBags,
+            shareOfRequested,
+            unitCostUsdPerM2,
+            landedCostPerM2Egp,
+            landedCostInputEgp,
+            basePricePerBagUsd,
+            basePricePerBagEgp,
+            convertedPricePerBagEgp,
+            freightPerBag,
+            customsPerBag,
+            clearancePerBag,
+            finalSourceBagCostEgp,
+            contributionToTotalPerBagEgp,
+          };
+        })
+      : [];
   const pricePerBagExpression =
     isBagBodyCostBreakdown && costBreakdownComponent && costBreakdownMetrics?.sourceMetrics.length
       ? `${costBreakdownComponent.selectedSources
           .map((source, index) => {
             const lineMetrics = costBreakdownMetrics.sourceMetrics[index];
-            return `(${formatMetric(lineMetrics?.allocatedBags ?? null, 0, " bags")} × ${formatMetric(
-              lineMetrics?.actualAreaPerBagM2 ?? null,
-              4,
-              " m²/bag",
-            )} × ${formatMetric(numberOrNull(source.unitCostUsdPerM2), 4, " USD/m²")})`;
+            return source.sourceType === "stock"
+              ? `(${formatMetric(lineMetrics?.allocatedBags ?? null, 0, " bags")} × ${formatMetric(
+                  lineMetrics?.actualAreaPerBagM2 ?? null,
+                  4,
+                  " m²/bag",
+                )} × ${formatMetric(lineMetrics?.landedCostPerM2Egp ?? null, 2, " EGP/m²")})`
+              : `(${formatMetric(lineMetrics?.allocatedBags ?? null, 0, " bags")} × ${formatMetric(
+                  lineMetrics?.actualAreaPerBagM2 ?? null,
+                  4,
+                  " m²/bag",
+                )} × ${formatMetric(numberOrNull(source.unitCostUsdPerM2), 4, " USD/m²")})`;
           })
           .join(" + ")} ÷ requested quantity [${formatMetric(
           costBreakdownMetrics.requestedQuantity ?? null,
@@ -2377,7 +2552,9 @@ export const MaterialSourcingPage = () => {
         ? component.selectedSources.findIndex((source) => source.sourceId === option.sourceId)
         : component.selectedSources.findIndex((source) => source.sourceId === option.sourceId);
     const existingSource = existingIndex >= 0 ? component.selectedSources[existingIndex] : null;
-    const baseDraftSource = existingSource ? { ...existingSource } : buildSelectedSourceFromOption(option);
+    const baseDraftSource = existingSource
+      ? hydrateSelectedSourceFromOption(existingSource, option)
+      : buildSelectedSourceFromOption(option);
     const draftSource =
       form.sourcingStrategy === "combine-sources"
         ? {
@@ -2621,10 +2798,23 @@ export const MaterialSourcingPage = () => {
       return;
     }
 
+    const sourceOptions = buildSourceOptions(
+      component,
+      stockItems,
+      importPresets,
+      suppliers,
+      materials,
+      component.materialId || productConfiguration?.mainFabricMaterialId || "",
+    );
+    const matchingOption =
+      sourceOptions.find(
+        (option) => option.sourceId === source.sourceId && option.sourceType === source.sourceType,
+      ) ?? null;
+
     setDrawerState({
       componentIndex,
       sourceIndex,
-      draftSource: { ...source },
+      draftSource: hydrateSelectedSourceFromOption(source, matchingOption),
     });
   };
 
@@ -2704,6 +2894,7 @@ export const MaterialSourcingPage = () => {
             rollWidthM: numberOrNullMillimeterInput(source.rollWidthM),
             rollLengthM: numberOrNullMillimeterInput(source.rollLengthM),
             rollCount: source.sourceType === "stock" ? 1 : Math.max(1, Math.floor(numberOrNull(source.rollCount) ?? 1)),
+            landedCostEgp: numberOrNull(source.landedCostEgp),
             customsEstimate: lineMetrics?.customsCostPerM2Egp ?? null,
             customsPercent: numberOrNull(source.customsPercent),
             freightCostPerM2Egp: numberOrNull(source.freightCostPerM2Egp),
@@ -3231,7 +3422,217 @@ export const MaterialSourcingPage = () => {
         size="lg"
       >
         <div className="space-y-3">
-          {costBreakdownComponent && costBreakdownMetrics?.sourceMetrics.length ? (
+          {isBagBodyCostBreakdown ? (
+            <>
+              <div className="rounded-2xl border border-primary/20 bg-primary/5 px-4 py-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-slate-700">Total Material Cost / Bag</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Sum of all selected source contributions to one finished bag.
+                    </p>
+                  </div>
+                  <p className="text-base font-semibold text-slate-900">
+                    {formatMetric(costBreakdownMetrics?.materialCostPerBagEgp ?? null, 2, " EGP")}
+                  </p>
+                </div>
+              </div>
+
+              {bagBodySourceBreakdown.map((item, index) => {
+                const { source, lineMetrics } = item;
+                const rollWidthMm = numberOrNull(source.rollWidthM);
+                const rollLengthMm = numberOrNull(source.rollLengthM);
+
+                return (
+                  <div
+                    key={`${source.sourceId}-${index}`}
+                    className="rounded-2xl border border-border bg-slate-50 px-4 py-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-medium text-slate-700">{`Source ${index + 1}`}</p>
+                          <Badge variant={source.sourceType === "stock" ? "success" : "neutral"}>
+                            {source.sourceType === "stock" ? "Stock" : "Import"}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">{source.sourceName}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {`Allocated ${formatMetric(item.allocatedBags, 0, " bags")} of ${formatMetric(
+                            requestedQuantityForBreakdown,
+                            0,
+                            " bags",
+                          )} requested (${formatMetric(
+                            item.shareOfRequested !== null ? item.shareOfRequested * 100 : null,
+                            2,
+                            "%",
+                          )})`}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Contribution To Total / Bag</p>
+                        <p className="mt-1 text-base font-semibold text-slate-900">
+                          {formatMetric(item.contributionToTotalPerBagEgp, 2, " EGP")}
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {`Source bag cost: ${formatMetric(item.finalSourceBagCostEgp, 2, " EGP/bag")}`}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-medium text-slate-700">Area / Bag</p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {`((roll width [${formatMillimeters(rollWidthMm)}] × roll length [${formatMillimeters(
+                                rollLengthMm,
+                                0,
+                              )}]) ÷ 1,000,000) ÷ bags per roll [${formatMetric(
+                                lineMetrics?.bagsPerRoll ?? null,
+                                0,
+                                " bags/roll",
+                              )}]`}
+                            </p>
+                          </div>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {formatMetric(item.areaPerBag, 4, " m²/bag")}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-medium text-slate-700">Price / Bag</p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {source.sourceType === "stock"
+                                ? `area / bag [${formatMetric(item.areaPerBag, 4, " m²/bag")}] × landing cost [${formatMetric(
+                                    item.landedCostInputEgp ?? item.landedCostPerM2Egp,
+                                    2,
+                                    " EGP/m²",
+                                  )}]`
+                                : `area / bag [${formatMetric(item.areaPerBag, 4, " m²/bag")}] × unit cost [${formatMetric(
+                                    item.unitCostUsdPerM2,
+                                    4,
+                                    " USD/m²",
+                                  )}]`}
+                            </p>
+                          </div>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {source.sourceType === "stock"
+                              ? formatMetric(item.basePricePerBagEgp, 2, " EGP/bag")
+                              : formatMetric(item.basePricePerBagUsd, 4, " USD/bag")}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-medium text-slate-700">USD To EGP</p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {source.sourceType === "stock"
+                                ? `Stock source uses landing cost already in EGP.`
+                                : `price / bag [${formatMetric(
+                                    item.basePricePerBagUsd,
+                                    4,
+                                    " USD/bag",
+                                  )}] × effective exchange rate [${formatMetric(
+                                    effectiveExchangeRate,
+                                    4,
+                                    " EGP/USD",
+                                  )}]`}
+                            </p>
+                          </div>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {formatMetric(item.convertedPricePerBagEgp, 2, " EGP/bag")}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                          <p className="text-sm font-medium text-slate-700">Freight / Bag</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {`area / bag [${formatMetric(item.areaPerBag, 4, " m²/bag")}] × freight [${formatMetric(
+                              lineMetrics?.freightCostPerM2Egp ?? null,
+                              2,
+                              " EGP/m²",
+                            )}]`}
+                          </p>
+                          <p className="mt-2 text-sm font-semibold text-slate-900">
+                            {formatMetric(item.freightPerBag, 2, " EGP/bag")}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                          <p className="text-sm font-medium text-slate-700">Customs / Bag</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {source.sourceType === "stock"
+                              ? "No customs applied for stock source."
+                              : `area / bag [${formatMetric(item.areaPerBag, 4, " m²/bag")}] × customs [${formatMetric(
+                                  lineMetrics?.customsCostPerM2Egp ?? null,
+                                  2,
+                                  " EGP/m²",
+                                )}]`}
+                          </p>
+                          <p className="mt-2 text-sm font-semibold text-slate-900">
+                            {formatMetric(item.customsPerBag, 2, " EGP/bag")}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                          <p className="text-sm font-medium text-slate-700">Clearance / Bag</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {`area / bag [${formatMetric(item.areaPerBag, 4, " m²/bag")}] × clearance [${formatMetric(
+                              lineMetrics?.clearanceCostPerM2Egp ?? null,
+                              2,
+                              " EGP/m²",
+                            )}]`}
+                          </p>
+                          <p className="mt-2 text-sm font-semibold text-slate-900">
+                            {formatMetric(item.clearancePerBag, 2, " EGP/bag")}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 bg-slate-100 px-4 py-3">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-medium text-slate-700">Final Source Cost / Bag</p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {`converted base [${formatMetric(
+                                item.convertedPricePerBagEgp,
+                                2,
+                                " EGP/bag",
+                              )}] + freight [${formatMetric(
+                                item.freightPerBag,
+                                2,
+                                " EGP/bag",
+                              )}] + customs [${formatMetric(
+                                item.customsPerBag,
+                                2,
+                                " EGP/bag",
+                              )}] + clearance [${formatMetric(
+                                item.clearancePerBag,
+                                2,
+                                " EGP/bag",
+                              )}]`}
+                            </p>
+                          </div>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {formatMetric(item.finalSourceBagCostEgp, 2, " EGP/bag")}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          ) : costBreakdownComponent && costBreakdownMetrics?.sourceMetrics.length ? (
             <>
               {costBreakdownComponent.selectedSources.map((source, index) => {
                 const lineMetrics = costBreakdownMetrics.sourceMetrics[index];
@@ -3325,52 +3726,8 @@ export const MaterialSourcingPage = () => {
             </>
           ) : null}
 
-          {(isBagBodyCostBreakdown
+          {!isBagBodyCostBreakdown
             ? [
-                {
-                  label: "Price / Bag",
-                  expression: pricePerBagExpression,
-                  value: formatMetric(usdCostPerBagForBreakdown, 4, " USD"),
-                },
-                {
-                  label: "USD to EGP",
-                  expression: `price / bag [${formatMetric(usdCostPerBagForBreakdown, 4, " USD")}] × (exchange rate [${formatMetric(
-                    exchangeRate,
-                    4,
-                    " EGP/USD",
-                  )}] × (1 + safety factor [${formatMetric(currencySafetyFactorPercent, 2, "%")}] ÷ 100))`,
-                  value: formatMetric(convertedCostPerBagForBreakdown, 2, " EGP"),
-                },
-                {
-                  label: "Freight / Bag",
-                  expression: freightPerBagExpression,
-                  value: formatMetric(freightPerBagForBreakdown, 2, " EGP"),
-                },
-                {
-                  label: "Clearance / Bag",
-                  expression: clearancePerBagExpression,
-                  value: formatMetric(clearancePerBagForBreakdown, 2, " EGP"),
-                },
-                {
-                  label: "Customes / Bag",
-                  expression: customsPerBagExpression,
-                  value: formatMetric(customsPerBagForBreakdown, 2, " EGP"),
-                },
-                {
-                  label: "Final Material Cost / Bag",
-                  expression: `converted price / bag [${formatMetric(convertedCostPerBagForBreakdown, 2, " EGP")}] + freight / bag [${formatMetric(
-                    freightPerBagForBreakdown,
-                    2,
-                    " EGP",
-                  )}] + clearance / bag [${formatMetric(clearancePerBagForBreakdown, 2, " EGP")}] + customes / bag [${formatMetric(
-                    customsPerBagForBreakdown,
-                    2,
-                    " EGP",
-                  )}]`,
-                  value: formatMetric(costBreakdownMetrics?.materialCostPerBagEgp ?? null, 2, " EGP"),
-                },
-              ]
-            : [
                 {
                   label: "Source Totals",
                   expression: isAccessoryComponent(costBreakdownComponent ?? { componentType: "", componentName: "" })
@@ -3401,7 +3758,7 @@ export const MaterialSourcingPage = () => {
                       )}]`,
                   value: formatMetric(costBreakdownMetrics?.materialCostPerBagEgp ?? null, 2, " EGP/unit"),
                 },
-              ]).map((item) => (
+              ].map((item) => (
             <div
               key={item.label}
               className="rounded-2xl border border-border bg-slate-50 px-4 py-3"
@@ -3414,7 +3771,8 @@ export const MaterialSourcingPage = () => {
                 <p className="text-sm font-semibold text-slate-900">{`= ${item.value}`}</p>
               </div>
             </div>
-          ))}
+              ))
+            : null}
         </div>
       </Dialog>
     </div>

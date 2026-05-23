@@ -391,7 +391,7 @@ export const AccessoriesPage = () => {
               <p className="text-sm font-medium text-slate-700">Pricing Items</p>
               <Button type="button" variant="outline" onClick={() => setForm((c) => ({ ...c, pricingItems: [...c.pricingItems, emptyPricingItem()] }))}>
                 <Plus className="h-4 w-4" />
-                Add Row
+                Add Item
               </Button>
             </div>
             <div className="space-y-3">

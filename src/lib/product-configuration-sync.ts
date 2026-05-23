@@ -22,6 +22,8 @@ type ProductSyncStatus = {
 
 const normalizeText = (value: string | null | undefined) => value?.trim() ?? "";
 
+const hasTextValue = (value: string | null | undefined) => normalizeText(value) !== "";
+
 const normalizeNumeric = (value: string | number | null | undefined) => {
   if (value === null || value === undefined || value === "") {
     return "";
@@ -34,6 +36,18 @@ const normalizeNumeric = (value: string | number | null | undefined) => {
 
   return Number.isInteger(parsed) ? String(parsed) : parsed.toFixed(4).replace(/\.?0+$/, "");
 };
+
+const hasNumericValue = (value: string | number | null | undefined) => normalizeNumeric(value) !== "";
+
+const matchesTextIfPresent = (
+  current: string | null | undefined,
+  expected: string | null | undefined,
+) => !hasTextValue(current) || normalizeText(current) === normalizeText(expected);
+
+const matchesNumericIfPresent = (
+  current: string | number | null | undefined,
+  expected: string | number | null | undefined,
+) => !hasNumericValue(current) || normalizeNumeric(current) === normalizeNumeric(expected);
 
 const resolveMaterialId = (value: string, materials: Material[]) => {
   const match = materials.find(
@@ -72,10 +86,9 @@ const areComparableComponentsEqual = (
 ) =>
   normalizeText(current.productName) === normalizeText(expected.productName) &&
   normalizeText(current.componentName) === normalizeText(expected.componentName) &&
-  normalizeText(current.componentType) === normalizeText(expected.componentType) &&
+  matchesTextIfPresent(current.componentType, expected.componentType) &&
   normalizeText(current.materialId) === normalizeText(expected.materialId) &&
-  normalizeNumeric(current.accessoryTotalPricePerBagEgp) ===
-    normalizeNumeric(expected.accessoryTotalPricePerBagEgp) &&
+  matchesNumericIfPresent(current.accessoryTotalPricePerBagEgp, expected.accessoryTotalPricePerBagEgp) &&
   normalizeNumeric(current.requestedQuantity) === normalizeNumeric(expected.requestedQuantity) &&
   normalizeNumeric(current.bagDiameterMm) === normalizeNumeric(expected.bagDiameterMm) &&
   normalizeNumeric(current.bagLengthMm) === normalizeNumeric(expected.bagLengthMm) &&

@@ -74,6 +74,18 @@ type MaterialLineOverrides = {
 const productOverheadLineCode = (baseCode: "F" | "G" | "G2", productId: string) =>
   `${baseCode}::${productId}`;
 
+const parseProductOverheadLineCode = (
+  code: string,
+): { baseCode: "F" | "G" | "G2"; productId: string } | null => {
+  const [baseCode, productId] = code.split("::");
+
+  if (!productId || (baseCode !== "F" && baseCode !== "G" && baseCode !== "G2")) {
+    return null;
+  }
+
+  return { baseCode, productId };
+};
+
 const productOverheadLineDefinitions = {
   F: {
     category: "Factory Overhead",
@@ -287,21 +299,32 @@ const calculateMaterialLineOverrides = ({
       const recomputedTotal = selection.selectedSources.reduce((total, source) => {
         const qtyUsedM2 = source.qtyUsedM2 ?? null;
         const unitCostUsdPerM2 = source.unitCostUsdPerM2 ?? null;
+        const landedCostEgp = source.landedCostEgp ?? null;
         const customsPercent = source.customsPercent ?? 0;
         const freightCostPerM2Egp = source.freightCostPerM2Egp ?? 0;
         const clearanceCostPerM2Egp = source.clearanceCostPerM2Egp ?? 0;
 
-        if (qtyUsedM2 === null || unitCostUsdPerM2 === null) {
+        if (qtyUsedM2 === null) {
           return total;
         }
 
-        const convertedCostPerM2Egp = unitCostUsdPerM2 * effectiveExchangeRate;
-        const customsCostPerM2Egp = convertedCostPerM2Egp * (customsPercent / 100);
+        const convertedCostPerM2Egp =
+          unitCostUsdPerM2 !== null ? unitCostUsdPerM2 * effectiveExchangeRate : null;
+        const customsCostPerM2Egp =
+          source.sourceType === "stock" ? 0 : (convertedCostPerM2Egp ?? 0) * (customsPercent / 100);
         const landedCostPerM2Egp =
-          convertedCostPerM2Egp +
-          customsCostPerM2Egp +
-          freightCostPerM2Egp +
-          clearanceCostPerM2Egp;
+          source.sourceType === "stock"
+            ? landedCostEgp
+            : convertedCostPerM2Egp !== null
+              ? convertedCostPerM2Egp +
+                customsCostPerM2Egp +
+                freightCostPerM2Egp +
+                clearanceCostPerM2Egp
+              : null;
+
+        if (landedCostPerM2Egp === null) {
+          return total;
+        }
 
         return total + qtyUsedM2 * landedCostPerM2Egp;
       }, 0);
@@ -483,8 +506,9 @@ const mergeCostLines = (
 
   return defaultLines.map((line) => {
     const saved = savedByCode.get(line.code);
+    const productOverheadCode = parseProductOverheadLineCode(line.code);
     const costPerBag =
-      ["A", "B", "C", "F", "G", "G2"].includes(line.code)
+      ["A", "B", "C", "F", "G", "G2"].includes(line.code) || productOverheadCode
         ? line.costPerBag ?? null
         : saved?.editable
           ? saved.costPerBag
@@ -499,6 +523,35 @@ const mergeCostLines = (
       costPerBag: costPerBag?.toString() ?? "",
     };
   });
+};
+
+const syncProductConfigurationOverheads = (
+  configuration: ProductConfiguration,
+  costLines: Array<{ code: string; costPerBag: string | number | null }>,
+): ProductConfiguration => {
+  const costLineValues = new Map(
+    costLines.map((line) => [
+      line.code,
+      typeof line.costPerBag === "string" ? numberOrNull(line.costPerBag) : line.costPerBag ?? null,
+    ]),
+  );
+
+  return {
+    ...configuration,
+    productSnapshots: configuration.productSnapshots.map((product) => ({
+      ...product,
+      factoryOverheadPerBag:
+        costLineValues.get(productOverheadLineCode("F", product.productId)) ?? product.factoryOverheadPerBag ?? null,
+      manufacturingOverheadPerBag:
+        costLineValues.get(productOverheadLineCode("G", product.productId)) ??
+        product.manufacturingOverheadPerBag ??
+        null,
+      managementOverheadPerBag:
+        costLineValues.get(productOverheadLineCode("G2", product.productId)) ??
+        product.managementOverheadPerBag ??
+        null,
+    })),
+  };
 };
 
 const toForm = (
@@ -549,10 +602,12 @@ export const CostBuildUpPage = () => {
       sources: Array<{
         sourceId: string;
         sourceName: string;
+        sourceType: "stock" | "import";
         allocatedBags: number | null;
         actualAreaPerBagM2: number | null;
         qtyUsedM2: number | null;
         unitCostUsdPerM2: number | null;
+        landedCostEgp: number | null;
         customsPercent: number | null;
         customsCostPerM2Egp: number | null;
         freightCostPerM2Egp: number | null;
@@ -901,6 +956,7 @@ export const CostBuildUpPage = () => {
         const sources = selection.selectedSources.map((source) => {
           const qtyUsedM2 = source.qtyUsedM2 ?? null;
           const unitCostUsdPerM2 = source.unitCostUsdPerM2 ?? null;
+          const landedCostEgp = source.landedCostEgp ?? null;
           const customsPercent = source.customsPercent ?? 0;
           const freightCostPerM2Egp = source.freightCostPerM2Egp ?? 0;
           const clearanceCostPerM2Egp = source.clearanceCostPerM2Egp ?? 0;
@@ -909,21 +965,29 @@ export const CostBuildUpPage = () => {
               ? unitCostUsdPerM2 * effectiveExchangeRate
               : null;
           const customsCostPerM2Egp =
-            convertedCostPerM2Egp !== null ? convertedCostPerM2Egp * (customsPercent / 100) : null;
+            source.sourceType === "stock"
+              ? 0
+              : convertedCostPerM2Egp !== null
+                ? convertedCostPerM2Egp * (customsPercent / 100)
+                : null;
           const landedCostPerM2Egp =
-            convertedCostPerM2Egp !== null
-              ? convertedCostPerM2Egp + (customsCostPerM2Egp ?? 0) + freightCostPerM2Egp + clearanceCostPerM2Egp
-              : null;
+            source.sourceType === "stock"
+              ? landedCostEgp
+              : convertedCostPerM2Egp !== null
+                ? convertedCostPerM2Egp + (customsCostPerM2Egp ?? 0) + freightCostPerM2Egp + clearanceCostPerM2Egp
+                : null;
           const totalCostEgp =
             qtyUsedM2 !== null && landedCostPerM2Egp !== null ? qtyUsedM2 * landedCostPerM2Egp : null;
 
           return {
             sourceId: source.sourceId,
             sourceName: source.sourceName,
+            sourceType: source.sourceType,
             allocatedBags: source.allocatedBags ?? null,
             actualAreaPerBagM2: source.actualAreaPerBagM2 ?? null,
             qtyUsedM2,
             unitCostUsdPerM2,
+            landedCostEgp,
             customsPercent,
             customsCostPerM2Egp,
             freightCostPerM2Egp,
@@ -1189,6 +1253,15 @@ export const CostBuildUpPage = () => {
     }
 
     try {
+      const syncedConfiguration = productConfiguration
+        ? syncProductConfigurationOverheads(productConfiguration, form.costLines)
+        : null;
+      const persistedConfiguration = syncedConfiguration
+        ? await api.put<ProductConfiguration>(
+            `/tenders/${tenderId}/product-configuration`,
+            syncedConfiguration,
+          )
+        : null;
       const response = await api.put<CostBuildUp>(`/tenders/${tenderId}/cost-build-up`, payload);
       const nextMaterialLineOverrides = calculateMaterialLineOverrides({
         materialSourcing,
@@ -1196,12 +1269,14 @@ export const CostBuildUpPage = () => {
         currencySafetyFactorPercent,
         materials,
       });
+      const nextConfiguration = persistedConfiguration ?? productConfiguration;
       const nextForm = toForm(
         response,
         nextMaterialLineOverrides,
-        deriveCostDefaults(productConfiguration),
-        productConfiguration?.productSnapshots ?? [],
+        deriveCostDefaults(nextConfiguration),
+        nextConfiguration?.productSnapshots ?? [],
       );
+      setProductConfiguration(nextConfiguration);
       setForm(nextForm);
       setLastSavedSignature(JSON.stringify(nextForm));
       setMessage(
@@ -1370,16 +1445,22 @@ export const CostBuildUpPage = () => {
                                             {source.actualAreaPerBagM2 !== null
                                               ? (
                                                   <div className="space-y-1">
-                                                    <p>{formatMetric(source.unitCostUsdPerM2 ?? null, 3, " USD/m²")}</p>
-                                                    <p className="text-xs text-muted-foreground">
-                                                      {formatMetric(
-                                                        source.unitCostUsdPerM2 !== null && effectiveExchangeRate !== null
-                                                          ? source.unitCostUsdPerM2 * effectiveExchangeRate
-                                                          : null,
-                                                        2,
-                                                        " EGP/m²",
-                                                      )}
-                                                    </p>
+                                                    {source.sourceType === "stock" ? (
+                                                      <p>{formatMetric(source.landedCostEgp ?? null, 2, " EGP/m²")}</p>
+                                                    ) : (
+                                                      <>
+                                                        <p>{formatMetric(source.unitCostUsdPerM2 ?? null, 3, " USD/m²")}</p>
+                                                        <p className="text-xs text-muted-foreground">
+                                                          {formatMetric(
+                                                            source.unitCostUsdPerM2 !== null && effectiveExchangeRate !== null
+                                                              ? source.unitCostUsdPerM2 * effectiveExchangeRate
+                                                              : null,
+                                                            2,
+                                                            " EGP/m²",
+                                                          )}
+                                                        </p>
+                                                      </>
+                                                    )}
                                                   </div>
                                                 )
                                               : formatMetric(source.unitCostUsdPerM2 ?? null, 2, " EGP/bag")}
@@ -1955,28 +2036,36 @@ export const CostBuildUpPage = () => {
                           </div>
                           <div>
                             <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Unit cost</p>
-                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.unitCostUsdPerM2, 3, " USD/m²")}</p>
+                            <p className="mt-1 text-sm text-slate-900">
+                              {source.sourceType === "stock"
+                                ? formatMetric(source.landedCostEgp, 2, " EGP/m²")
+                                : formatMetric(source.unitCostUsdPerM2, 3, " USD/m²")}
+                            </p>
                           </div>
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Effective FX</p>
-                            <p className="mt-1 text-sm text-slate-900">{formatMetric(effectiveExchangeRate, 3)}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Freight / m²</p>
-                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.freightCostPerM2Egp, 2, " EGP")}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Customes %</p>
-                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.customsPercent, 2, "%")}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Clearance / m²</p>
-                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.clearanceCostPerM2Egp, 2, " EGP")}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Customs cost / m²</p>
-                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.customsCostPerM2Egp, 2, " EGP")}</p>
-                          </div>
+                          {source.sourceType === "stock" ? null : (
+                            <>
+                              <div>
+                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Effective FX</p>
+                                <p className="mt-1 text-sm text-slate-900">{formatMetric(effectiveExchangeRate, 3)}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Freight / m²</p>
+                                <p className="mt-1 text-sm text-slate-900">{formatMetric(source.freightCostPerM2Egp, 2, " EGP")}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Customes %</p>
+                                <p className="mt-1 text-sm text-slate-900">{formatMetric(source.customsPercent, 2, "%")}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Clearance / m²</p>
+                                <p className="mt-1 text-sm text-slate-900">{formatMetric(source.clearanceCostPerM2Egp, 2, " EGP")}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Customs cost / m²</p>
+                                <p className="mt-1 text-sm text-slate-900">{formatMetric(source.customsCostPerM2Egp, 2, " EGP")}</p>
+                              </div>
+                            </>
+                          )}
                           <div>
                             <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Landed cost / m²</p>
                             <p className="mt-1 text-sm font-semibold text-slate-900">
@@ -1991,47 +2080,63 @@ export const CostBuildUpPage = () => {
                           </div>
                         </div>
                         <div className="mt-4 space-y-2 border-t border-border pt-4">
-                          <p className="text-sm text-muted-foreground">
-                            {`Freight / bag = (area / bag [${formatMetric(
-                              source.actualAreaPerBagM2 ?? null,
-                              4,
-                              " m²/bag",
-                            )}] × freight cost / m² [${formatMetric(
-                              source.freightCostPerM2Egp,
-                              2,
-                              " EGP/m²",
-                            )}])`}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            {`Clearance / bag = (area / bag [${formatMetric(
-                              source.actualAreaPerBagM2 ?? null,
-                              4,
-                              " m²/bag",
-                            )}] × clearance cost / m² [${formatMetric(
-                              source.clearanceCostPerM2Egp,
-                              2,
-                              " EGP/m²",
-                            )}])`}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            {`Customes / bag = ((area / bag [${formatMetric(
-                              source.actualAreaPerBagM2 ?? null,
-                              4,
-                              " m²/bag",
-                            )}] × cost / m² [${formatMetric(
-                              source.unitCostUsdPerM2,
-                              3,
-                              " USD/m²",
-                            )}] × effective exchange rate [${formatMetric(
-                              effectiveExchangeRate,
-                              3,
-                              " EGP/USD",
-                            )}]) × customes % [${formatMetric(
-                              source.customsPercent,
-                              2,
-                              "%",
-                            )}]) ÷ 100`}
-                          </p>
+                          {source.sourceType === "stock" ? (
+                            <p className="text-sm text-muted-foreground">
+                              {`Source total = qty used [${formatMetric(
+                                source.qtyUsedM2,
+                                4,
+                                " m²",
+                              )}] × landing cost / m² [${formatMetric(
+                                source.landedCostPerM2Egp,
+                                2,
+                                " EGP/m²",
+                              )}]`}
+                            </p>
+                          ) : (
+                            <>
+                              <p className="text-sm text-muted-foreground">
+                                {`Freight / bag = (area / bag [${formatMetric(
+                                  source.actualAreaPerBagM2 ?? null,
+                                  4,
+                                  " m²/bag",
+                                )}] × freight cost / m² [${formatMetric(
+                                  source.freightCostPerM2Egp,
+                                  2,
+                                  " EGP/m²",
+                                )}])`}
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                {`Clearance / bag = (area / bag [${formatMetric(
+                                  source.actualAreaPerBagM2 ?? null,
+                                  4,
+                                  " m²/bag",
+                                )}] × clearance cost / m² [${formatMetric(
+                                  source.clearanceCostPerM2Egp,
+                                  2,
+                                  " EGP/m²",
+                                )}])`}
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                {`Customes / bag = ((area / bag [${formatMetric(
+                                  source.actualAreaPerBagM2 ?? null,
+                                  4,
+                                  " m²/bag",
+                                )}] × cost / m² [${formatMetric(
+                                  source.unitCostUsdPerM2,
+                                  3,
+                                  " USD/m²",
+                                )}] × effective exchange rate [${formatMetric(
+                                  effectiveExchangeRate,
+                                  3,
+                                  " EGP/USD",
+                                )}]) × customes % [${formatMetric(
+                                  source.customsPercent,
+                                  2,
+                                  "%",
+                                )}]) ÷ 100`}
+                              </p>
+                            </>
+                          )}
                         </div>
                       </div>
                     ))}
