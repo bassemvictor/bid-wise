@@ -295,10 +295,9 @@ export const NestedTenderGrid = ({
             source.unitCostUsdPerM2 !== null &&
             effectiveExchangeRate !== null
               ? source.qtyUsedM2 *
-                (source.unitCostUsdPerM2 * effectiveExchangeRate +
-                  (freightCostPerM2Egp ?? 0) +
-                  (source.customsEstimate ?? 0) +
-                  (otherChargesPerM2Egp ?? 0))
+                ((source.unitCostUsdPerM2 * effectiveExchangeRate) * (1 + ((source.customsPercent ?? 0) / 100)) +
+                  (source.freightCostPerM2Egp ?? freightCostPerM2Egp ?? 0) +
+                  (source.clearanceCostPerM2Egp ?? otherChargesPerM2Egp ?? 0))
               : null;
           const priceImpact =
             costImpact !== null &&

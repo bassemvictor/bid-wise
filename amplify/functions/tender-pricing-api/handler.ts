@@ -242,6 +242,9 @@ const normalizeMaterialSourceSelectionPayload = (
         rollLengthM: toNullableNumber(source.rollLengthM),
         rollCount: toNullableNumber(source.rollCount),
         customsEstimate: toNullableNumber(source.customsEstimate),
+        customsPercent: toNullableNumber(source.customsPercent),
+        freightCostPerM2Egp: toNullableNumber(source.freightCostPerM2Egp),
+        clearanceCostPerM2Egp: toNullableNumber(source.clearanceCostPerM2Egp),
         bagsAcrossRollWidth: toNullableNumber(source.bagsAcrossRollWidth),
         bagsAlongRollLength: toNullableNumber(source.bagsAlongRollLength),
         bagsPerRoll: toNullableNumber(source.bagsPerRoll),
@@ -285,6 +288,9 @@ const normalizeMaterialSourceSelectionPayload = (
               rollLengthM: toNullableNumber(source.rollLengthM),
               rollCount: toNullableNumber(source.rollCount),
               customsEstimate: toNullableNumber(source.customsEstimate),
+              customsPercent: toNullableNumber(source.customsPercent),
+              freightCostPerM2Egp: toNullableNumber(source.freightCostPerM2Egp),
+              clearanceCostPerM2Egp: toNullableNumber(source.clearanceCostPerM2Egp),
               bagsAcrossRollWidth: toNullableNumber(source.bagsAcrossRollWidth),
               bagsAlongRollLength: toNullableNumber(source.bagsAlongRollLength),
               bagsPerRoll: toNullableNumber(source.bagsPerRoll),
@@ -383,8 +389,8 @@ const normalizeMaterialPayload = (payload: Partial<Material>, tenantId: string):
   materialId: payload.materialId ?? crypto.randomUUID(),
   materialName: payload.materialName?.trim() ?? "",
   category: normalizeMaterialCategory(payload.category),
-  temperatureLimit: payload.temperatureLimit?.trim() ?? "",
-  chemicalResistance: payload.chemicalResistance?.trim() ?? "",
+  description: payload.description?.trim() ?? "",
+  baseMaterial: payload.baseMaterial?.trim() ?? "",
   defaultWastePercent: toNullableNumber(payload.defaultWastePercent),
   rollWidthM: toNullableNumber(payload.rollWidthM),
   rollLengthM: toNullableNumber(payload.rollLengthM),
@@ -403,6 +409,7 @@ const normalizeStockItemPayload = (payload: Partial<StockItem>, tenantId: string
   rollWidthM: toNullableNumber(payload.rollWidthM),
   rollLengthM: toNullableNumber(payload.rollLengthM),
   unitCostUsdPerM2: toNullableNumber(payload.unitCostUsdPerM2),
+  landedCostEgp: toNullableNumber(payload.landedCostEgp),
   active: payload.active ?? true,
   createdAt: payload.createdAt ?? "",
   updatedAt: payload.updatedAt ?? "",
@@ -418,6 +425,9 @@ const normalizeImportPresetPayload = (payload: Partial<ImportPreset>, tenantId: 
   rollLengthM: toNullableNumber(payload.rollLengthM),
   leadTimeDays: toNullableNumber(payload.leadTimeDays),
   unitCostUsdPerM2: toNullableNumber(payload.unitCostUsdPerM2),
+  freightCostPerM2Egp: toNullableNumber(payload.freightCostPerM2Egp),
+  clearanceCostPerM2Egp: toNullableNumber(payload.clearanceCostPerM2Egp),
+  customsPercent: toNullableNumber(payload.customsPercent),
   customsEstimate: toNullableNumber(payload.customsEstimate),
   active: payload.active ?? true,
   createdAt: payload.createdAt ?? "",
@@ -455,6 +465,20 @@ const normalizeProductPayload = (payload: Partial<Product>, tenantId: string): P
         componentName: component.componentName?.trim() ?? "",
         componentType: component.componentType?.trim() ?? "",
         material: component.material?.trim() ?? "",
+        accessorySnapshot:
+          component.accessorySnapshot && typeof component.accessorySnapshot === "object"
+            ? {
+                accessoryId: component.accessorySnapshot.accessoryId?.trim() ?? "",
+                accessoryName: component.accessorySnapshot.accessoryName?.trim() ?? "",
+                pricingItems: Array.isArray(component.accessorySnapshot.pricingItems)
+                  ? component.accessorySnapshot.pricingItems.map((item) => ({
+                      key: item.key?.trim() ?? "",
+                      price: toNullableNumber(item.price),
+                    }))
+                  : [],
+                totalPricePerBagEgp: toNullableNumber(component.accessorySnapshot.totalPricePerBagEgp),
+              }
+            : null,
         specifications:
           component.specifications && typeof component.specifications === "object"
             ? Object.fromEntries(
@@ -476,9 +500,13 @@ const normalizeAccessoryPayload = (payload: Partial<Accessory>, tenantId: string
   tenantId,
   accessoryId: payload.accessoryId ?? crypto.randomUUID(),
   accessoryName: payload.accessoryName?.trim() ?? "",
-  material: payload.material?.trim() ?? "",
-  unit: payload.unit?.trim() ?? "",
-  defaultCost: toNullableNumber(payload.defaultCost),
+  pricingItems: Array.isArray(payload.pricingItems)
+    ? payload.pricingItems.map((item) => ({
+        key: item.key?.trim() ?? "",
+        price: toNullableNumber(item.price),
+      }))
+    : [],
+  totalPricePerBagEgp: toNullableNumber(payload.totalPricePerBagEgp),
   active: payload.active ?? true,
   createdAt: payload.createdAt ?? "",
   updatedAt: payload.updatedAt ?? "",
@@ -750,6 +778,9 @@ const sanitizeMaterialSourceSelection = (item: StoredEntity | null): MaterialSou
             rollLengthM: toNullableNumber(record.rollLengthM),
             rollCount: toNullableNumber(record.rollCount),
             customsEstimate: toNullableNumber(record.customsEstimate),
+            customsPercent: toNullableNumber(record.customsPercent),
+            freightCostPerM2Egp: toNullableNumber(record.freightCostPerM2Egp),
+            clearanceCostPerM2Egp: toNullableNumber(record.clearanceCostPerM2Egp),
             bagsAcrossRollWidth: toNullableNumber(record.bagsAcrossRollWidth),
             bagsAlongRollLength: toNullableNumber(record.bagsAlongRollLength),
             bagsPerRoll: toNullableNumber(record.bagsPerRoll),
@@ -798,6 +829,9 @@ const sanitizeMaterialSourceSelection = (item: StoredEntity | null): MaterialSou
                     rollLengthM: toNullableNumber(sourceRecord.rollLengthM),
                     rollCount: toNullableNumber(sourceRecord.rollCount),
                     customsEstimate: toNullableNumber(sourceRecord.customsEstimate),
+                    customsPercent: toNullableNumber(sourceRecord.customsPercent),
+                    freightCostPerM2Egp: toNullableNumber(sourceRecord.freightCostPerM2Egp),
+                    clearanceCostPerM2Egp: toNullableNumber(sourceRecord.clearanceCostPerM2Egp),
                     bagsAcrossRollWidth: toNullableNumber(sourceRecord.bagsAcrossRollWidth),
                     bagsAlongRollLength: toNullableNumber(sourceRecord.bagsAlongRollLength),
                     bagsPerRoll: toNullableNumber(sourceRecord.bagsPerRoll),
@@ -899,8 +933,8 @@ const sanitizeMaterial = (item: StoredEntity | null): Material | null => {
     materialId: String(item.materialId ?? ""),
     materialName: String(item.materialName ?? ""),
     category: normalizeMaterialCategory(item.category),
-    temperatureLimit: String(item.temperatureLimit ?? ""),
-    chemicalResistance: String(item.chemicalResistance ?? ""),
+    description: String(item.description ?? ""),
+    baseMaterial: String(item.baseMaterial ?? ""),
     defaultWastePercent: toNullableNumber(item.defaultWastePercent),
     rollWidthM: toNullableNumber(item.rollWidthM),
     rollLengthM: toNullableNumber(item.rollLengthM),
@@ -925,6 +959,7 @@ const sanitizeStockItem = (item: StoredEntity | null): StockItem | null => {
     rollWidthM: toNullableNumber(item.rollWidthM),
     rollLengthM: toNullableNumber(item.rollLengthM),
     unitCostUsdPerM2: toNullableNumber(item.unitCostUsdPerM2),
+    landedCostEgp: toNullableNumber(item.landedCostEgp),
     active: Boolean(item.active),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -946,6 +981,9 @@ const sanitizeImportPreset = (item: StoredEntity | null): ImportPreset | null =>
     rollLengthM: toNullableNumber(item.rollLengthM),
     leadTimeDays: toNullableNumber(item.leadTimeDays),
     unitCostUsdPerM2: toNullableNumber(item.unitCostUsdPerM2),
+    freightCostPerM2Egp: toNullableNumber(item.freightCostPerM2Egp),
+    clearanceCostPerM2Egp: toNullableNumber(item.clearanceCostPerM2Egp),
+    customsPercent: toNullableNumber(item.customsPercent),
     customsEstimate: toNullableNumber(item.customsEstimate),
     active: Boolean(item.active),
     createdAt: item.createdAt,
@@ -997,6 +1035,20 @@ const sanitizeProduct = (item: StoredEntity | null): Product | null => {
             componentName: String(record.componentName ?? ""),
             componentType: String(record.componentType ?? ""),
             material: String(record.material ?? ""),
+            accessorySnapshot:
+              record.accessorySnapshot && typeof record.accessorySnapshot === "object"
+                ? {
+                    accessoryId: String((record.accessorySnapshot as Record<string, unknown>).accessoryId ?? ""),
+                    accessoryName: String((record.accessorySnapshot as Record<string, unknown>).accessoryName ?? ""),
+                    pricingItems: Array.isArray((record.accessorySnapshot as Record<string, unknown>).pricingItems)
+                      ? ((record.accessorySnapshot as Record<string, unknown>).pricingItems as Array<Record<string, unknown>>).map((entry) => ({
+                          key: String(entry.key ?? ""),
+                          price: toNullableNumber(entry.price),
+                        }))
+                      : [],
+                    totalPricePerBagEgp: toNullableNumber((record.accessorySnapshot as Record<string, unknown>).totalPricePerBagEgp),
+                  }
+                : null,
             specifications:
               record.specifications && typeof record.specifications === "object"
                 ? Object.fromEntries(
@@ -1030,9 +1082,13 @@ const sanitizeAccessory = (item: StoredEntity | null): Accessory | null => {
     tenantId: item.tenantId,
     accessoryId: String(item.accessoryId ?? ""),
     accessoryName: String(item.accessoryName ?? ""),
-    material: String(item.material ?? ""),
-    unit: String(item.unit ?? ""),
-    defaultCost: toNullableNumber(item.defaultCost),
+    pricingItems: Array.isArray(item.pricingItems)
+      ? item.pricingItems.map((entry) => ({
+          key: String((entry as Record<string, unknown>).key ?? ""),
+          price: toNullableNumber((entry as Record<string, unknown>).price),
+        }))
+      : [],
+    totalPricePerBagEgp: toNullableNumber(item.totalPricePerBagEgp),
     active: Boolean(item.active),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -2524,8 +2580,8 @@ const seedDevMasterData = async (context: RequestContext) => {
         materialName: materialNames[index],
         category:
           index < 6 ? "Fabric Material" : index < 8 ? "Ring Material" : "Threading Material",
-        temperatureLimit: `${160 + index * 10} C`,
-        chemicalResistance: ["Low", "Medium", "High"][index % 3],
+        description: `${materialNames[index]} master data`,
+        baseMaterial: index < 6 ? "PTFE" : index < 8 ? "Steel" : "Nylon",
         defaultWastePercent: 3 + index,
         rollWidthM: index < 6 ? Number((1.2 + index * 0.05).toFixed(2)) : null,
         rollLengthM: index < 6 ? 80 + index * 10 : null,
@@ -2556,9 +2612,11 @@ const seedDevMasterData = async (context: RequestContext) => {
         accessoryId: `ACC-${String(index + 1).padStart(3, "0")}`,
         tenantId: context.tenantId,
         accessoryName: `Accessory ${index + 1}`,
-        material: materials[(index + 6) % materials.length]?.materialName ?? `Material ${index + 1}`,
-        unit: accessoryUnits[index],
-        defaultCost: Number((0.25 + index * 0.12).toFixed(2)),
+        pricingItems: [
+          { key: "Material", price: Number((0.1 + index * 0.05).toFixed(2)) },
+          { key: "Labour", price: Number((0.05 + index * 0.02).toFixed(2)) },
+        ],
+        totalPricePerBagEgp: Number((0.15 + index * 0.07).toFixed(2)),
         active: true,
       }),
     ),
@@ -2641,6 +2699,9 @@ const seedDevMasterData = async (context: RequestContext) => {
         leadTimeDays: 21 + index * 2,
         unitCostUsdPerM2: Number((5.5 + index * 0.4).toFixed(2)),
         customsEstimate: Number((0.45 + index * 0.08).toFixed(2)),
+        customsPercent: Number((8 + index * 2).toFixed(2)),
+        freightCostPerM2Egp: Number((4.5 + index * 0.6).toFixed(2)),
+        clearanceCostPerM2Egp: Number((2.5 + index * 0.35).toFixed(2)),
         active: true,
       }),
     ),
@@ -2716,6 +2777,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     const context = getRequestContext(event);
     const method = event.requestContext.http.method;
     const path = event.rawPath;
+    const decodedPath = decodeURIComponent(path);
     const tenderId = event.pathParameters?.tenderId;
     const scenarioId = event.pathParameters?.scenarioId;
     const section = event.pathParameters?.section as keyof typeof sectionConfig | undefined;
@@ -2834,7 +2896,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     if (
       event.pathParameters?.importPresetId &&
       method === "GET" &&
-      path === `/import-presets/${event.pathParameters.importPresetId}`
+      decodedPath === `/import-presets/${event.pathParameters.importPresetId}`
     ) {
       const importPreset = await getImportPreset(context, event.pathParameters.importPresetId);
       return importPreset ? json(200, importPreset) : json(404, { message: "Import preset not found." });
@@ -2843,7 +2905,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     if (
       event.pathParameters?.importPresetId &&
       method === "PUT" &&
-      path === `/import-presets/${event.pathParameters.importPresetId}`
+      decodedPath === `/import-presets/${event.pathParameters.importPresetId}`
     ) {
       return json(
         200,
@@ -2857,7 +2919,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
     if (
       event.pathParameters?.importPresetId &&
       method === "DELETE" &&
-      path === `/import-presets/${event.pathParameters.importPresetId}`
+      decodedPath === `/import-presets/${event.pathParameters.importPresetId}`
     ) {
       const importPreset = await archiveTenantEntity(
         context.tableName,
@@ -2876,12 +2938,12 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       return json(201, await saveSupplier(context, parseBody<Partial<Supplier>>(event.body)));
     }
 
-    if (event.pathParameters?.supplierId && method === "GET" && path === `/suppliers/${event.pathParameters.supplierId}`) {
+    if (event.pathParameters?.supplierId && method === "GET" && decodedPath === `/suppliers/${event.pathParameters.supplierId}`) {
       const supplier = await getSupplier(context, event.pathParameters.supplierId);
       return supplier ? json(200, supplier) : json(404, { message: "Supplier not found." });
     }
 
-    if (event.pathParameters?.supplierId && method === "PUT" && path === `/suppliers/${event.pathParameters.supplierId}`) {
+    if (event.pathParameters?.supplierId && method === "PUT" && decodedPath === `/suppliers/${event.pathParameters.supplierId}`) {
       return json(
         200,
         await saveSupplier(context, {
@@ -2891,7 +2953,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       );
     }
 
-    if (event.pathParameters?.supplierId && method === "DELETE" && path === `/suppliers/${event.pathParameters.supplierId}`) {
+    if (event.pathParameters?.supplierId && method === "DELETE" && decodedPath === `/suppliers/${event.pathParameters.supplierId}`) {
       const supplier = await archiveTenantEntity(
         context.tableName,
         context.tenantId,
@@ -2901,11 +2963,11 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       return supplier ? json(200, supplier) : json(404, { message: "Supplier not found." });
     }
 
-    if (event.pathParameters?.supplierId && method === "GET" && path === `/suppliers/${event.pathParameters.supplierId}/offers`) {
+    if (event.pathParameters?.supplierId && method === "GET" && decodedPath === `/suppliers/${event.pathParameters.supplierId}/offers`) {
       return json(200, await listSupplierOffers(context.tableName, event.pathParameters.supplierId));
     }
 
-    if (event.pathParameters?.supplierId && method === "POST" && path === `/suppliers/${event.pathParameters.supplierId}/offers`) {
+    if (event.pathParameters?.supplierId && method === "POST" && decodedPath === `/suppliers/${event.pathParameters.supplierId}/offers`) {
       return json(
         201,
         await saveSupplierOffer(
@@ -2920,7 +2982,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       event.pathParameters?.supplierId &&
       event.pathParameters?.offerId &&
       method === "PUT" &&
-      path === `/suppliers/${event.pathParameters.supplierId}/offers/${event.pathParameters.offerId}`
+      decodedPath === `/suppliers/${event.pathParameters.supplierId}/offers/${event.pathParameters.offerId}`
     ) {
       return json(
         200,
@@ -2939,7 +3001,7 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       event.pathParameters?.supplierId &&
       event.pathParameters?.offerId &&
       method === "DELETE" &&
-      path === `/suppliers/${event.pathParameters.supplierId}/offers/${event.pathParameters.offerId}`
+      decodedPath === `/suppliers/${event.pathParameters.supplierId}/offers/${event.pathParameters.offerId}`
     ) {
       const offer = await deleteSupplierOffer(
         context.tableName,

@@ -10,6 +10,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Dialog } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { api, ApiError, isApiConfigured } from "../lib/api";
+import { getProductConfigurationSyncStatuses } from "../lib/product-configuration-sync";
+import {
+  confirmDiscardUnsavedChanges,
+  useUnsavedChangesWarning,
+} from "../lib/use-unsaved-changes";
 import type {
   CostBuildUp,
   CostLine,
@@ -202,6 +207,10 @@ const formatRequestedUnits = (componentName: string, quantity: number | null) =>
   return `${quantity.toLocaleString()} ${unit}`;
 };
 
+const formatMillimeterValue = (value: number) => {
+  return Number.isInteger(value) ? `${value} mm` : `${value.toFixed(2).replace(/\.?0+$/, "")} mm`;
+};
+
 const formatComponentSpecification = (
   component: NonNullable<MaterialSourceSelection["componentSelections"]>[number],
 ) => {
@@ -209,11 +218,11 @@ const formatComponentSpecification = (
   const details = [formatRequestedUnits(component.componentName, component.requestedQuantity)];
 
   if (component.bagDiameterMm !== null && component.bagDiameterMm !== undefined) {
-    details.push(`${component.bagDiameterMm} m`);
+    details.push(formatMillimeterValue(component.bagDiameterMm));
   }
 
   if (component.bagLengthMm !== null && component.bagLengthMm !== undefined) {
-    details.push(`${component.bagLengthMm} m`);
+    details.push(formatMillimeterValue(component.bagLengthMm));
   }
 
   return {
@@ -278,19 +287,21 @@ const calculateMaterialLineOverrides = ({
       const recomputedTotal = selection.selectedSources.reduce((total, source) => {
         const qtyUsedM2 = source.qtyUsedM2 ?? null;
         const unitCostUsdPerM2 = source.unitCostUsdPerM2 ?? null;
-        const customsEstimate = source.customsEstimate ?? 0;
-        const freightCostPerM2Egp = materialSourcing.freightCostPerM2Egp ?? 0;
-        const otherChargesPerM2Egp = materialSourcing.otherChargesPerM2Egp ?? 0;
+        const customsPercent = source.customsPercent ?? 0;
+        const freightCostPerM2Egp = source.freightCostPerM2Egp ?? 0;
+        const clearanceCostPerM2Egp = source.clearanceCostPerM2Egp ?? 0;
 
         if (qtyUsedM2 === null || unitCostUsdPerM2 === null) {
           return total;
         }
 
+        const convertedCostPerM2Egp = unitCostUsdPerM2 * effectiveExchangeRate;
+        const customsCostPerM2Egp = convertedCostPerM2Egp * (customsPercent / 100);
         const landedCostPerM2Egp =
-          unitCostUsdPerM2 * effectiveExchangeRate +
+          convertedCostPerM2Egp +
+          customsCostPerM2Egp +
           freightCostPerM2Egp +
-          customsEstimate +
-          otherChargesPerM2Egp;
+          clearanceCostPerM2Egp;
 
         return total + qtyUsedM2 * landedCostPerM2Egp;
       }, 0);
@@ -532,16 +543,20 @@ export const CostBuildUpPage = () => {
       componentId: string;
       componentName: string;
       requestedQuantity: number | null;
+      actualAreaPerBagM2: number | null;
       costPerBag: number | null;
       recomputedTotal: number | null;
       sources: Array<{
         sourceId: string;
         sourceName: string;
+        allocatedBags: number | null;
+        actualAreaPerBagM2: number | null;
         qtyUsedM2: number | null;
         unitCostUsdPerM2: number | null;
-        customsEstimate: number | null;
+        customsPercent: number | null;
+        customsCostPerM2Egp: number | null;
         freightCostPerM2Egp: number | null;
-        otherChargesPerM2Egp: number | null;
+        clearanceCostPerM2Egp: number | null;
         landedCostPerM2Egp: number | null;
         totalCostEgp: number | null;
       }>;
@@ -553,9 +568,13 @@ export const CostBuildUpPage = () => {
   const [saveMode, setSaveMode] = useState<"draft" | "continue" | null>(null);
   const [isMaterialSourcingDetailOpen, setIsMaterialSourcingDetailOpen] = useState(false);
   const [collapsedProducts, setCollapsedProducts] = useState<Record<string, boolean>>({});
+  const [lastSavedSignature, setLastSavedSignature] = useState(() =>
+    JSON.stringify(initialForm(tenderId)),
+  );
 
   useEffect(() => {
     setForm(initialForm(tenderId));
+    setLastSavedSignature(JSON.stringify(initialForm(tenderId)));
   }, [tenderId]);
 
   useEffect(() => {
@@ -629,11 +648,18 @@ export const CostBuildUpPage = () => {
         });
         const costDefaults = deriveCostDefaults(loadedConfiguration);
         if (saved) {
-          setForm(toForm(saved, materialLineOverrides, costDefaults, loadedConfiguration.productSnapshots ?? []));
+          const nextForm = toForm(
+            saved,
+            materialLineOverrides,
+            costDefaults,
+            loadedConfiguration.productSnapshots ?? [],
+          );
+          setForm(nextForm);
+          setLastSavedSignature(JSON.stringify(nextForm));
           return;
         }
 
-        setForm({
+        const nextForm = {
           ...initialForm(tenderId),
           tenantId: loadedTender.tenantId,
           productConfigId: loadedConfiguration.productConfigId,
@@ -656,7 +682,9 @@ export const CostBuildUpPage = () => {
             costDefaults,
             loadedConfiguration.productSnapshots ?? [],
           ),
-        });
+        };
+        setForm(nextForm);
+        setLastSavedSignature(JSON.stringify(nextForm));
       } catch (reason) {
         if (isMounted) {
           setError(reason instanceof Error ? reason.message : "Unable to load cost build-up.");
@@ -720,6 +748,29 @@ export const CostBuildUpPage = () => {
         };
       }),
     [form.costLines, productSnapshots],
+  );
+
+  const productSyncStatuses = useMemo(
+    () =>
+      getProductConfigurationSyncStatuses(
+        productConfiguration,
+        materials,
+        (materialSourcing?.componentSelections ?? []).map((selection) => ({
+          productId: selection.productId,
+          productName: selection.productName,
+          componentId: selection.componentId,
+          componentName: selection.componentName,
+          componentType: null,
+          materialId: selection.materialId,
+          accessoryTotalPricePerBagEgp: null,
+          requestedQuantity: selection.requestedQuantity,
+          bagDiameterMm: selection.bagDiameterMm,
+          bagLengthMm: selection.bagLengthMm,
+          seamAllowanceMm: selection.seamAllowanceMm,
+          topBottomAllowanceMm: selection.topBottomAllowanceMm,
+        })),
+      ),
+    [materialSourcing?.componentSelections, materials, productConfiguration],
   );
 
   const calculatedLines = useMemo(() => {
@@ -844,19 +895,24 @@ export const CostBuildUpPage = () => {
   const sourcingBreakdown = materialSourcing?.componentSelections ?? [];
 
   const lineABreakdown = useMemo(() => {
-    const freightCostPerM2Egp = materialSourcing?.freightCostPerM2Egp ?? 0;
-    const otherChargesPerM2Egp = materialSourcing?.otherChargesPerM2Egp ?? 0;
-
     const components = sourcingBreakdown
       .filter((selection) => isFabricMaterialCategory(resolveMaterialCategoryForSelection(selection, materials)))
       .map((selection) => {
         const sources = selection.selectedSources.map((source) => {
           const qtyUsedM2 = source.qtyUsedM2 ?? null;
           const unitCostUsdPerM2 = source.unitCostUsdPerM2 ?? null;
-          const customsEstimate = source.customsEstimate ?? 0;
-          const landedCostPerM2Egp =
+          const customsPercent = source.customsPercent ?? 0;
+          const freightCostPerM2Egp = source.freightCostPerM2Egp ?? 0;
+          const clearanceCostPerM2Egp = source.clearanceCostPerM2Egp ?? 0;
+          const convertedCostPerM2Egp =
             unitCostUsdPerM2 !== null && effectiveExchangeRate !== null
-              ? unitCostUsdPerM2 * effectiveExchangeRate + freightCostPerM2Egp + customsEstimate + otherChargesPerM2Egp
+              ? unitCostUsdPerM2 * effectiveExchangeRate
+              : null;
+          const customsCostPerM2Egp =
+            convertedCostPerM2Egp !== null ? convertedCostPerM2Egp * (customsPercent / 100) : null;
+          const landedCostPerM2Egp =
+            convertedCostPerM2Egp !== null
+              ? convertedCostPerM2Egp + (customsCostPerM2Egp ?? 0) + freightCostPerM2Egp + clearanceCostPerM2Egp
               : null;
           const totalCostEgp =
             qtyUsedM2 !== null && landedCostPerM2Egp !== null ? qtyUsedM2 * landedCostPerM2Egp : null;
@@ -864,11 +920,14 @@ export const CostBuildUpPage = () => {
           return {
             sourceId: source.sourceId,
             sourceName: source.sourceName,
+            allocatedBags: source.allocatedBags ?? null,
+            actualAreaPerBagM2: source.actualAreaPerBagM2 ?? null,
             qtyUsedM2,
             unitCostUsdPerM2,
-            customsEstimate,
+            customsPercent,
+            customsCostPerM2Egp,
             freightCostPerM2Egp,
-            otherChargesPerM2Egp,
+            clearanceCostPerM2Egp,
             landedCostPerM2Egp,
             totalCostEgp,
           };
@@ -881,6 +940,7 @@ export const CostBuildUpPage = () => {
           componentId: selection.componentId,
           componentName: selection.componentName,
           requestedQuantity,
+          actualAreaPerBagM2: selection.actualAreaPerBagM2 ?? null,
           costPerBag:
             requestedQuantity !== null && requestedQuantity > 0
               ? recomputedTotal / requestedQuantity
@@ -914,17 +974,20 @@ export const CostBuildUpPage = () => {
         productName: product.productName || "Untitled product",
         productType: product.productType,
         requestedQuantity: product.requestedQuantity,
+        isOutOfSync: productSyncStatuses.get(product.productId)?.isOutOfSync ?? false,
         componentsCount: product.components.length,
         bagBodyCount: product.components.filter(
           (component) =>
-            component.componentType.trim().toLowerCase() === "bag body" ||
-            component.componentName.trim().toLowerCase() === "bag body",
+          component.componentType.trim().toLowerCase() === "bag" ||
+          component.componentName.trim().toLowerCase() === "bag" ||
+          component.componentType.trim().toLowerCase() === "bag body" ||
+          component.componentName.trim().toLowerCase() === "bag body",
         ).length,
         factoryOverheadPerBag: product.factoryOverheadPerBag ?? null,
         manufacturingOverheadPerBag: product.manufacturingOverheadPerBag ?? null,
         managementOverheadPerBag: product.managementOverheadPerBag ?? null,
       })),
-    [productSnapshots],
+    [productSnapshots, productSyncStatuses],
   );
 
   const productCostCards = useMemo(
@@ -1109,6 +1172,10 @@ export const CostBuildUpPage = () => {
       totals,
     ],
   );
+  const currentSignature = useMemo(() => JSON.stringify(form), [form]);
+  const isDirty = currentSignature !== lastSavedSignature;
+
+  useUnsavedChangesWarning(isDirty);
 
   const save = async (mode: "draft" | "continue") => {
     setMessage("");
@@ -1129,14 +1196,14 @@ export const CostBuildUpPage = () => {
         currencySafetyFactorPercent,
         materials,
       });
-      setForm(
-        toForm(
-          response,
-          nextMaterialLineOverrides,
-          deriveCostDefaults(productConfiguration),
-          productConfiguration?.productSnapshots ?? [],
-        ),
+      const nextForm = toForm(
+        response,
+        nextMaterialLineOverrides,
+        deriveCostDefaults(productConfiguration),
+        productConfiguration?.productSnapshots ?? [],
       );
+      setForm(nextForm);
+      setLastSavedSignature(JSON.stringify(nextForm));
       setMessage(
         mode === "draft" ? "Cost build-up saved." : "Cost build-up saved. Continuing to alternatives.",
       );
@@ -1153,7 +1220,7 @@ export const CostBuildUpPage = () => {
 
   return (
     <div className="space-y-6">
-      <TenderWorkflowStepper currentStep={4} tenderId={tenderId} />
+      <TenderWorkflowStepper currentStep={4} tenderId={tenderId} isDirty={isDirty} />
 
       {isLoading ? (
         <div className="rounded-2xl bg-slate-50 p-6 text-sm text-muted-foreground">
@@ -1497,7 +1564,12 @@ export const CostBuildUpPage = () => {
                                           }`}
                                         />
                                         <div>
-                                          <p className="text-base font-semibold text-slate-900">{product.productName}</p>
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <p className="text-base font-semibold text-slate-900">{product.productName}</p>
+                                            {product.isOutOfSync ? (
+                                              <Badge variant="warning">Needs Sync</Badge>
+                                            ) : null}
+                                          </div>
                                           <p className="mt-1 text-sm text-muted-foreground">{product.productId}</p>
                                         </div>
                                       </div>
@@ -1673,7 +1745,17 @@ export const CostBuildUpPage = () => {
               ) : null}
 
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-2">
-                <Button onClick={() => navigate(`/tenders/${tenderId}/material-sourcing`)} type="button" variant="ghost">
+                <Button
+                  onClick={() => {
+                    if (!confirmDiscardUnsavedChanges(isDirty)) {
+                      return;
+                    }
+
+                    navigate(`/tenders/${tenderId}/material-sourcing`);
+                  }}
+                  type="button"
+                  variant="ghost"
+                >
                   <ArrowLeft className="h-4 w-4" />
                   Back
                 </Button>
@@ -1733,7 +1815,14 @@ export const CostBuildUpPage = () => {
                         <div key={product.productId} className="rounded-2xl bg-white/12 px-4 py-3 backdrop-blur-sm">
                           <div className="flex items-start justify-between gap-3">
                             <div>
-                              <p className="text-sm font-semibold text-white">{product.productName}</p>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-semibold text-white">{product.productName}</p>
+                                {product.isOutOfSync ? (
+                                  <Badge className="bg-amber-100 text-amber-900" variant="warning">
+                                    Needs Sync
+                                  </Badge>
+                                ) : null}
+                              </div>
                               <p className="mt-1 text-xs text-blue-100">
                                 {product.requestedQuantity !== null && product.requestedQuantity !== undefined
                                   ? `${product.requestedQuantity.toLocaleString()} bags`
@@ -1853,6 +1942,14 @@ export const CostBuildUpPage = () => {
                         <p className="text-sm font-semibold text-slate-900">{source.sourceName}</p>
                         <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                           <div>
+                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Allocated bags</p>
+                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.allocatedBags ?? null, 0, " bags")}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Area / bag</p>
+                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.actualAreaPerBagM2 ?? null, 4, " m²/bag")}</p>
+                          </div>
+                          <div>
                             <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Qty used</p>
                             <p className="mt-1 text-sm text-slate-900">{formatMetric(source.qtyUsedM2, 4, " m²")}</p>
                           </div>
@@ -1869,12 +1966,16 @@ export const CostBuildUpPage = () => {
                             <p className="mt-1 text-sm text-slate-900">{formatMetric(source.freightCostPerM2Egp, 2, " EGP")}</p>
                           </div>
                           <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Customs</p>
-                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.customsEstimate, 2, " EGP")}</p>
+                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Customes %</p>
+                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.customsPercent, 2, "%")}</p>
                           </div>
                           <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Other charges / m²</p>
-                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.otherChargesPerM2Egp, 2, " EGP")}</p>
+                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Clearance / m²</p>
+                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.clearanceCostPerM2Egp, 2, " EGP")}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Customs cost / m²</p>
+                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.customsCostPerM2Egp, 2, " EGP")}</p>
                           </div>
                           <div>
                             <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Landed cost / m²</p>
@@ -1888,6 +1989,49 @@ export const CostBuildUpPage = () => {
                               {formatMetric(source.totalCostEgp, 2, " EGP")}
                             </p>
                           </div>
+                        </div>
+                        <div className="mt-4 space-y-2 border-t border-border pt-4">
+                          <p className="text-sm text-muted-foreground">
+                            {`Freight / bag = (area / bag [${formatMetric(
+                              source.actualAreaPerBagM2 ?? null,
+                              4,
+                              " m²/bag",
+                            )}] × freight cost / m² [${formatMetric(
+                              source.freightCostPerM2Egp,
+                              2,
+                              " EGP/m²",
+                            )}])`}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {`Clearance / bag = (area / bag [${formatMetric(
+                              source.actualAreaPerBagM2 ?? null,
+                              4,
+                              " m²/bag",
+                            )}] × clearance cost / m² [${formatMetric(
+                              source.clearanceCostPerM2Egp,
+                              2,
+                              " EGP/m²",
+                            )}])`}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {`Customes / bag = ((area / bag [${formatMetric(
+                              source.actualAreaPerBagM2 ?? null,
+                              4,
+                              " m²/bag",
+                            )}] × cost / m² [${formatMetric(
+                              source.unitCostUsdPerM2,
+                              3,
+                              " USD/m²",
+                            )}] × effective exchange rate [${formatMetric(
+                              effectiveExchangeRate,
+                              3,
+                              " EGP/USD",
+                            )}]) × customes % [${formatMetric(
+                              source.customsPercent,
+                              2,
+                              "%",
+                            )}]) ÷ 100`}
+                          </p>
                         </div>
                       </div>
                     ))}

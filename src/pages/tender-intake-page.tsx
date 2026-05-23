@@ -4,7 +4,7 @@ import {
   FileText,
   Truck,
 } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { TenderWorkflowStepper } from "../components/tenders/tender-workflow-stepper";
@@ -16,6 +16,7 @@ import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { api, ApiError, isApiConfigured } from "../lib/api";
+import { useUnsavedChangesWarning } from "../lib/use-unsaved-changes";
 import type { Accessory, Customer, Material, TenderRequest, TenderRequestType } from "../../shared/types";
 
 type TenderIntakeForm = Omit<
@@ -140,6 +141,7 @@ export const TenderIntakePage = () => {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [saveMode, setSaveMode] = useState<"draft" | "next" | null>(null);
+  const [lastSavedSignature, setLastSavedSignature] = useState(() => JSON.stringify(initialState));
 
   useEffect(() => {
     if (!isApiConfigured) {
@@ -192,7 +194,7 @@ export const TenderIntakePage = () => {
           return;
         }
 
-        setForm({
+        const nextForm = {
           tenderId: record.tenderId,
           tenantId: record.tenantId,
           customerName: record.customerName,
@@ -223,7 +225,9 @@ export const TenderIntakePage = () => {
           status: record.status,
           assignedTo: record.assignedTo ?? "",
           archived: record.archived ?? false,
-        });
+        };
+        setForm(nextForm);
+        setLastSavedSignature(JSON.stringify(nextForm));
       } catch (reason) {
         if (reason instanceof ApiError && reason.status === 404) {
           setError("Tender not found.");
@@ -338,7 +342,9 @@ export const TenderIntakePage = () => {
         ? await api.put<TenderRequest>(`/tenders/${payload.tenderId}`, payload)
         : await api.post<TenderRequest>("/tenders", payload);
 
-      setForm((current) => ({ ...current, tenderId: response.tenderId, status: response.status }));
+      const nextForm = { ...form, tenderId: response.tenderId, status: response.status };
+      setForm(nextForm);
+      setLastSavedSignature(JSON.stringify(nextForm));
       setMessage(
         mode === "draft" ? "Draft saved successfully." : "Tender intake saved and moved to product configuration.",
       );
@@ -358,12 +364,17 @@ export const TenderIntakePage = () => {
     await persistTender("next");
   };
 
+  const currentSignature = useMemo(() => JSON.stringify(form), [form]);
+  const isDirty = currentSignature !== lastSavedSignature;
+
+  useUnsavedChangesWarning(isDirty);
+
   const renderFieldMessage = (field: keyof TenderIntakeForm) =>
     fieldErrors[field] ? <p className="text-xs text-rose-600">{fieldErrors[field]}</p> : null;
 
   return (
     <div className="space-y-6">
-      <TenderWorkflowStepper currentStep={1} tenderId={form.tenderId || undefined} />
+      <TenderWorkflowStepper currentStep={1} tenderId={form.tenderId || undefined} isDirty={isDirty} />
 
       <div>
         <Card>

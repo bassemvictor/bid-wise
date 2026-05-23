@@ -12,7 +12,14 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import type { Material, Product, ProductConfiguration, TenderRequest } from "../../shared/types";
+import type {
+  Accessory,
+  Material,
+  Product,
+  ProductConfiguration,
+  ProductComponentAccessorySnapshot,
+  TenderRequest,
+} from "../../shared/types";
 import { TenderWorkflowStepper } from "../components/tenders/tender-workflow-stepper";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -20,6 +27,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { api, ApiError, isApiConfigured } from "../lib/api";
+import {
+  confirmDiscardUnsavedChanges,
+  useUnsavedChangesWarning,
+} from "../lib/use-unsaved-changes";
 
 type SpecificationFormRow = {
   key: string;
@@ -31,6 +42,9 @@ type ProductSnapshotComponentForm = {
   componentName: string;
   componentType: string;
   material: string;
+  accessoryId: string;
+  accessoryPricingItems: SpecificationFormRow[];
+  accessoryTotalPricePerBagEgp: string;
   diameter: string;
   length: string;
   seamAllowanceMm: string;
@@ -82,12 +96,12 @@ type ComponentDrawerState = {
   value: ProductSnapshotComponentForm;
 };
 
-const componentTypeOptions = ["Bag Body", "Ring", "Thread", "Other"] as const;
+const componentTypeOptions = ["Bag", "Accessories", "Ring", "Thread", "Other"] as const;
 type ComponentTypeOption = (typeof componentTypeOptions)[number];
 
 const getMaterialCategoryForComponentType = (componentType: string): Material["category"] | null => {
   switch (componentType) {
-    case "Bag Body":
+    case "Bag":
       return "Fabric Material";
     case "Thread":
       return "Threading Material";
@@ -100,8 +114,10 @@ const getMaterialCategoryForComponentType = (componentType: string): Material["c
 
 const getMaterialPlaceholderForComponentType = (componentType: string) => {
   switch (componentType) {
-    case "Bag Body":
+    case "Bag":
       return "Select fabric material";
+    case "Accessories":
+      return "Select accessory";
     case "Thread":
       return "Select threading material";
     case "Ring":
@@ -145,13 +161,64 @@ const numberOrNull = (value: string) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const toMillimeterInputValue = (value: string | number | boolean | null | undefined) => {
+  if (value === null || value === undefined || value === "") {
+    return "";
+  }
+
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    return "";
+  }
+
+  return Number.isInteger(parsed) ? String(parsed) : parsed.toFixed(2).replace(/\.?0+$/, "");
+};
+
+const numberOrNullMillimeterInput = (value: string) => {
+  const parsed = numberOrNull(value);
+  return parsed;
+};
+
+const formatAccessoryTotal = (value: number) =>
+  value.toFixed(2).replace(/\.?0+$/, "");
+
+const computeAccessoryTotalPrice = (rows: SpecificationFormRow[]) =>
+  rows.reduce((total, row) => {
+    const parsed = Number(row.value.trim());
+    return Number.isFinite(parsed) ? total + parsed : total;
+  }, 0);
+
+const resolveAccessoryId = (
+  component: Pick<ProductSnapshotComponentForm, "accessoryId" | "material">,
+  accessories: Accessory[],
+) => {
+  const directMatch = accessories.find(
+    (accessory) => accessory.accessoryId === component.accessoryId,
+  );
+
+  if (directMatch) {
+    return directMatch.accessoryId;
+  }
+
+  const nameMatch = accessories.find(
+    (accessory) =>
+      accessory.accessoryName === component.material ||
+      accessory.accessoryName === component.accessoryId,
+  );
+
+  return nameMatch?.accessoryId ?? "";
+};
+
 const createComponentForm = (
   seed?: Partial<ProductSnapshotComponentForm>,
 ): ProductSnapshotComponentForm => ({
   componentId: seed?.componentId ?? crypto.randomUUID(),
   componentName: seed?.componentName ?? "",
-  componentType: seed?.componentType ?? "Bag Body",
+  componentType: seed?.componentType ?? "Bag",
   material: seed?.material ?? "",
+  accessoryId: seed?.accessoryId ?? "",
+  accessoryPricingItems: seed?.accessoryPricingItems ?? [],
+  accessoryTotalPricePerBagEgp: seed?.accessoryTotalPricePerBagEgp ?? "",
   diameter: seed?.diameter ?? "",
   length: seed?.length ?? "",
   seamAllowanceMm: seed?.seamAllowanceMm ?? "",
@@ -159,13 +226,15 @@ const createComponentForm = (
   specificationRows: seed?.specificationRows ?? [],
 });
 
-const createComponentFromType = (componentType: ComponentTypeOption = "Bag Body") =>
+const createComponentFromType = (componentType: ComponentTypeOption = "Bag") =>
   createComponentForm({
     componentType,
     componentName: componentType === "Other" ? "" : componentType,
   });
 
 const isBagBody = (component: ProductSnapshotComponentForm) =>
+  component.componentType.trim().toLowerCase().includes("bag") ||
+  component.componentName.trim().toLowerCase().includes("bag") ||
   component.componentType.trim().toLowerCase().includes("bag body") ||
   component.componentName.trim().toLowerCase().includes("bag body");
 
@@ -192,26 +261,34 @@ const toSnapshotComponentForm = (
   componentName: component.componentName,
   componentType: component.componentType,
   material: component.material,
+  accessoryId: component.accessorySnapshot?.accessoryId ?? "",
+  accessoryPricingItems:
+    component.accessorySnapshot?.pricingItems.map((item) => ({
+      key: item.key,
+      value: item.price?.toString() ?? "",
+    })) ?? [],
+  accessoryTotalPricePerBagEgp:
+    component.accessorySnapshot?.totalPricePerBagEgp?.toString() ?? "",
   diameter:
     component.specifications.diameter === null ||
     component.specifications.diameter === undefined
       ? ""
-      : String(component.specifications.diameter),
+      : toMillimeterInputValue(component.specifications.diameter),
   length:
     component.specifications.length === null ||
     component.specifications.length === undefined
       ? ""
-      : String(component.specifications.length),
+      : toMillimeterInputValue(component.specifications.length),
   seamAllowanceMm:
     component.specifications.seamAllowanceMm === null ||
     component.specifications.seamAllowanceMm === undefined
       ? ""
-      : String(component.specifications.seamAllowanceMm),
+      : toMillimeterInputValue(component.specifications.seamAllowanceMm),
   topBottomAllowanceMm:
     component.specifications.topBottomAllowanceMm === null ||
     component.specifications.topBottomAllowanceMm === undefined
       ? ""
-      : String(component.specifications.topBottomAllowanceMm),
+      : toMillimeterInputValue(component.specifications.topBottomAllowanceMm),
   specificationRows: specificationsToRows(component.specifications),
 });
 
@@ -263,10 +340,10 @@ const buildSnapshotProduct = (product: ProductSnapshotForm): Product => {
     ) as Record<string, string | number | boolean | null>;
 
     if (isBagBody(component)) {
-      specifications.diameter = numberOrNull(component.diameter);
-      specifications.length = numberOrNull(component.length);
-      specifications.seamAllowanceMm = numberOrNull(component.seamAllowanceMm);
-      specifications.topBottomAllowanceMm = numberOrNull(component.topBottomAllowanceMm);
+      specifications.diameter = numberOrNullMillimeterInput(component.diameter);
+      specifications.length = numberOrNullMillimeterInput(component.length);
+      specifications.seamAllowanceMm = numberOrNullMillimeterInput(component.seamAllowanceMm);
+      specifications.topBottomAllowanceMm = numberOrNullMillimeterInput(component.topBottomAllowanceMm);
     }
 
     return {
@@ -275,6 +352,23 @@ const buildSnapshotProduct = (product: ProductSnapshotForm): Product => {
       componentType: component.componentType.trim(),
       material: component.material.trim(),
       specifications,
+      accessorySnapshot:
+        component.componentType === "Accessories"
+          ? ({
+              accessoryId: component.accessoryId,
+              accessoryName: component.material.trim(),
+              pricingItems: component.accessoryPricingItems
+                .filter((row) => row.key.trim() || row.value.trim())
+                .map((row) => ({
+                  key: row.key.trim(),
+                  price: row.value.trim() === "" ? null : Number(row.value),
+                })),
+              totalPricePerBagEgp:
+                component.accessoryTotalPricePerBagEgp.trim() === ""
+                  ? null
+                  : Number(component.accessoryTotalPricePerBagEgp),
+            } satisfies ProductComponentAccessorySnapshot)
+          : null,
     };
   });
 
@@ -329,6 +423,9 @@ const applyDerivedSnapshotValues = (
 ): ProductConfigurationForm => {
   const allComponents = snapshots.flatMap((product) => product.components);
   const bagBody = allComponents.find(isBagBody);
+  const accessory = allComponents.find(
+    (component) => component.componentType === "Accessories",
+  );
   const ring = allComponents.find((component) => component.componentType === "Ring");
   const thread = allComponents.find((component) => component.componentType === "Thread");
   const totalRequestedQuantity = snapshots.reduce((total, product) => {
@@ -349,8 +446,10 @@ const applyDerivedSnapshotValues = (
     mainFabricMaterialId: bagBody
       ? normalizeMaterialReference(bagBody.material, materials)
       : "",
-    accessoriesMaterialId: ring
-      ? normalizeMaterialReference(ring.material, materials)
+    accessoriesMaterialId: accessory?.accessoryId
+      ? accessory.accessoryId
+      : ring
+        ? normalizeMaterialReference(ring.material, materials)
       : "",
     threadMaterialId: thread
       ? normalizeMaterialReference(thread.material, materials)
@@ -379,10 +478,10 @@ const toForm = (config: ProductConfiguration): ProductConfigurationForm => ({
   }),
   productType: config.productType,
   quantity: config.quantity?.toString() ?? "",
-  bagDiameterMm: config.bagDiameterMm?.toString() ?? "",
-  bagLengthMm: config.bagLengthMm?.toString() ?? "",
-  seamAllowanceMm: config.seamAllowanceMm?.toString() ?? "",
-  topBottomAllowanceMm: config.topBottomAllowanceMm?.toString() ?? "",
+  bagDiameterMm: toMillimeterInputValue(config.bagDiameterMm),
+  bagLengthMm: toMillimeterInputValue(config.bagLengthMm),
+  seamAllowanceMm: toMillimeterInputValue(config.seamAllowanceMm),
+  topBottomAllowanceMm: toMillimeterInputValue(config.topBottomAllowanceMm),
   topDesign: config.topDesign,
   bottomDesign: config.bottomDesign,
   seamType: config.seamType,
@@ -397,7 +496,7 @@ const toForm = (config: ProductConfiguration): ProductConfigurationForm => ({
 });
 
 const formatDimension = (label: string, value: string) =>
-  value.trim() ? `${label} ${Number(value).toFixed(2)} m` : "";
+  value.trim() ? `${label} ${Number(value).toFixed(0)} mm` : "";
 
 const getKeyDimensions = (component: ProductSnapshotComponentForm) => {
   const values = [
@@ -409,11 +508,13 @@ const getKeyDimensions = (component: ProductSnapshotComponentForm) => {
 
 const ProductComponentDrawer = ({
   materials,
+  accessories,
   onClose,
   onSave,
   state,
 }: {
   materials: Material[];
+  accessories: Accessory[];
   onClose: () => void;
   onSave: (
     productIndex: number,
@@ -424,14 +525,42 @@ const ProductComponentDrawer = ({
   state: ComponentDrawerState | null;
 }) => {
   const [draft, setDraft] = useState<ProductSnapshotComponentForm>(
-    state?.value ?? createComponentFromType("Bag Body"),
+    state?.value ?? createComponentFromType("Bag"),
   );
 
   useEffect(() => {
     if (state) {
-      setDraft(state.value);
+      setDraft((current) => {
+        const nextValue = createComponentForm(state.value);
+
+        if (nextValue.componentType !== "Accessories") {
+          return nextValue;
+        }
+
+        const resolvedAccessoryId = resolveAccessoryId(nextValue, accessories);
+        const accessory = accessories.find(
+          (item) => item.accessoryId === resolvedAccessoryId,
+        );
+        const nextRows =
+          nextValue.accessoryPricingItems.length > 0
+            ? nextValue.accessoryPricingItems
+            : accessory?.pricingItems.map((item) => ({
+                key: item.key,
+                value: item.price?.toString() ?? "",
+              })) ?? [];
+
+        return {
+          ...nextValue,
+          accessoryId: resolvedAccessoryId,
+          material: nextValue.material || accessory?.accessoryName || "",
+          accessoryPricingItems: nextRows,
+          accessoryTotalPricePerBagEgp: formatAccessoryTotal(
+            computeAccessoryTotalPrice(nextRows),
+          ),
+        };
+      });
     }
-  }, [state]);
+  }, [accessories, state]);
 
   if (!state) {
     return null;
@@ -441,6 +570,48 @@ const ProductComponentDrawer = ({
   const availableMaterials = selectedMaterialCategory
     ? materials.filter((material) => material.category === selectedMaterialCategory)
     : materials;
+
+  const addAccessoryPricingRow = () => {
+    setDraft((current) => ({
+      ...current,
+      accessoryPricingItems: [...current.accessoryPricingItems, { key: "", value: "" }],
+    }));
+  };
+
+  const updateAccessoryPricingRow = (
+    rowIndex: number,
+    patch: Partial<SpecificationFormRow>,
+  ) => {
+    setDraft((current) => {
+      const nextRows = current.accessoryPricingItems.map((row, currentRowIndex) =>
+        currentRowIndex === rowIndex ? { ...row, ...patch } : row,
+      );
+
+      return {
+        ...current,
+        accessoryPricingItems: nextRows,
+        accessoryTotalPricePerBagEgp: formatAccessoryTotal(
+          computeAccessoryTotalPrice(nextRows),
+        ),
+      };
+    });
+  };
+
+  const removeAccessoryPricingRow = (rowIndex: number) => {
+    setDraft((current) => {
+      const nextRows = current.accessoryPricingItems.filter(
+        (_, currentRowIndex) => currentRowIndex !== rowIndex,
+      );
+
+      return {
+        ...current,
+        accessoryPricingItems: nextRows,
+        accessoryTotalPricePerBagEgp: formatAccessoryTotal(
+          computeAccessoryTotalPrice(nextRows),
+        ),
+      };
+    });
+  };
 
   const addSpecificationRow = () => {
     setDraft((current) => ({
@@ -475,7 +646,19 @@ const ProductComponentDrawer = ({
       return;
     }
 
-    onSave(state.productIndex, state.mode, state.componentIndex, draft);
+    const resolvedAccessoryId =
+      draft.componentType === "Accessories"
+        ? resolveAccessoryId(draft, accessories)
+        : "";
+
+    onSave(state.productIndex, state.mode, state.componentIndex, {
+      ...draft,
+      accessoryId: resolvedAccessoryId,
+      accessoryTotalPricePerBagEgp:
+        draft.componentType === "Accessories"
+          ? formatAccessoryTotal(computeAccessoryTotalPrice(draft.accessoryPricingItems))
+          : draft.accessoryTotalPricePerBagEgp,
+    });
   };
 
   return (
@@ -533,25 +716,37 @@ const ProductComponentDrawer = ({
                             ? ""
                             : nextType
                           : current.componentName,
-                      material: (() => {
-                        const nextCategory = getMaterialCategoryForComponentType(nextType);
-                        const normalizedMaterialId = normalizeMaterialReference(
-                          current.material,
-                          materials,
-                        );
+                      material:
+                        nextType === "Accessories"
+                          ? current.material
+                          : (() => {
+                              const nextCategory = getMaterialCategoryForComponentType(nextType);
+                              const normalizedMaterialId = normalizeMaterialReference(
+                                current.material,
+                                materials,
+                              );
 
-                        if (!normalizedMaterialId || !nextCategory) {
-                          return "";
-                        }
+                              if (!normalizedMaterialId || !nextCategory) {
+                                return "";
+                              }
 
-                        return materials.some(
-                          (material) =>
-                            material.materialId === normalizedMaterialId &&
-                            material.category === nextCategory,
-                        )
-                          ? normalizedMaterialId
-                          : "";
-                      })(),
+                              return materials.some(
+                                (material) =>
+                                  material.materialId === normalizedMaterialId &&
+                                  material.category === nextCategory,
+                              )
+                                ? normalizedMaterialId
+                                : "";
+                            })(),
+                      accessoryId: nextType === "Accessories" ? current.accessoryId : "",
+                      accessoryPricingItems:
+                        nextType === "Accessories" ? current.accessoryPricingItems : [],
+                      accessoryTotalPricePerBagEgp:
+                        nextType === "Accessories"
+                          ? formatAccessoryTotal(
+                              computeAccessoryTotalPrice(current.accessoryPricingItems),
+                            )
+                          : "",
                     }));
                   }}
                 >
@@ -562,68 +757,181 @@ const ProductComponentDrawer = ({
                   ))}
                 </Select>
               </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Material
-                <Select
-                  value={normalizeMaterialReference(draft.material, materials)}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, material: event.target.value }))
-                  }
-                >
-                  <option value="">{getMaterialPlaceholderForComponentType(draft.componentType)}</option>
-                  {availableMaterials.map((material) => (
-                    <option key={material.materialId} value={material.materialId}>
-                      {material.materialName}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Diameter
-                <Input
-                  inputMode="decimal"
-                  value={draft.diameter}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, diameter: event.target.value }))
-                  }
-                />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Length
-                <Input
-                  inputMode="decimal"
-                  value={draft.length}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, length: event.target.value }))
-                  }
-                />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Seam Allowance
-                <Input
-                  inputMode="decimal"
-                  value={draft.seamAllowanceMm}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      seamAllowanceMm: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Top / Bottom Allowance
-                <Input
-                  inputMode="decimal"
-                  value={draft.topBottomAllowanceMm}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      topBottomAllowanceMm: event.target.value,
-                    }))
-                  }
-                />
-              </label>
+              {draft.componentType === "Accessories" ? (
+                <>
+                  <label className="space-y-2 text-sm font-medium text-slate-700">
+                    Accessory
+                    <Select
+                      value={resolveAccessoryId(draft, accessories)}
+                      onChange={(event) => {
+                        const nextAccessory =
+                          accessories.find(
+                            (accessory) => accessory.accessoryId === event.target.value,
+                          ) ?? null;
+
+                        setDraft((current) => {
+                          const nextRows =
+                            nextAccessory?.pricingItems.map((item) => ({
+                              key: item.key,
+                              value: item.price?.toString() ?? "",
+                            })) ?? [];
+
+                          return {
+                            ...current,
+                            accessoryId: event.target.value,
+                            material: nextAccessory?.accessoryName ?? "",
+                            componentName:
+                              current.componentName.trim() === "" ||
+                              current.componentName === "Accessories"
+                                ? nextAccessory?.accessoryName ?? current.componentName
+                                : current.componentName,
+                            accessoryPricingItems: nextRows,
+                            accessoryTotalPricePerBagEgp: formatAccessoryTotal(
+                              computeAccessoryTotalPrice(nextRows),
+                            ),
+                          };
+                        });
+                      }}
+                    >
+                      <option value="">
+                        {getMaterialPlaceholderForComponentType(draft.componentType)}
+                      </option>
+                      {accessories.map((accessory) => (
+                        <option key={accessory.accessoryId} value={accessory.accessoryId}>
+                          {accessory.accessoryName}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="space-y-2 text-sm font-medium text-slate-700 sm:col-span-2">
+                    Total Price Per Bag (EGP)
+                    <Input
+                      inputMode="decimal"
+                      value={draft.accessoryTotalPricePerBagEgp}
+                      readOnly
+                    />
+                  </label>
+                  <div className="space-y-3 sm:col-span-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium text-slate-700">
+                        Accessory Pricing Snapshot
+                      </p>
+                      <Button onClick={addAccessoryPricingRow} type="button" variant="outline">
+                        <Plus className="h-4 w-4" />
+                        Add Item
+                      </Button>
+                    </div>
+                    <div className="space-y-3">
+                      {draft.accessoryPricingItems.length ? (
+                        draft.accessoryPricingItems.map((row, rowIndex) => (
+                          <div
+                            className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,180px)_auto]"
+                            key={`${draft.componentId}-accessory-${rowIndex}`}
+                          >
+                            <Input
+                              placeholder="Type / Category"
+                              value={row.key}
+                              onChange={(event) =>
+                                updateAccessoryPricingRow(rowIndex, {
+                                  key: event.target.value,
+                                })
+                              }
+                            />
+                            <Input
+                              inputMode="decimal"
+                              placeholder="Price"
+                              value={row.value}
+                              onChange={(event) =>
+                                updateAccessoryPricingRow(rowIndex, {
+                                  value: event.target.value,
+                                })
+                              }
+                            />
+                            <Button
+                              onClick={() => removeAccessoryPricingRow(rowIndex)}
+                              type="button"
+                              variant="ghost"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          No accessory pricing rows loaded yet.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label className="space-y-2 text-sm font-medium text-slate-700">
+                    Material
+                    <Select
+                      value={normalizeMaterialReference(draft.material, materials)}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, material: event.target.value }))
+                      }
+                    >
+                      <option value="">
+                        {getMaterialPlaceholderForComponentType(draft.componentType)}
+                      </option>
+                      {availableMaterials.map((material) => (
+                        <option key={material.materialId} value={material.materialId}>
+                          {material.materialName}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="space-y-2 text-sm font-medium text-slate-700">
+                    Diameter (mm)
+                    <Input
+                      inputMode="decimal"
+                      value={draft.diameter}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, diameter: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium text-slate-700">
+                    Length (mm)
+                    <Input
+                      inputMode="decimal"
+                      value={draft.length}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, length: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium text-slate-700">
+                    Seam Allowance (mm)
+                    <Input
+                      inputMode="decimal"
+                      value={draft.seamAllowanceMm}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          seamAllowanceMm: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium text-slate-700">
+                    Top / Bottom Allowance (mm)
+                    <Input
+                      inputMode="decimal"
+                      value={draft.topBottomAllowanceMm}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          topBottomAllowanceMm: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </>
+              )}
             </div>
 
             <details className="rounded-[1.15rem] border border-border bg-slate-50/70">
@@ -699,6 +1007,7 @@ export const ProductConfigurationPage = () => {
   const { tenderId = "" } = useParams();
   const [form, setForm] = useState<ProductConfigurationForm>(() => initialForm(tenderId));
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [accessories, setAccessories] = useState<Accessory[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductToAdd, setSelectedProductToAdd] = useState("");
   const [collapsedProducts, setCollapsedProducts] = useState<Record<string, boolean>>({});
@@ -707,9 +1016,13 @@ export const ProductConfigurationPage = () => {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [saveMode, setSaveMode] = useState<"draft" | "continue" | null>(null);
+  const [lastSavedSignature, setLastSavedSignature] = useState(() =>
+    JSON.stringify(initialForm(tenderId)),
+  );
 
   useEffect(() => {
     setForm(initialForm(tenderId));
+    setLastSavedSignature(JSON.stringify(initialForm(tenderId)));
   }, [tenderId]);
 
   useEffect(() => {
@@ -725,17 +1038,20 @@ export const ProductConfigurationPage = () => {
       setError("");
 
       try {
-        const [loadedMaterials, loadedProducts] = await Promise.all([
+        const [loadedMaterials, loadedProducts, loadedAccessories] = await Promise.all([
           api.get<Material[]>("/materials?tenantId=alimex-demo"),
           api.get<Product[]>("/products?tenantId=alimex-demo"),
+          api.get<Accessory[]>("/accessories?tenantId=alimex-demo"),
         ]);
 
         const activeMaterials = loadedMaterials.filter((item) => item.active);
         const activeProducts = loadedProducts.filter((item) => item.active);
+        const activeAccessories = loadedAccessories.filter((item) => item.active);
 
         if (isMounted) {
           setMaterials(activeMaterials);
           setProducts(activeProducts);
+          setAccessories(activeAccessories);
         }
 
         try {
@@ -745,13 +1061,13 @@ export const ProductConfigurationPage = () => {
 
           if (isMounted) {
             const nextForm = toForm(config);
-            setForm(
-              applyDerivedSnapshotValues(
-                nextForm,
-                nextForm.productSnapshots,
-                activeMaterials,
-              ),
+            const derivedForm = applyDerivedSnapshotValues(
+              nextForm,
+              nextForm.productSnapshots,
+              activeMaterials,
             );
+            setForm(derivedForm);
+            setLastSavedSignature(JSON.stringify(derivedForm));
           }
         } catch (reason) {
           if (reason instanceof ApiError && reason.status === 404) {
@@ -768,17 +1084,17 @@ export const ProductConfigurationPage = () => {
                     .map(toSnapshotForm);
 
             if (isMounted) {
-              setForm((current) =>
-                applyDerivedSnapshotValues(
-                  {
-                    ...current,
-                    selectedProductIds: tender.selectedProductIds ?? [],
-                    productSnapshots: tenderSnapshots,
-                  },
-                  tenderSnapshots,
-                  activeMaterials,
-                ),
+              const nextForm = applyDerivedSnapshotValues(
+                {
+                  ...initialForm(tenderId),
+                  selectedProductIds: tender.selectedProductIds ?? [],
+                  productSnapshots: tenderSnapshots,
+                },
+                tenderSnapshots,
+                activeMaterials,
               );
+              setForm(nextForm);
+              setLastSavedSignature(JSON.stringify(nextForm));
             }
           } else {
             throw reason;
@@ -824,7 +1140,7 @@ export const ProductConfigurationPage = () => {
       mode: "add",
       productIndex,
       componentIndex: null,
-      value: createComponentFromType("Bag Body"),
+      value: createComponentFromType("Bag"),
     });
   };
 
@@ -969,7 +1285,7 @@ export const ProductConfigurationPage = () => {
 
     if (!form.bagDiameterMm || !form.bagLengthMm || !form.mainFabricMaterialId) {
       setError(
-        "Add a Bag Body component with diameter, length, and material before continuing.",
+        "Add a Bag component with diameter, length, and material before continuing.",
       );
       return false;
     }
@@ -987,10 +1303,10 @@ export const ProductConfigurationPage = () => {
       productSnapshots: form.productSnapshots.map(buildSnapshotProduct),
       productType: form.productType,
       quantity: numberOrNull(form.quantity),
-      bagDiameterMm: numberOrNull(form.bagDiameterMm),
-      bagLengthMm: numberOrNull(form.bagLengthMm),
-      seamAllowanceMm: numberOrNull(form.seamAllowanceMm),
-      topBottomAllowanceMm: numberOrNull(form.topBottomAllowanceMm),
+      bagDiameterMm: numberOrNullMillimeterInput(form.bagDiameterMm),
+      bagLengthMm: numberOrNullMillimeterInput(form.bagLengthMm),
+      seamAllowanceMm: numberOrNullMillimeterInput(form.seamAllowanceMm),
+      topBottomAllowanceMm: numberOrNullMillimeterInput(form.topBottomAllowanceMm),
       topDesign: form.topDesign.trim(),
       bottomDesign: form.bottomDesign.trim(),
       seamType: form.seamType.trim(),
@@ -1015,6 +1331,10 @@ export const ProductConfigurationPage = () => {
     }),
     [form, materials, tenderId],
   );
+  const currentSignature = useMemo(() => JSON.stringify(form), [form]);
+  const isDirty = currentSignature !== lastSavedSignature;
+
+  useUnsavedChangesWarning(isDirty);
 
   const save = async (mode: "draft" | "continue") => {
     setError("");
@@ -1039,13 +1359,13 @@ export const ProductConfigurationPage = () => {
       );
 
       const nextForm = toForm(response);
-      setForm(
-        applyDerivedSnapshotValues(
-          nextForm,
-          nextForm.productSnapshots,
-          materials,
-        ),
+      const derivedForm = applyDerivedSnapshotValues(
+        nextForm,
+        nextForm.productSnapshots,
+        materials,
       );
+      setForm(derivedForm);
+      setLastSavedSignature(JSON.stringify(derivedForm));
       setMessage(
         mode === "draft"
           ? "Product configuration snapshot saved."
@@ -1068,7 +1388,7 @@ export const ProductConfigurationPage = () => {
 
   return (
     <div className="space-y-5">
-      <TenderWorkflowStepper currentStep={2} tenderId={tenderId} />
+      <TenderWorkflowStepper currentStep={2} tenderId={tenderId} isDirty={isDirty} />
 
       <Card>
         <CardHeader className="border-b border-border pb-5">
@@ -1164,7 +1484,7 @@ export const ProductConfigurationPage = () => {
 
                       {!collapsedProducts[product.productId] ? (
                         <div className="space-y-5 px-5 py-5">
-                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                             <label className="space-y-2 text-sm font-medium text-slate-700">
                               Product Name
                               <Input
@@ -1203,37 +1523,13 @@ export const ProductConfigurationPage = () => {
                               />
                             </label>
                             <label className="space-y-2 text-sm font-medium text-slate-700">
-                              Factory Overhead
-                              <Input
-                                inputMode="decimal"
-                                value={product.factoryOverheadPerBag}
-                                onChange={(event) =>
-                                  updateProductSnapshot(productIndex, {
-                                    factoryOverheadPerBag: event.target.value,
-                                  })
-                                }
-                              />
-                            </label>
-                            <label className="space-y-2 text-sm font-medium text-slate-700">
-                              Manufacturing Overhead
+                              Manufacturing Cost
                               <Input
                                 inputMode="decimal"
                                 value={product.manufacturingOverheadPerBag}
                                 onChange={(event) =>
                                   updateProductSnapshot(productIndex, {
                                     manufacturingOverheadPerBag: event.target.value,
-                                  })
-                                }
-                              />
-                            </label>
-                            <label className="space-y-2 text-sm font-medium text-slate-700">
-                              Management Overhead
-                              <Input
-                                inputMode="decimal"
-                                value={product.managementOverheadPerBag}
-                                onChange={(event) =>
-                                  updateProductSnapshot(productIndex, {
-                                    managementOverheadPerBag: event.target.value,
                                   })
                                 }
                               />
@@ -1365,7 +1661,13 @@ export const ProductConfigurationPage = () => {
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <Button
-                    onClick={() => navigate(`/tenders/intake/${tenderId}`)}
+                    onClick={() => {
+                      if (!confirmDiscardUnsavedChanges(isDirty)) {
+                        return;
+                      }
+
+                      navigate(`/tenders/intake/${tenderId}`);
+                    }}
                     type="button"
                     variant="ghost"
                   >
@@ -1392,6 +1694,7 @@ export const ProductConfigurationPage = () => {
       </Card>
 
       <ProductComponentDrawer
+        accessories={accessories}
         materials={materials}
         onClose={() => setDrawerState(null)}
         onSave={saveComponent}

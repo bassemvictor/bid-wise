@@ -2,6 +2,7 @@ import { Check } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 import { cn } from "../../lib/utils";
+import { Badge } from "../ui/badge";
 
 type Step = {
   label: string;
@@ -12,6 +13,7 @@ type TenderWorkflowStepperProps = {
   currentStep: number;
   currentStepCompleted?: boolean;
   tenderId?: string;
+  isDirty?: boolean;
 };
 
 const getSteps = (tenderId?: string): Step[] => [
@@ -30,13 +32,15 @@ export const TenderWorkflowStepper = ({
   currentStep,
   currentStepCompleted = false,
   tenderId,
+  isDirty = false,
 }: TenderWorkflowStepperProps) => {
   const steps = getSteps(tenderId);
 
   return (
     <div className="overflow-x-auto rounded-[1.4rem] border border-border bg-white px-5 py-4 panel-shadow">
-      <div className="mb-4">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-slate-900">Tender Workflow</p>
+        {isDirty ? <Badge variant="warning">Changed</Badge> : null}
       </div>
       <div className="flex min-w-max items-center">
         {steps.map((step, index) => {
@@ -77,6 +81,24 @@ export const TenderWorkflowStepper = ({
                     "rounded-xl px-2 py-1 transition-opacity hover:opacity-85",
                     !isActive && !isComplete && "hover:opacity-100",
                   )}
+                  onClick={(event) => {
+                    if (
+                      !isDirty ||
+                      !step.href ||
+                      stepNumber === currentStep ||
+                      typeof window === "undefined"
+                    ) {
+                      return;
+                    }
+
+                    const shouldLeave = window.confirm(
+                      "You have unsaved changes in this tender stage. Leave without saving?",
+                    );
+
+                    if (!shouldLeave) {
+                      event.preventDefault();
+                    }
+                  }}
                   to={step.href}
                 >
                   {content}

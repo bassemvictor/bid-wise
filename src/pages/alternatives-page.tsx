@@ -10,6 +10,10 @@ import { Input } from "../components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Textarea } from "../components/ui/textarea";
 import { api, ApiError, isApiConfigured } from "../lib/api";
+import {
+  confirmDiscardUnsavedChanges,
+  useUnsavedChangesWarning,
+} from "../lib/use-unsaved-changes";
 import type { CostBuildUp, ScenarioAlternative, TenderRequest } from "../../shared/types";
 
 type AlternativeScenarioForm = {
@@ -280,9 +284,13 @@ export const AlternativesPage = () => {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [saveMode, setSaveMode] = useState<"draft" | "continue" | null>(null);
+  const [lastSavedSignature, setLastSavedSignature] = useState(() =>
+    JSON.stringify(initialForm(tenderId)),
+  );
 
   useEffect(() => {
     setForm(initialForm(tenderId));
+    setLastSavedSignature(JSON.stringify(initialForm(tenderId)));
   }, [tenderId]);
 
   useEffect(() => {
@@ -332,16 +340,20 @@ export const AlternativesPage = () => {
         }
 
         if (saved) {
-          setForm(toForm(saved));
+          const nextForm = toForm(saved);
+          setForm(nextForm);
+          setLastSavedSignature(JSON.stringify(nextForm));
           return;
         }
 
-        setForm({
+        const nextForm = {
           ...initialForm(tenderId),
           tenantId: loadedTender.tenantId,
           quantity: loadedCostBuildUp?.quantity?.toString() ?? "",
           baseCostPerBag: loadedCostBuildUp?.totalCostPricePerBag?.toString() ?? "",
-        });
+        };
+        setForm(nextForm);
+        setLastSavedSignature(JSON.stringify(nextForm));
       } catch (reason) {
         if (isMounted) {
           setError(reason instanceof Error ? reason.message : "Unable to load alternatives.");
@@ -505,6 +517,10 @@ export const AlternativesPage = () => {
     }),
     [baseCostPerBag, form.alternativeId, form.currency, form.notes, form.tenantId, quantity, scenarios, tenderId],
   );
+  const currentSignature = useMemo(() => JSON.stringify(form), [form]);
+  const isDirty = currentSignature !== lastSavedSignature;
+
+  useUnsavedChangesWarning(isDirty);
 
   const validate = () => {
     if (baseCostPerBag === null || quantity === null) {
@@ -561,7 +577,9 @@ export const AlternativesPage = () => {
         payload,
       );
 
-      setForm(toForm(response));
+      const nextForm = toForm(response);
+      setForm(nextForm);
+      setLastSavedSignature(JSON.stringify(nextForm));
       setMessage(mode === "draft" ? "Alternatives saved." : "Alternatives saved. Continuing to pricing approval.");
 
       if (mode === "continue") {
@@ -576,7 +594,7 @@ export const AlternativesPage = () => {
 
   return (
     <div className="space-y-6">
-      <TenderWorkflowStepper currentStep={5} tenderId={tenderId} />
+      <TenderWorkflowStepper currentStep={5} tenderId={tenderId} isDirty={isDirty} />
 
       <Card>
         <CardHeader>
@@ -686,7 +704,17 @@ export const AlternativesPage = () => {
               {error ? <p className="mt-2 text-rose-600">{error}</p> : null}
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" variant="ghost" onClick={() => navigate(`/tenders/${tenderId}/cost-build-up`)}>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  if (!confirmDiscardUnsavedChanges(isDirty)) {
+                    return;
+                  }
+
+                  navigate(`/tenders/${tenderId}/cost-build-up`);
+                }}
+              >
                 <ArrowLeft className="h-4 w-4" />
                 Back
               </Button>

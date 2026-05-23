@@ -1,4 +1,5 @@
 import { Search } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -11,6 +12,7 @@ type MasterDataToolbarProps = {
   onSearchChange: (value: string) => void;
   statusFilter: string;
   onStatusFilterChange: (value: string) => void;
+  actions?: ReactNode;
 };
 
 export const MasterDataToolbar = ({
@@ -20,6 +22,7 @@ export const MasterDataToolbar = ({
   onSearchChange,
   statusFilter,
   onStatusFilterChange,
+  actions,
 }: MasterDataToolbarProps) => (
   <div className="flex flex-col gap-4 rounded-[1.25rem] border border-border bg-white p-4 md:flex-row md:items-center md:justify-between">
     <div className="grid gap-3 md:grid-cols-[1fr_180px] md:items-center">
@@ -38,8 +41,11 @@ export const MasterDataToolbar = ({
         <option value="archived">Archived only</option>
       </Select>
     </div>
-    <Button onClick={onAdd} type="button">
-      {addLabel}
-    </Button>
+    <div className="flex flex-wrap items-center gap-3">
+      {actions}
+      <Button onClick={onAdd} type="button">
+        {addLabel}
+      </Button>
+    </div>
   </div>
 );

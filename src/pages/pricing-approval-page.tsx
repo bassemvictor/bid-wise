@@ -14,6 +14,10 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Textarea } from "../components/ui/textarea";
 import { api, ApiError, isApiConfigured } from "../lib/api";
+import {
+  confirmDiscardUnsavedChanges,
+  useUnsavedChangesWarning,
+} from "../lib/use-unsaved-changes";
 import { cn } from "../lib/utils";
 
 type DecisionForm = {
@@ -124,6 +128,7 @@ export const PricingApprovalPage = () => {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [saveMode, setSaveMode] = useState<"draft" | "final" | "approve" | null>(null);
+  const [lastSavedSignature, setLastSavedSignature] = useState("null");
 
   useEffect(() => {
     if (!isApiConfigured || !tenderId) {
@@ -158,7 +163,9 @@ export const PricingApprovalPage = () => {
 
         setTender(loadedTender);
         setAlternatives(loadedAlternatives);
-        setForm(buildInitialForm(tenderId, loadedAlternatives, savedApproval));
+        const nextForm = buildInitialForm(tenderId, loadedAlternatives, savedApproval);
+        setForm(nextForm);
+        setLastSavedSignature(JSON.stringify(nextForm));
       } catch (reason) {
         if (isMounted) {
           setError(
@@ -212,6 +219,10 @@ export const PricingApprovalPage = () => {
   );
 
   const hasApprovedScenario = decisionCounts.approved > 0;
+  const currentSignature = useMemo(() => JSON.stringify(form), [form]);
+  const isDirty = currentSignature !== lastSavedSignature;
+
+  useUnsavedChangesWarning(isDirty);
 
   const updateDecision = (scenarioId: string, patch: Partial<DecisionForm>) => {
     setForm((current) =>
@@ -304,7 +315,9 @@ export const PricingApprovalPage = () => {
     try {
       const response = await api.put<PricingApproval>(`/tenders/${tenderId}/pricing-approval`, payload);
       if (alternatives) {
-        setForm(buildInitialForm(tenderId, alternatives, response));
+        const nextForm = buildInitialForm(tenderId, alternatives, response);
+        setForm(nextForm);
+        setLastSavedSignature(JSON.stringify(nextForm));
       }
       setTender((current) =>
         current
@@ -335,6 +348,7 @@ export const PricingApprovalPage = () => {
         currentStep={6}
         currentStepCompleted={tender?.status === "APPROVED"}
         tenderId={tenderId}
+        isDirty={isDirty}
       />
 
       <Card>
@@ -514,7 +528,17 @@ export const PricingApprovalPage = () => {
               </label>
 
               <div className="flex flex-wrap justify-between gap-3 border-t border-border pt-4">
-                <Button onClick={() => navigate(`/tenders/${tenderId}/alternatives`)} type="button" variant="outline">
+                <Button
+                  onClick={() => {
+                    if (!confirmDiscardUnsavedChanges(isDirty)) {
+                      return;
+                    }
+
+                    navigate(`/tenders/${tenderId}/alternatives`);
+                  }}
+                  type="button"
+                  variant="outline"
+                >
                   <ArrowLeft className="h-4 w-4" />
                   Back
                 </Button>

@@ -25,8 +25,8 @@ const navigation = [
           { label: "Import", href: "/import-presets" },
         ],
       },
-      { label: "Products", href: "/products" },
       { label: "Accessories", href: "/accessories" },
+      { label: "Products", href: "/products" },
     ],
   },
   {

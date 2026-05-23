@@ -86,6 +86,40 @@ const formatAuditValue = (value: string | number | boolean | null) => {
   return String(value);
 };
 
+const convertMetersToMillimeters = (value: unknown) => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return value;
+  }
+
+  const millimeters = value * 1000;
+  return Number.isInteger(millimeters) ? millimeters : Number(millimeters.toFixed(2));
+};
+
+const toDisplayPayload = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(toDisplayPayload);
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, unknown>>((accumulator, [key, entry]) => {
+    if (key === "rollWidthM") {
+      accumulator.rollWidthMm = convertMetersToMillimeters(entry);
+      return accumulator;
+    }
+
+    if (key === "rollLengthM") {
+      accumulator.rollLengthMm = convertMetersToMillimeters(entry);
+      return accumulator;
+    }
+
+    accumulator[key] = toDisplayPayload(entry);
+    return accumulator;
+  }, {});
+};
+
 const getWorkflowPath = ({
   tenderId,
   status,
@@ -159,6 +193,7 @@ const TenderDetailContent = ({
     () => getPageTitle(section === "overview" ? `/tenders/${tenderId}` : `/tenders/${tenderId}/${section}`),
     [section, tenderId],
   );
+  const displayPayload = useMemo(() => (payload ? toDisplayPayload(payload) : null), [payload]);
   const navigate = useNavigate();
   const workflowPath = getWorkflowPath({
     tenderId,
@@ -278,7 +313,9 @@ const TenderDetailContent = ({
           <CardContent>
             <div className="rounded-2xl bg-slate-50 p-4">
               <pre className="overflow-x-auto whitespace-pre-wrap break-words text-sm text-slate-700">
-                {payload ? JSON.stringify(payload, null, 2) : "No backend record loaded for this section yet."}
+                {displayPayload
+                  ? JSON.stringify(displayPayload, null, 2)
+                  : "No backend record loaded for this section yet."}
               </pre>
             </div>
             {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}

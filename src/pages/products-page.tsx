@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
 
-import type { Material, Product, ProductComponent, ProductType } from "../../shared/types";
+import type { Accessory, Material, Product, ProductComponent, ProductComponentAccessorySnapshot, ProductType } from "../../shared/types";
 import { EmptyState } from "../components/master-data/empty-state";
 import { MasterDataToolbar } from "../components/master-data/master-data-toolbar";
 import { StatusBadge } from "../components/master-data/status-badge";
@@ -24,6 +24,9 @@ type ProductComponentForm = {
   componentName: string;
   componentType: string;
   material: string;
+  accessoryId: string;
+  accessoryPricingItems: SpecificationFormRow[];
+  accessoryTotalPricePerBagEgp: string;
   diameter: string;
   length: string;
   seamAllowanceMm: string;
@@ -36,9 +39,7 @@ type ProductForm = {
   tenantId: string;
   productName: string;
   productType: ProductType;
-  factoryOverheadPerBag: string;
   manufacturingOverheadPerBag: string;
-  managementOverheadPerBag: string;
   components: ProductComponentForm[];
   active: boolean;
 };
@@ -50,12 +51,12 @@ type ComponentDrawerState = {
 };
 
 const productTypes: ProductType[] = ["Filter Bag", "Other"];
-const componentTypeOptions = ["Bag Body", "Ring", "Thread", "Other"] as const;
+const componentTypeOptions = ["Bag", "Accessories", "Ring", "Thread", "Other"] as const;
 type ComponentTypeOption = (typeof componentTypeOptions)[number];
 
 const getMaterialCategoryForComponentType = (componentType: string): Material["category"] | null => {
   switch (componentType) {
-    case "Bag Body":
+    case "Bag":
       return "Fabric Material";
     case "Thread":
       return "Threading Material";
@@ -68,8 +69,10 @@ const getMaterialCategoryForComponentType = (componentType: string): Material["c
 
 const getMaterialPlaceholderForComponentType = (componentType: string) => {
   switch (componentType) {
-    case "Bag Body":
+    case "Bag":
       return "Select fabric material";
+    case "Accessories":
+      return "Select accessory";
     case "Thread":
       return "Select threading material";
     case "Ring":
@@ -84,9 +87,7 @@ const initialForm: ProductForm = {
   tenantId: "alimex-demo",
   productName: "",
   productType: "Filter Bag",
-  factoryOverheadPerBag: "",
   manufacturingOverheadPerBag: "",
-  managementOverheadPerBag: "",
   components: [],
   active: true,
 };
@@ -94,8 +95,11 @@ const initialForm: ProductForm = {
 const createComponentForm = (seed?: Partial<ProductComponentForm>): ProductComponentForm => ({
   componentId: seed?.componentId ?? crypto.randomUUID(),
   componentName: seed?.componentName ?? "",
-  componentType: seed?.componentType ?? "Bag Body",
+  componentType: seed?.componentType ?? "Bag",
   material: seed?.material ?? "",
+  accessoryId: seed?.accessoryId ?? "",
+  accessoryPricingItems: seed?.accessoryPricingItems ?? [],
+  accessoryTotalPricePerBagEgp: seed?.accessoryTotalPricePerBagEgp ?? "",
   diameter: seed?.diameter ?? "",
   length: seed?.length ?? "",
   seamAllowanceMm: seed?.seamAllowanceMm ?? "",
@@ -103,14 +107,16 @@ const createComponentForm = (seed?: Partial<ProductComponentForm>): ProductCompo
   specificationRows: seed?.specificationRows ?? [],
 });
 
-const createComponentFromType = (componentType: ComponentTypeOption = "Bag Body") =>
+const createComponentFromType = (componentType: ComponentTypeOption = "Bag") =>
   createComponentForm({
     componentType,
     componentName: componentType === "Other" ? "" : componentType,
   });
 
 const isBagBody = (component: ProductComponentForm) =>
+  component.componentName.trim().toLowerCase() === "bag" ||
   component.componentName.trim().toLowerCase() === "bag body" ||
+  component.componentType.trim().toLowerCase() === "bag" ||
   component.componentType.trim().toLowerCase() === "bag body";
 
 const specificationsToFormRows = (specifications: ProductComponent["specifications"]) =>
@@ -132,9 +138,7 @@ const toForm = (record: Product): ProductForm => ({
   tenantId: record.tenantId,
   productName: record.productName,
   productType: record.productType,
-  factoryOverheadPerBag: record.factoryOverheadPerBag?.toString() ?? "",
   manufacturingOverheadPerBag: record.manufacturingOverheadPerBag?.toString() ?? "",
-  managementOverheadPerBag: record.managementOverheadPerBag?.toString() ?? "",
   active: record.active,
   components: record.components.map((component) =>
     createComponentForm({
@@ -142,14 +146,25 @@ const toForm = (record: Product): ProductForm => ({
       componentName: component.componentName,
       componentType: component.componentType,
       material: component.material,
+      accessoryId: component.accessorySnapshot?.accessoryId ?? "",
+      accessoryPricingItems:
+        component.accessorySnapshot?.pricingItems.map((item) => ({
+          key: item.key,
+          value: item.price?.toString() ?? "",
+        })) ?? [],
+      accessoryTotalPricePerBagEgp: component.accessorySnapshot?.totalPricePerBagEgp?.toString() ?? "",
       diameter:
         component.specifications.diameter === null || component.specifications.diameter === undefined
           ? ""
-          : String(component.specifications.diameter),
+          : typeof component.specifications.diameter === "boolean"
+            ? ""
+            : formatInputMetric(component.specifications.diameter),
       length:
         component.specifications.length === null || component.specifications.length === undefined
           ? ""
-          : String(component.specifications.length),
+          : typeof component.specifications.length === "boolean"
+            ? ""
+            : formatInputMetric(component.specifications.length),
       seamAllowanceMm:
         component.specifications.seamAllowanceMm === null ||
         component.specifications.seamAllowanceMm === undefined
@@ -183,12 +198,14 @@ const buildComponentPayload = (component: ProductComponentForm): ProductComponen
       }),
   );
 
-  specifications.diameter = component.diameter.trim() === "" ? null : Number(component.diameter);
-  specifications.length = component.length.trim() === "" ? null : Number(component.length);
-  specifications.seamAllowanceMm =
-    component.seamAllowanceMm.trim() === "" ? null : Number(component.seamAllowanceMm);
-  specifications.topBottomAllowanceMm =
-    component.topBottomAllowanceMm.trim() === "" ? null : Number(component.topBottomAllowanceMm);
+  if (isBagBody(component)) {
+    specifications.diameter = component.diameter.trim() === "" ? null : Number(component.diameter);
+    specifications.length = component.length.trim() === "" ? null : Number(component.length);
+    specifications.seamAllowanceMm =
+      component.seamAllowanceMm.trim() === "" ? null : Number(component.seamAllowanceMm);
+    specifications.topBottomAllowanceMm =
+      component.topBottomAllowanceMm.trim() === "" ? null : Number(component.topBottomAllowanceMm);
+  }
 
   return {
     componentId: component.componentId || crypto.randomUUID(),
@@ -196,6 +213,23 @@ const buildComponentPayload = (component: ProductComponentForm): ProductComponen
     componentType: component.componentType.trim(),
     material: component.material.trim(),
     specifications,
+    accessorySnapshot:
+      component.componentType === "Accessories"
+        ? {
+            accessoryId: component.accessoryId,
+            accessoryName: component.material.trim(),
+            pricingItems: component.accessoryPricingItems
+              .filter((row) => row.key.trim() || row.value.trim())
+              .map((row) => ({
+                key: row.key.trim(),
+                price: row.value.trim() === "" ? null : Number(row.value),
+              })),
+            totalPricePerBagEgp:
+              component.accessoryTotalPricePerBagEgp.trim() === ""
+                ? null
+                : Number(component.accessoryTotalPricePerBagEgp),
+          } satisfies ProductComponentAccessorySnapshot
+        : null,
   };
 };
 
@@ -204,8 +238,21 @@ const formatCurrency = (value: number | null | undefined) =>
     ? "Not set"
     : `${value.toFixed(2)} EGP`;
 
+const formatInputMetric = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined || value === "") {
+    return "";
+  }
+
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    return typeof value === "string" ? value : "";
+  }
+
+  return parsed.toFixed(2).replace(/\.?0+$/, "");
+};
+
 const formatDimension = (label: string, value: string) =>
-  value.trim() ? `${label} ${Number(value).toFixed(2)} m` : "";
+  value.trim() ? `${label} ${formatInputMetric(value)} mm` : "";
 
 const getKeyDimensions = (component: ProductComponentForm) => {
   const values = [formatDimension("Ø", component.diameter), formatDimension("L", component.length)].filter(Boolean);
@@ -228,21 +275,23 @@ const resolveMaterialLabel = (value: string, materials: Material[]) => {
 const createEmptyDrawerState = (): ComponentDrawerState => ({
   mode: "add",
   index: null,
-  value: createComponentFromType("Bag Body"),
+  value: createComponentFromType("Bag"),
 });
 
 const ProductComponentDrawer = ({
   materials,
+  accessories,
   onClose,
   onSave,
   state,
 }: {
   materials: Material[];
+  accessories: Accessory[];
   onClose: () => void;
   onSave: (value: ProductComponentForm, mode: "add" | "edit", index: number | null) => void;
   state: ComponentDrawerState | null;
 }) => {
-  const [draft, setDraft] = useState<ProductComponentForm>(state?.value ?? createComponentFromType("Bag Body"));
+  const [draft, setDraft] = useState<ProductComponentForm>(state?.value ?? createComponentFromType("Bag"));
 
   useEffect(() => {
     if (state) {
@@ -258,6 +307,28 @@ const ProductComponentDrawer = ({
   const availableMaterials = selectedMaterialCategory
     ? materials.filter((material) => material.category === selectedMaterialCategory)
     : materials;
+  const addAccessoryPricingRow = () => {
+    setDraft((current) => ({
+      ...current,
+      accessoryPricingItems: [...current.accessoryPricingItems, { key: "", value: "" }],
+    }));
+  };
+
+  const updateAccessoryPricingRow = (rowIndex: number, patch: Partial<SpecificationFormRow>) => {
+    setDraft((current) => ({
+      ...current,
+      accessoryPricingItems: current.accessoryPricingItems.map((row, currentRowIndex) =>
+        currentRowIndex === rowIndex ? { ...row, ...patch } : row,
+      ),
+    }));
+  };
+
+  const removeAccessoryPricingRow = (rowIndex: number) => {
+    setDraft((current) => ({
+      ...current,
+      accessoryPricingItems: current.accessoryPricingItems.filter((_, currentRowIndex) => currentRowIndex !== rowIndex),
+    }));
+  };
 
   const addSpecificationRow = () => {
     setDraft((current) => ({
@@ -344,14 +415,19 @@ const ProductComponentDrawer = ({
                             : nextType
                           : current.componentName,
                       material:
-                        current.material &&
-                        materials.some(
-                          (material) =>
-                            material.materialName === current.material &&
-                            material.category === getMaterialCategoryForComponentType(nextType),
-                        )
+                        nextType === "Accessories"
                           ? current.material
-                          : "",
+                          : current.material &&
+                              materials.some(
+                                (material) =>
+                                  material.materialName === current.material &&
+                                  material.category === getMaterialCategoryForComponentType(nextType),
+                              )
+                            ? current.material
+                            : "",
+                      accessoryId: nextType === "Accessories" ? current.accessoryId : "",
+                      accessoryPricingItems: nextType === "Accessories" ? current.accessoryPricingItems : [],
+                      accessoryTotalPricePerBagEgp: nextType === "Accessories" ? current.accessoryTotalPricePerBagEgp : "",
                     }));
                   }}
                 >
@@ -362,54 +438,138 @@ const ProductComponentDrawer = ({
                   ))}
                 </Select>
               </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Material
-                <Select
-                  value={draft.material}
-                  onChange={(event) => setDraft((current) => ({ ...current, material: event.target.value }))}
-                >
-                  <option value="">{getMaterialPlaceholderForComponentType(draft.componentType)}</option>
-                  {availableMaterials.map((material) => (
-                    <option key={material.materialId} value={material.materialName}>
-                      {material.materialName}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Diameter
-                <Input
-                  inputMode="decimal"
-                  value={draft.diameter}
-                  onChange={(event) => setDraft((current) => ({ ...current, diameter: event.target.value }))}
-                />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Length
-                <Input
-                  inputMode="decimal"
-                  value={draft.length}
-                  onChange={(event) => setDraft((current) => ({ ...current, length: event.target.value }))}
-                />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Seam Allowance
-                <Input
-                  inputMode="decimal"
-                  value={draft.seamAllowanceMm}
-                  onChange={(event) => setDraft((current) => ({ ...current, seamAllowanceMm: event.target.value }))}
-                />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Top / Bottom Allowance
-                <Input
-                  inputMode="decimal"
-                  value={draft.topBottomAllowanceMm}
-                  onChange={(event) =>
-                    setDraft((current) => ({ ...current, topBottomAllowanceMm: event.target.value }))
-                  }
-                />
-              </label>
+              {draft.componentType === "Accessories" ? (
+                <label className="space-y-2 text-sm font-medium text-slate-700">
+                  Accessory
+                  <Select
+                    value={draft.accessoryId}
+                    onChange={(event) => {
+                      const nextAccessory = accessories.find((accessory) => accessory.accessoryId === event.target.value) ?? null;
+                      setDraft((current) => ({
+                        ...current,
+                        accessoryId: event.target.value,
+                        material: nextAccessory?.accessoryName ?? "",
+                        componentName:
+                          current.componentName.trim() === "" || current.componentName === "Accessories"
+                            ? nextAccessory?.accessoryName ?? current.componentName
+                            : current.componentName,
+                        accessoryPricingItems:
+                          nextAccessory?.pricingItems.map((item) => ({
+                            key: item.key,
+                            value: item.price?.toString() ?? "",
+                          })) ?? [],
+                        accessoryTotalPricePerBagEgp: nextAccessory?.totalPricePerBagEgp?.toString() ?? "",
+                      }));
+                    }}
+                  >
+                    <option value="">{getMaterialPlaceholderForComponentType(draft.componentType)}</option>
+                    {accessories.map((accessory) => (
+                      <option key={accessory.accessoryId} value={accessory.accessoryId}>
+                        {accessory.accessoryName}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+              ) : (
+                <label className="space-y-2 text-sm font-medium text-slate-700">
+                  Material
+                  <Select
+                    value={draft.material}
+                    onChange={(event) => setDraft((current) => ({ ...current, material: event.target.value }))}
+                  >
+                    <option value="">{getMaterialPlaceholderForComponentType(draft.componentType)}</option>
+                    {availableMaterials.map((material) => (
+                      <option key={material.materialId} value={material.materialName}>
+                        {material.materialName}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+              )}
+              {draft.componentType === "Accessories" ? (
+                <>
+                  <label className="space-y-2 text-sm font-medium text-slate-700 sm:col-span-2">
+                    Total Price Per Bag (EGP)
+                    <Input
+                      inputMode="decimal"
+                      value={draft.accessoryTotalPricePerBagEgp}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, accessoryTotalPricePerBagEgp: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <div className="space-y-3 sm:col-span-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium text-slate-700">Accessory Pricing Snapshot</p>
+                      <Button onClick={addAccessoryPricingRow} type="button" variant="outline">
+                        <Plus className="h-4 w-4" />
+                        Add Row
+                      </Button>
+                    </div>
+                    <div className="space-y-3">
+                      {draft.accessoryPricingItems.length ? (
+                        draft.accessoryPricingItems.map((row, rowIndex) => (
+                          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,180px)_auto]" key={`${draft.componentId}-accessory-${rowIndex}`}>
+                            <Input
+                              placeholder="Type / Category"
+                              value={row.key}
+                              onChange={(event) => updateAccessoryPricingRow(rowIndex, { key: event.target.value })}
+                            />
+                            <Input
+                              inputMode="decimal"
+                              placeholder="Price"
+                              value={row.value}
+                              onChange={(event) => updateAccessoryPricingRow(rowIndex, { value: event.target.value })}
+                            />
+                            <Button onClick={() => removeAccessoryPricingRow(rowIndex)} type="button" variant="ghost">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No accessory pricing rows loaded yet.</p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label className="space-y-2 text-sm font-medium text-slate-700">
+                    Diameter (mm)
+                    <Input
+                      inputMode="decimal"
+                      value={draft.diameter}
+                      onChange={(event) => setDraft((current) => ({ ...current, diameter: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium text-slate-700">
+                    Length (mm)
+                    <Input
+                      inputMode="decimal"
+                      value={draft.length}
+                      onChange={(event) => setDraft((current) => ({ ...current, length: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium text-slate-700">
+                    Seam Allowance
+                    <Input
+                      inputMode="decimal"
+                      value={draft.seamAllowanceMm}
+                      onChange={(event) => setDraft((current) => ({ ...current, seamAllowanceMm: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-2 text-sm font-medium text-slate-700">
+                    Top / Bottom Allowance
+                    <Input
+                      inputMode="decimal"
+                      value={draft.topBottomAllowanceMm}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, topBottomAllowanceMm: event.target.value }))
+                      }
+                    />
+                  </label>
+                </>
+              )}
             </div>
 
             <details className="rounded-[1.15rem] border border-border bg-slate-50/70" open={false}>
@@ -473,6 +633,7 @@ const ProductComponentDrawer = ({
 export const ProductsPage = () => {
   const [records, setRecords] = useState<Product[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [accessories, setAccessories] = useState<Accessory[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [open, setOpen] = useState(false);
@@ -488,12 +649,14 @@ export const ProductsPage = () => {
     }
 
     try {
-      const [products, materialItems] = await Promise.all([
+      const [products, materialItems, accessoryItems] = await Promise.all([
         api.get<Product[]>("/products?tenantId=alimex-demo"),
         api.get<Material[]>("/materials?tenantId=alimex-demo"),
+        api.get<Accessory[]>("/accessories?tenantId=alimex-demo"),
       ]);
       setRecords(products);
       setMaterials(materialItems.filter((item) => item.active));
+      setAccessories(accessoryItems.filter((item) => item.active));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to load products.");
     }
@@ -528,10 +691,10 @@ export const ProductsPage = () => {
   };
 
   const openAddComponentDrawer = () => {
-    setDrawerState({
+      setDrawerState({
       mode: "add",
       index: null,
-      value: createComponentFromType("Bag Body"),
+      value: createComponentFromType("Bag"),
     });
   };
 
@@ -596,12 +759,10 @@ export const ProductsPage = () => {
       productId: form.productId.trim(),
       productName: form.productName.trim(),
       productType: form.productType,
-      factoryOverheadPerBag:
-        form.factoryOverheadPerBag.trim() === "" ? null : Number(form.factoryOverheadPerBag),
       manufacturingOverheadPerBag:
         form.manufacturingOverheadPerBag.trim() === "" ? null : Number(form.manufacturingOverheadPerBag),
-      managementOverheadPerBag:
-        form.managementOverheadPerBag.trim() === "" ? null : Number(form.managementOverheadPerBag),
+      factoryOverheadPerBag: editing?.factoryOverheadPerBag ?? null,
+      managementOverheadPerBag: editing?.managementOverheadPerBag ?? null,
       components: form.components.map(buildComponentPayload),
       active: form.active,
       createdAt: "",
@@ -734,16 +895,8 @@ export const ProductsPage = () => {
                                   <p className="mt-2 text-sm font-semibold text-slate-900">{record.components.length}</p>
                                 </div>
                                 <div className="rounded-2xl bg-slate-50 p-4">
-                                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Factory Overhead / Bag</p>
-                                  <p className="mt-2 text-sm font-semibold text-slate-900">{formatCurrency(record.factoryOverheadPerBag)}</p>
-                                </div>
-                                <div className="rounded-2xl bg-slate-50 p-4">
-                                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Manufacturing Overhead / Bag</p>
+                                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Manufacturing Cost / Bag</p>
                                   <p className="mt-2 text-sm font-semibold text-slate-900">{formatCurrency(record.manufacturingOverheadPerBag)}</p>
-                                </div>
-                                <div className="rounded-2xl bg-slate-50 p-4">
-                                  <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Management Overhead / Bag</p>
-                                  <p className="mt-2 text-sm font-semibold text-slate-900">{formatCurrency(record.managementOverheadPerBag)}</p>
                                 </div>
                               </div>
                               <div className="overflow-x-auto rounded-2xl border border-border">
@@ -861,32 +1014,12 @@ export const ProductsPage = () => {
                   </Select>
                 </label>
                 <label className="space-y-2 text-sm font-medium text-slate-700">
-                  Factory Overhead
-                  <Input
-                    inputMode="decimal"
-                    value={form.factoryOverheadPerBag}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, factoryOverheadPerBag: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="space-y-2 text-sm font-medium text-slate-700">
-                  Manufacturing Overhead
+                  Manufacturing Cost
                   <Input
                     inputMode="decimal"
                     value={form.manufacturingOverheadPerBag}
                     onChange={(event) =>
                       setForm((current) => ({ ...current, manufacturingOverheadPerBag: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="space-y-2 text-sm font-medium text-slate-700">
-                  Management Overhead
-                  <Input
-                    inputMode="decimal"
-                    value={form.managementOverheadPerBag}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, managementOverheadPerBag: event.target.value }))
                     }
                   />
                 </label>
@@ -990,6 +1123,7 @@ export const ProductsPage = () => {
           </form>
 
           <ProductComponentDrawer
+            accessories={accessories}
             materials={materials}
             onClose={() => setDrawerState(null)}
             onSave={saveComponent}

@@ -191,6 +191,9 @@ export type SelectedMaterialSource = {
   rollLengthM?: number | null;
   rollCount?: number | null;
   customsEstimate?: number | null;
+  customsPercent?: number | null;
+  freightCostPerM2Egp?: number | null;
+  clearanceCostPerM2Egp?: number | null;
   bagsAcrossRollWidth?: number | null;
   bagsAlongRollLength?: number | null;
   bagsPerRoll?: number | null;
@@ -346,8 +349,8 @@ export type Material = EntityEnvelope & {
   materialId: string;
   materialName: string;
   category: MaterialCategory;
-  temperatureLimit: string;
-  chemicalResistance: string;
+  description: string;
+  baseMaterial: string;
   defaultWastePercent: number | null;
   rollWidthM: number | null;
   rollLengthM: number | null;
@@ -362,6 +365,7 @@ export type StockItem = EntityEnvelope & {
   rollWidthM: number | null;
   rollLengthM: number | null;
   unitCostUsdPerM2: number | null;
+  landedCostEgp: number | null;
   active: boolean;
 };
 
@@ -373,6 +377,9 @@ export type ImportPreset = EntityEnvelope & {
   rollLengthM: number | null;
   leadTimeDays: number | null;
   unitCostUsdPerM2: number | null;
+  freightCostPerM2Egp: number | null;
+  clearanceCostPerM2Egp: number | null;
+  customsPercent: number | null;
   customsEstimate: number | null;
   active: boolean;
 };
@@ -381,12 +388,25 @@ export type ProductType = "Filter Bag" | "Other";
 
 export type ProductComponentSpecificationValue = string | number | boolean | null;
 
+export type AccessoryPriceItem = {
+  key: string;
+  price: number | null;
+};
+
+export type ProductComponentAccessorySnapshot = {
+  accessoryId: string;
+  accessoryName: string;
+  pricingItems: AccessoryPriceItem[];
+  totalPricePerBagEgp: number | null;
+};
+
 export type ProductComponent = {
   componentId: string;
   componentName: string;
   componentType: string;
   material: string;
   specifications: Record<string, ProductComponentSpecificationValue>;
+  accessorySnapshot?: ProductComponentAccessorySnapshot | null;
 };
 
 export type Supplier = EntityEnvelope & {
@@ -427,8 +447,7 @@ export type Product = EntityEnvelope & {
 export type Accessory = EntityEnvelope & {
   accessoryId: string;
   accessoryName: string;
-  material: string;
-  unit: string;
-  defaultCost: number | null;
+  pricingItems: AccessoryPriceItem[];
+  totalPricePerBagEgp: number | null;
   active: boolean;
 };

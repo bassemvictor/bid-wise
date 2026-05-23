@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import * as XLSX from "xlsx";
 
 import { EmptyState } from "../components/master-data/empty-state";
 import { MasterDataToolbar } from "../components/master-data/master-data-toolbar";
@@ -71,6 +73,15 @@ const toOfferForm = (record: SupplierOffer): OfferForm => ({
   validUntil: record.validUntil,
 });
 
+type SupplierImportRow = Record<string, unknown>;
+
+const normalizeImportCell = (value: unknown) => (value === null || value === undefined ? "" : String(value).trim());
+
+const parseBooleanLike = (value: unknown) => {
+  const normalized = normalizeImportCell(value).toLowerCase();
+  return normalized === "true" || normalized === "yes" || normalized === "y" || normalized === "1";
+};
+
 export const SuppliersPage = () => {
   const [records, setRecords] = useState<Supplier[]>([]);
   const [search, setSearch] = useState("");
@@ -84,6 +95,9 @@ export const SuppliersPage = () => {
   const [offerForm, setOfferForm] = useState<OfferForm>(initialOfferForm());
   const [offers, setOffers] = useState<SupplierOffer[]>([]);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [isImporting, setIsImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadSuppliers = async () => {
     if (!isApiConfigured) {
@@ -103,7 +117,7 @@ export const SuppliersPage = () => {
     }
 
     try {
-      setOffers(await api.get<SupplierOffer[]>(`/suppliers/${supplierId}/offers?tenantId=alimex-demo`));
+      setOffers(await api.get<SupplierOffer[]>(`/suppliers/${encodeURIComponent(supplierId)}/offers?tenantId=alimex-demo`));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to load supplier offers.");
     }
@@ -122,6 +136,8 @@ export const SuppliersPage = () => {
 
   const submitSupplier = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setError("");
+    setMessage("");
     const payload: Supplier = {
       entityType: "SUPPLIER",
       ...supplierForm,
@@ -137,7 +153,7 @@ export const SuppliersPage = () => {
 
     try {
       if (editing) {
-        await api.put<Supplier>(`/suppliers/${payload.supplierId}`, payload);
+        await api.put<Supplier>(`/suppliers/${encodeURIComponent(payload.supplierId)}`, payload);
       } else {
         await api.post<Supplier>("/suppliers", payload);
       }
@@ -153,6 +169,9 @@ export const SuppliersPage = () => {
     if (!selectedSupplier) {
       return;
     }
+
+    setError("");
+    setMessage("");
 
     const payload: SupplierOffer = {
       entityType: "SUPPLIER_OFFER",
@@ -173,11 +192,11 @@ export const SuppliersPage = () => {
     try {
       if (editingOffer) {
         await api.put<SupplierOffer>(
-          `/suppliers/${selectedSupplier.supplierId}/offers/${payload.offerId}`,
+          `/suppliers/${encodeURIComponent(selectedSupplier.supplierId)}/offers/${encodeURIComponent(payload.offerId)}`,
           payload,
         );
       } else {
-        await api.post<SupplierOffer>(`/suppliers/${selectedSupplier.supplierId}/offers`, payload);
+        await api.post<SupplierOffer>(`/suppliers/${encodeURIComponent(selectedSupplier.supplierId)}/offers`, payload);
       }
       setOfferDialogOpen(false);
       await loadOffers(selectedSupplier.supplierId);
@@ -187,8 +206,10 @@ export const SuppliersPage = () => {
   };
 
   const archiveSupplier = async (record: Supplier) => {
+    setError("");
+    setMessage("");
     try {
-      await api.delete<Supplier>(`/suppliers/${record.supplierId}?tenantId=alimex-demo`);
+      await api.delete<Supplier>(`/suppliers/${encodeURIComponent(record.supplierId)}?tenantId=alimex-demo`);
       await loadSuppliers();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to archive supplier.");
@@ -200,17 +221,151 @@ export const SuppliersPage = () => {
       return;
     }
 
+    setError("");
+    setMessage("");
     try {
-      await api.delete(`/suppliers/${selectedSupplier.supplierId}/offers/${record.offerId}?tenantId=alimex-demo`);
+      await api.delete(`/suppliers/${encodeURIComponent(selectedSupplier.supplierId)}/offers/${encodeURIComponent(record.offerId)}?tenantId=alimex-demo`);
       await loadOffers(selectedSupplier.supplierId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to delete supplier offer.");
     }
   };
 
+  const triggerImportPicker = () => {
+    setError("");
+    setMessage("");
+    importInputRef.current?.click();
+  };
+
+  const importSuppliers = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    if (!isApiConfigured) {
+      setError("Set VITE_API_BASE_URL before importing suppliers.");
+      return;
+    }
+
+    setError("");
+    setMessage("");
+    setIsImporting(true);
+
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) {
+        throw new Error("The Excel file does not contain any sheets.");
+      }
+
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rows = XLSX.utils.sheet_to_json<SupplierImportRow>(worksheet, {
+        defval: "",
+        raw: false,
+      });
+
+      const existingById = new Map(records.map((record) => [record.supplierId.trim().toLowerCase(), record]));
+      const existingByName = new Map(records.map((record) => [record.supplierName.trim().toLowerCase(), record]));
+
+      const suppliersToUpsert = rows
+        .map((row) => {
+          const supplierId = normalizeImportCell(row.Code);
+          const supplierName = normalizeImportCell(row.Name);
+
+          if (!supplierId && !supplierName) {
+            return null;
+          }
+
+          const matchedExisting =
+            (supplierId && existingById.get(supplierId.toLowerCase())) ||
+            (supplierName && existingByName.get(supplierName.toLowerCase())) ||
+            null;
+
+          return {
+            row,
+            payload: {
+              entityType: "SUPPLIER" as const,
+              tenantId: "alimex-demo",
+              supplierId: supplierId || matchedExisting?.supplierId || crypto.randomUUID(),
+              supplierName: supplierName || matchedExisting?.supplierName || "Unnamed Supplier",
+              country: normalizeImportCell(row.Country) || matchedExisting?.country || "",
+              contactName: normalizeImportCell(row["Contact Name"]) || matchedExisting?.contactName || "",
+              email: normalizeImportCell(row.Email) || matchedExisting?.email || "",
+              phone: normalizeImportCell(row.Phone) || matchedExisting?.phone || "",
+              preferred:
+                row.Preferred !== undefined
+                  ? parseBooleanLike(row.Preferred)
+                  : matchedExisting?.preferred ?? false,
+              active:
+                row.Active !== undefined
+                  ? parseBooleanLike(row.Active)
+                  : matchedExisting?.active ?? true,
+              createdAt: "",
+              updatedAt: "",
+            } satisfies Supplier,
+            isUpdate: Boolean(matchedExisting),
+          };
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+
+      if (!suppliersToUpsert.length) {
+        throw new Error("No supplier rows were found in the Excel file.");
+      }
+
+      let createdCount = 0;
+      let updatedCount = 0;
+
+      for (const supplier of suppliersToUpsert) {
+        if (supplier.isUpdate) {
+          await api.put<Supplier>(`/suppliers/${encodeURIComponent(supplier.payload.supplierId)}`, supplier.payload);
+          updatedCount += 1;
+        } else {
+          await api.post<Supplier>("/suppliers", supplier.payload);
+          createdCount += 1;
+        }
+      }
+
+      await loadSuppliers();
+      setMessage(`Imported ${suppliersToUpsert.length} suppliers from ${file.name}. Created ${createdCount}, updated ${updatedCount}.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to import suppliers from Excel.");
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <MasterDataToolbar addLabel="Add Supplier" onAdd={() => { setEditing(null); setSupplierForm(initialSupplierForm); setSupplierDialogOpen(true); }} searchValue={search} onSearchChange={setSearch} statusFilter={statusFilter} onStatusFilterChange={setStatusFilter} />
+      <MasterDataToolbar
+        addLabel="Add Supplier"
+        onAdd={() => {
+          setEditing(null);
+          setSupplierForm(initialSupplierForm);
+          setSupplierDialogOpen(true);
+        }}
+        searchValue={search}
+        onSearchChange={setSearch}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+        actions={
+          <>
+            <input
+              ref={importInputRef}
+              accept=".xlsx,.xls"
+              className="hidden"
+              type="file"
+              onChange={(event) => void importSuppliers(event)}
+            />
+            <Button disabled={isImporting} type="button" variant="outline" onClick={triggerImportPicker}>
+              <Upload className="h-4 w-4" />
+              {isImporting ? "Importing..." : "Import Suppliers"}
+            </Button>
+          </>
+        }
+      />
       <Card>
         <CardHeader>
           <div>
@@ -249,6 +404,7 @@ export const SuppliersPage = () => {
               </TableBody>
             </Table>
           )}
+          {message ? <p className="mt-4 text-sm text-emerald-600">{message}</p> : null}
           {error ? <p className="mt-4 text-sm text-rose-600">{error}</p> : null}
         </CardContent>
       </Card>

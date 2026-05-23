@@ -12,7 +12,28 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { api, isApiConfigured } from "../lib/api";
 import type { Material, StockItem, Supplier } from "../../shared/types";
 
-const isFabricMaterialCategory = (category?: Material["category"] | null) => category === "Fabric Material";
+const toMillimeterInputValue = (value: number | string | null | undefined) => {
+  if (value === null || value === undefined || value === "") {
+    return "";
+  }
+
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    return "";
+  }
+
+  const millimeters = parsed * 1000;
+  return Number.isInteger(millimeters) ? String(millimeters) : millimeters.toFixed(2).replace(/\.?0+$/, "");
+};
+
+const numberOrNullMillimeterInput = (value: string) => {
+  if (value.trim() === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed / 1000 : null;
+};
 
 type StockForm = Omit<
   StockItem,
@@ -23,11 +44,13 @@ type StockForm = Omit<
   | "rollWidthM"
   | "rollLengthM"
   | "unitCostUsdPerM2"
+  | "landedCostEgp"
 > & {
   unitCount: string;
   rollWidthM: string;
   rollLengthM: string;
   unitCostUsdPerM2: string;
+  landedCostEgp: string;
 };
 
 const initialForm: StockForm = {
@@ -39,6 +62,7 @@ const initialForm: StockForm = {
   rollWidthM: "",
   rollLengthM: "",
   unitCostUsdPerM2: "",
+  landedCostEgp: "",
   active: true,
 };
 
@@ -48,9 +72,10 @@ const toForm = (record: StockItem): StockForm => ({
   supplierId: record.supplierId,
   materialId: record.materialId,
   unitCount: record.unitCount?.toString() ?? "",
-  rollWidthM: record.rollWidthM?.toString() ?? "",
-  rollLengthM: record.rollLengthM?.toString() ?? "",
+  rollWidthM: toMillimeterInputValue(record.rollWidthM),
+  rollLengthM: toMillimeterInputValue(record.rollLengthM),
   unitCostUsdPerM2: record.unitCostUsdPerM2?.toString() ?? "",
+  landedCostEgp: record.landedCostEgp?.toString() ?? "",
   active: record.active,
 });
 
@@ -97,13 +122,6 @@ export const StockPage = () => {
     () => Object.fromEntries(materials.map((material) => [material.materialId, material.materialName])),
     [materials],
   );
-  const materialCategoryMap = useMemo(
-    () => Object.fromEntries(materials.map((material) => [material.materialId, material.category])),
-    [materials],
-  );
-  const selectedMaterial = materials.find((material) => material.materialId === form.materialId) ?? null;
-  const isFabricMaterial = isFabricMaterialCategory(selectedMaterial?.category);
-
   const filtered = useMemo(
     () =>
       records.filter((record) => {
@@ -117,6 +135,7 @@ export const StockPage = () => {
           record.rollWidthM?.toString() ?? "",
           record.rollLengthM?.toString() ?? "",
           record.unitCostUsdPerM2?.toString() ?? "",
+          record.landedCostEgp?.toString() ?? "",
         ]
           .join(" ")
           .toLowerCase()
@@ -142,10 +161,11 @@ export const StockPage = () => {
       supplierId: form.supplierId,
       materialId: form.materialId,
       unitCount: form.unitCount.trim() === "" ? null : Number(form.unitCount),
-      rollWidthM: isFabricMaterial && form.rollWidthM.trim() !== "" ? Number(form.rollWidthM) : null,
-      rollLengthM: isFabricMaterial && form.rollLengthM.trim() !== "" ? Number(form.rollLengthM) : null,
+      rollWidthM: numberOrNullMillimeterInput(form.rollWidthM),
+      rollLengthM: numberOrNullMillimeterInput(form.rollLengthM),
       unitCostUsdPerM2:
         form.unitCostUsdPerM2.trim() === "" ? null : Number(form.unitCostUsdPerM2),
+      landedCostEgp: form.landedCostEgp.trim() === "" ? null : Number(form.landedCostEgp),
       active: form.active,
       createdAt: "",
       updatedAt: "",
@@ -210,9 +230,10 @@ export const StockPage = () => {
                   <TableHead>Stock Item</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead>Material</TableHead>
-                  <TableHead>Roll Width (m)</TableHead>
-                  <TableHead>Roll Length (m)</TableHead>
+                  <TableHead>Roll Width (mm)</TableHead>
+                  <TableHead>Roll Length (mm)</TableHead>
                   <TableHead>Cost</TableHead>
+                  <TableHead>Landing Cost EGP / m²</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -226,15 +247,14 @@ export const StockPage = () => {
                     </TableCell>
                     <TableCell>{supplierMap[record.supplierId] ?? record.supplierId ?? "-"}</TableCell>
                     <TableCell>{materialMap[record.materialId] ?? record.materialId ?? "-"}</TableCell>
-                    <TableCell>{isFabricMaterialCategory(materialCategoryMap[record.materialId]) ? (record.rollWidthM ?? "-") : "-"}</TableCell>
-                    <TableCell>{isFabricMaterialCategory(materialCategoryMap[record.materialId]) ? (record.rollLengthM ?? "-") : "-"}</TableCell>
+                    <TableCell>{toMillimeterInputValue(record.rollWidthM) || "-"}</TableCell>
+                    <TableCell>{toMillimeterInputValue(record.rollLengthM) || "-"}</TableCell>
                     <TableCell>
                       {record.unitCostUsdPerM2 !== null
-                        ? isFabricMaterialCategory(materialCategoryMap[record.materialId])
-                          ? `${record.unitCostUsdPerM2.toFixed(3)} USD/m²`
-                          : `${record.unitCostUsdPerM2.toFixed(2)} EGP/bag`
+                        ? `${record.unitCostUsdPerM2.toFixed(3)} USD/m²`
                         : "-"}
                     </TableCell>
+                    <TableCell>{record.landedCostEgp !== null ? `${record.landedCostEgp.toFixed(2)} EGP` : "-"}</TableCell>
                     <TableCell><StatusBadge active={record.active} /></TableCell>
                     <TableCell className="space-x-2">
                       <Button
@@ -265,7 +285,7 @@ export const StockPage = () => {
         open={open}
         onClose={() => setOpen(false)}
         title={editing ? "Edit In Stock Item" : "Add In Stock Item"}
-        description="Select the supplier and material, then capture dimensions for fabric materials or direct bag cost for other materials."
+        description="Select the supplier and material, then capture roll dimensions and stock cost inputs."
       >
         <form className="grid gap-5 md:grid-cols-2" onSubmit={submit}>
           <label className="space-y-2 text-sm font-medium text-slate-700">
@@ -291,14 +311,9 @@ export const StockPage = () => {
               onChange={(event) =>
                 setForm((current) => {
                   const nextMaterialId = event.target.value;
-                  const nextMaterial = materials.find((material) => material.materialId === nextMaterialId);
-                  const nextIsFabric = isFabricMaterialCategory(nextMaterial?.category);
-
                   return {
                     ...current,
                     materialId: nextMaterialId,
-                    rollWidthM: nextIsFabric ? current.rollWidthM : "",
-                    rollLengthM: nextIsFabric ? current.rollLengthM : "",
                   };
                 })
               }
@@ -311,25 +326,31 @@ export const StockPage = () => {
               ))}
             </Select>
           </label>
-          {isFabricMaterial ? (
-            <>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Roll Width (m)
-                <Input required inputMode="decimal" value={form.rollWidthM} onChange={(event) => setForm((current) => ({ ...current, rollWidthM: event.target.value }))} />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Roll Length (m)
-                <Input required inputMode="decimal" value={form.rollLengthM} onChange={(event) => setForm((current) => ({ ...current, rollLengthM: event.target.value }))} />
-              </label>
-            </>
-          ) : null}
           <label className="space-y-2 text-sm font-medium text-slate-700">
-            {isFabricMaterial ? "Unit Cost USD / m²" : "Cost per Bag (EGP)"}
+            Roll Width (mm)
+            <Input required inputMode="decimal" value={form.rollWidthM} onChange={(event) => setForm((current) => ({ ...current, rollWidthM: event.target.value }))} />
+          </label>
+          <label className="space-y-2 text-sm font-medium text-slate-700">
+            Roll Length (mm)
+            <Input required inputMode="decimal" value={form.rollLengthM} onChange={(event) => setForm((current) => ({ ...current, rollLengthM: event.target.value }))} />
+          </label>
+          <label className="space-y-2 text-sm font-medium text-slate-700">
+            Unit Cost USD / m²
             <Input
               inputMode="decimal"
               value={form.unitCostUsdPerM2}
               onChange={(event) =>
                 setForm((current) => ({ ...current, unitCostUsdPerM2: event.target.value }))
+              }
+            />
+          </label>
+          <label className="space-y-2 text-sm font-medium text-slate-700">
+            Landing Cost EGP / m²
+            <Input
+              inputMode="decimal"
+              value={form.landedCostEgp}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, landedCostEgp: event.target.value }))
               }
             />
           </label>
