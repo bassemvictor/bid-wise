@@ -146,22 +146,22 @@ const lineDefinitions: Array<Omit<CostLine, "costPerBag"> & { costPerBag?: numbe
   {
     code: "F",
     category: "Factory Overhead",
-    description: "Weighted factory overhead calculated from the editable product rows.",
-    calculationBasis: "Weighted average of product overhead rows",
+    description: "Factory overhead total across products divided by total bags.",
+    calculationBasis: "Sum of product factory overhead totals ÷ total bag count",
     editable: false,
   },
   {
     code: "G",
     category: "Manufacturing Overhead",
-    description: "Weighted manufacturing overhead calculated from the editable product rows.",
-    calculationBasis: "Weighted average of product overhead rows",
+    description: "Manufacturing overhead total across products divided by total bags.",
+    calculationBasis: "Sum of product manufacturing overhead totals ÷ total bag count",
     editable: false,
   },
   {
     code: "G2",
     category: "Management Overhead",
-    description: "Weighted management overhead calculated from the editable product rows.",
-    calculationBasis: "Weighted average of product overhead rows",
+    description: "Management overhead total across products divided by total bags.",
+    calculationBasis: "Sum of product management overhead totals ÷ total bag count",
     editable: false,
   },
   {
@@ -815,6 +815,14 @@ export const CostBuildUpPage = () => {
     [materialSourcing, exchangeRate, currencySafetyFactorPercent, materials],
   );
   const productSnapshots = productConfiguration?.productSnapshots ?? [];
+  const orderQuantity = useMemo(() => {
+    const totalProductQuantity = productSnapshots.reduce(
+      (sum, product) => sum + (product.requestedQuantity ?? 0),
+      0,
+    );
+
+    return totalProductQuantity > 0 ? totalProductQuantity : quantity;
+  }, [productSnapshots, quantity]);
 
   useEffect(() => {
     setCollapsedProducts(
@@ -867,7 +875,32 @@ export const CostBuildUpPage = () => {
     [materialSourcing?.componentSelections, materials, productConfiguration],
   );
 
-  const calculatedLines = useMemo(() => {
+  const sourcingBreakdown = materialSourcing?.componentSelections ?? [];
+
+  const productCards = useMemo(
+    () =>
+      productSnapshots.map((product) => ({
+        productId: product.productId,
+        productName: product.productName || "Untitled product",
+        productType: product.productType,
+        requestedQuantity: product.requestedQuantity,
+        isOutOfSync: productSyncStatuses.get(product.productId)?.isOutOfSync ?? false,
+        componentsCount: product.components.length,
+        bagBodyCount: product.components.filter(
+          (component) =>
+          component.componentType.trim().toLowerCase() === "bag" ||
+          component.componentName.trim().toLowerCase() === "bag" ||
+          component.componentType.trim().toLowerCase() === "bag body" ||
+          component.componentName.trim().toLowerCase() === "bag body",
+        ).length,
+        factoryOverheadPerBag: product.factoryOverheadPerBag ?? null,
+        manufacturingOverheadPerBag: product.manufacturingOverheadPerBag ?? null,
+        managementOverheadPerBag: product.managementOverheadPerBag ?? null,
+      })),
+    [productSnapshots, productSyncStatuses],
+  );
+
+  const productCostCards = useMemo(() => {
     const editableByCode = new Map(
       form.costLines.map((line) => [line.code, { ...line, costPerBag: numberOrNull(line.costPerBag) }]),
     );
@@ -876,99 +909,128 @@ export const CostBuildUpPage = () => {
     const read = (code: string) => readNullable(code) ?? 0;
     const salesPercent = numberOrNull(form.salesPercent) ?? 0;
     const salesFixedAmount = numberOrNull(form.salesFixedAmount) ?? 0;
-    const resolveWeightedProductOverhead = (
-      selector: (
-        product: (typeof productOverheadValues)[number],
-      ) => number | null,
-      fallbackCode: "F" | "G" | "G2",
-    ) => {
-      let weightedTotal = 0;
-      let totalQuantity = 0;
+    const packagingCostPerBag = read("D");
+    const rushCostPerBag = read("I_RUSH");
+    const transportationCostPerBag = read("J");
+    const installationCostPerBag = read("K");
+    const totalBags = orderQuantity !== null && Number.isFinite(orderQuantity) && orderQuantity > 0 ? orderQuantity : 0;
 
-      productOverheadValues.forEach((product) => {
-        const quantity = product.requestedQuantity ?? 0;
-        const value = selector(product);
-        if (quantity > 0 && value !== null) {
-          weightedTotal += value * quantity;
-          totalQuantity += quantity;
+    const productSummaries = productCards.map((product) => {
+      const requestedQuantityValue =
+        product.requestedQuantity !== null &&
+        product.requestedQuantity !== undefined &&
+        Number.isFinite(product.requestedQuantity) &&
+        product.requestedQuantity > 0
+          ? product.requestedQuantity
+          : 0;
+      const sourcingLines = sourcingBreakdown.filter((selection) => selection.productId === product.productId);
+
+      let fabricMaterialTotal = 0;
+      let ringMaterialTotal = 0;
+      let threadMaterialTotal = 0;
+
+      sourcingLines.forEach((selection) => {
+        const requestedQuantity = selection.requestedQuantity ?? product.requestedQuantity ?? null;
+        const componentTotal =
+          selection.totalMaterialCostEgp ??
+          (selection.materialCostPerBagEgp !== null &&
+          selection.materialCostPerBagEgp !== undefined &&
+          requestedQuantity !== null &&
+          requestedQuantity !== undefined
+            ? selection.materialCostPerBagEgp * requestedQuantity
+            : 0);
+        const category = resolveMaterialCategoryForSelection(selection, materials);
+
+        if (isFabricMaterialCategory(category)) {
+          fabricMaterialTotal += componentTotal;
+        } else if (isRingMaterialCategory(category)) {
+          ringMaterialTotal += componentTotal;
+        } else if (isThreadingMaterialCategory(category)) {
+          threadMaterialTotal += componentTotal;
         }
       });
 
-      if (totalQuantity > 0) {
-        return weightedTotal / totalQuantity;
-      }
-
-      return readNullable(fallbackCode);
-    };
-
-    const fabricMaterialCost = materialLineOverrides.A ?? 0;
-    const ringMaterialCost = materialLineOverrides.B ?? 0;
-    const threadingMaterialCost = materialLineOverrides.C ?? 0;
-    const packagingMaterialCost = read("D");
-    const factoryOverheadPerBag = resolveWeightedProductOverhead(
-      (product) => product.factoryOverheadPerBag,
-      "F",
-    );
-    const manufacturingOverheadPerBag = resolveWeightedProductOverhead(
-      (product) => product.manufacturingOverheadPerBag,
-      "G",
-    );
-    const managementOverheadPerBag = resolveWeightedProductOverhead(
-      (product) => product.managementOverheadPerBag,
-      "G2",
-    );
-    const materialCostPerBag =
-      fabricMaterialCost + ringMaterialCost + threadingMaterialCost + packagingMaterialCost;
-    const salesBasePerBag =
-      materialCostPerBag +
-      (factoryOverheadPerBag ?? 0) +
-      (manufacturingOverheadPerBag ?? 0) +
-      (managementOverheadPerBag ?? 0) +
-      read("I_RUSH") +
-      read("J") +
-      read("K");
-    const salesCostPerBag =
-      form.salesInputMode === "percent" ? salesBasePerBag * (salesPercent / 100) : salesFixedAmount;
-    const operatingCostPerBag =
-      (factoryOverheadPerBag ?? 0) +
-      (manufacturingOverheadPerBag ?? 0) +
-      (managementOverheadPerBag ?? 0) +
-      salesCostPerBag;
-    const additionalCostPerBag = read("I_RUSH") + read("J") + read("K");
-    const totalCostPricePerBag = materialCostPerBag + operatingCostPerBag + additionalCostPerBag;
-    const totalCostPriceForOrder =
-      quantity !== null && Number.isFinite(quantity) ? totalCostPricePerBag * quantity : null;
-
-    return form.costLines.map((line) => {
-      let value = numberOrNull(line.costPerBag);
-
-      if (line.code === "A") {
-        value = materialLineOverrides.A;
-      } else if (line.code === "B") {
-        value = materialLineOverrides.B;
-      } else if (line.code === "C") {
-        value = materialLineOverrides.C;
-      } else if (line.code === "F") {
-        value = factoryOverheadPerBag;
-      } else if (line.code === "G") {
-        value = manufacturingOverheadPerBag;
-      } else if (line.code === "G2") {
-        value = managementOverheadPerBag;
-      } else if (line.code === "H") {
-        value = salesCostPerBag;
-      } else if (line.code === "I_TOTAL") {
-        value = materialCostPerBag;
-      } else if (line.code === "II_TOTAL") {
-        value = operatingCostPerBag;
-      } else if (line.code === "III_TOTAL") {
-        value = additionalCostPerBag;
-      }
+      const packagingTotal = packagingCostPerBag * requestedQuantityValue;
+      const factoryOverheadPerBag =
+        productOverheadValues.find((item) => item.productId === product.productId)?.factoryOverheadPerBag ??
+        readNullable("F") ??
+        0;
+      const manufacturingOverheadPerBag =
+        productOverheadValues.find((item) => item.productId === product.productId)?.manufacturingOverheadPerBag ??
+        readNullable("G") ??
+        0;
+      const managementOverheadPerBag =
+        productOverheadValues.find((item) => item.productId === product.productId)?.managementOverheadPerBag ??
+        readNullable("G2") ??
+        0;
+      const factoryOverheadTotal = factoryOverheadPerBag * requestedQuantityValue;
+      const manufacturingOverheadTotal = manufacturingOverheadPerBag * requestedQuantityValue;
+      const managementOverheadTotal = managementOverheadPerBag * requestedQuantityValue;
+      const rushTotal = rushCostPerBag * requestedQuantityValue;
+      const transportationTotal = transportationCostPerBag * requestedQuantityValue;
+      const installationTotal = installationCostPerBag * requestedQuantityValue;
+      const directMaterialTotal = fabricMaterialTotal + ringMaterialTotal + threadMaterialTotal;
+      const materialTotal = directMaterialTotal + packagingTotal;
+      const additionalTotal = rushTotal + transportationTotal + installationTotal;
+      const salesBasisTotal = materialTotal + manufacturingOverheadTotal + additionalTotal;
 
       return {
-        ...line,
-        costPerBag: value,
-        percentOfTotal:
-          totalCostPricePerBag > 0 && value !== null ? (value / totalCostPricePerBag) * 100 : 0,
+        ...product,
+        requestedQuantityValue,
+        fabricMaterialTotal,
+        ringMaterialTotal,
+        threadMaterialTotal,
+        directMaterialTotal,
+        packagingTotal,
+        materialTotal,
+        factoryOverheadTotal,
+        manufacturingOverheadTotal,
+        managementOverheadTotal,
+        rushTotal,
+        transportationTotal,
+        installationTotal,
+        additionalTotal,
+        salesBasisTotal,
+        overheads: productOverheadValues.find((item) => item.productId === product.productId) ?? null,
+      };
+    });
+
+    const totalSalesBasis = productSummaries.reduce((sum, product) => sum + product.salesBasisTotal, 0);
+    const totalSalesAmount =
+      form.salesInputMode === "percent" ? totalSalesBasis * (salesPercent / 100) : salesFixedAmount;
+
+    return productSummaries.map((product) => {
+      const salesTotal =
+        form.salesInputMode === "percent"
+          ? totalSalesBasis > 0
+            ? totalSalesAmount * (product.salesBasisTotal / totalSalesBasis)
+            : 0
+          : totalBags > 0
+            ? totalSalesAmount * (product.requestedQuantityValue / totalBags)
+            : 0;
+      const operatingTotal =
+        product.factoryOverheadTotal +
+        product.manufacturingOverheadTotal +
+        product.managementOverheadTotal +
+        salesTotal;
+      const totalCost = product.materialTotal + operatingTotal + product.additionalTotal;
+      const materialPerBag =
+        product.requestedQuantityValue > 0 ? product.materialTotal / product.requestedQuantityValue : 0;
+      const operatingPerBag =
+        product.requestedQuantityValue > 0 ? operatingTotal / product.requestedQuantityValue : 0;
+      const additionalPerBag =
+        product.requestedQuantityValue > 0 ? product.additionalTotal / product.requestedQuantityValue : 0;
+      const totalPerBag = product.requestedQuantityValue > 0 ? totalCost / product.requestedQuantityValue : 0;
+
+      return {
+        ...product,
+        salesTotal,
+        operatingTotal,
+        totalCost,
+        materialPerBag,
+        operatingPerBag,
+        additionalPerBag,
+        totalPerBag,
       };
     });
   }, [
@@ -976,9 +1038,120 @@ export const CostBuildUpPage = () => {
     form.salesFixedAmount,
     form.salesInputMode,
     form.salesPercent,
-    materialLineOverrides,
+    materials,
+    orderQuantity,
+    productCards,
     productOverheadValues,
-    quantity,
+    sourcingBreakdown,
+  ]);
+
+  const tenderCostSummary = useMemo(() => {
+    const totalQuantity =
+      orderQuantity !== null && Number.isFinite(orderQuantity) && orderQuantity > 0 ? orderQuantity : null;
+    const fabricMaterialTotal = productCostCards.reduce((sum, product) => sum + product.fabricMaterialTotal, 0);
+    const ringMaterialTotal = productCostCards.reduce((sum, product) => sum + product.ringMaterialTotal, 0);
+    const threadMaterialTotal = productCostCards.reduce((sum, product) => sum + product.threadMaterialTotal, 0);
+    const packagingTotal = productCostCards.reduce((sum, product) => sum + product.packagingTotal, 0);
+    const materialTotal = productCostCards.reduce((sum, product) => sum + product.materialTotal, 0);
+    const factoryOverheadTotal = productCostCards.reduce((sum, product) => sum + product.factoryOverheadTotal, 0);
+    const manufacturingOverheadTotal = productCostCards.reduce(
+      (sum, product) => sum + product.manufacturingOverheadTotal,
+      0,
+    );
+    const managementOverheadTotal = productCostCards.reduce((sum, product) => sum + product.managementOverheadTotal, 0);
+    const salesTotal = productCostCards.reduce((sum, product) => sum + product.salesTotal, 0);
+    const operatingTotal = productCostCards.reduce((sum, product) => sum + product.operatingTotal, 0);
+    const rushTotal = productCostCards.reduce((sum, product) => sum + product.rushTotal, 0);
+    const transportationTotal = productCostCards.reduce((sum, product) => sum + product.transportationTotal, 0);
+    const installationTotal = productCostCards.reduce((sum, product) => sum + product.installationTotal, 0);
+    const additionalTotal = productCostCards.reduce((sum, product) => sum + product.additionalTotal, 0);
+    const totalCost = productCostCards.reduce((sum, product) => sum + product.totalCost, 0);
+    const salesBasisTotal = productCostCards.reduce((sum, product) => sum + product.salesBasisTotal, 0);
+    const perBag = (value: number, fallback: number | null = null) =>
+      totalQuantity && totalQuantity > 0 ? value / totalQuantity : fallback;
+
+    return {
+      totalQuantity,
+      fabricMaterialTotal,
+      ringMaterialTotal,
+      threadMaterialTotal,
+      packagingTotal,
+      materialTotal,
+      factoryOverheadTotal,
+      manufacturingOverheadTotal,
+      managementOverheadTotal,
+      salesTotal,
+      operatingTotal,
+      rushTotal,
+      transportationTotal,
+      installationTotal,
+      additionalTotal,
+      salesBasisTotal,
+      totalCost,
+      materialPerBag: perBag(materialTotal),
+      operatingPerBag: perBag(operatingTotal),
+      additionalPerBag: perBag(additionalTotal),
+      totalPerBag: perBag(totalCost),
+    };
+  }, [orderQuantity, productCostCards]);
+
+  const calculatedLines = useMemo(() => {
+    const editableByCode = new Map(
+      form.costLines.map((line) => [line.code, { ...line, costPerBag: numberOrNull(line.costPerBag) }]),
+    );
+
+    const readNullable = (code: string) => editableByCode.get(code)?.costPerBag ?? null;
+    const totalQuantity = tenderCostSummary.totalQuantity;
+    const perBag = (value: number, fallback: number | null = null) =>
+      totalQuantity && totalQuantity > 0 ? value / totalQuantity : fallback;
+    const totalCostPricePerBag = perBag(tenderCostSummary.totalCost);
+
+    return form.costLines.map((line) => {
+      let value = numberOrNull(line.costPerBag);
+
+      if (line.code === "A") {
+        value = perBag(tenderCostSummary.fabricMaterialTotal, materialLineOverrides.A);
+      } else if (line.code === "B") {
+        value = perBag(tenderCostSummary.ringMaterialTotal, materialLineOverrides.B);
+      } else if (line.code === "C") {
+        value = perBag(tenderCostSummary.threadMaterialTotal, materialLineOverrides.C);
+      } else if (line.code === "D") {
+        value = perBag(tenderCostSummary.packagingTotal, readNullable("D"));
+      } else if (line.code === "F") {
+        value = perBag(tenderCostSummary.factoryOverheadTotal, readNullable("F"));
+      } else if (line.code === "G") {
+        value = perBag(tenderCostSummary.manufacturingOverheadTotal, readNullable("G"));
+      } else if (line.code === "G2") {
+        value = perBag(tenderCostSummary.managementOverheadTotal, readNullable("G2"));
+      } else if (line.code === "H") {
+        value = perBag(tenderCostSummary.salesTotal, readNullable("H"));
+      } else if (line.code === "I_RUSH") {
+        value = perBag(tenderCostSummary.rushTotal, readNullable("I_RUSH"));
+      } else if (line.code === "J") {
+        value = perBag(tenderCostSummary.transportationTotal, readNullable("J"));
+      } else if (line.code === "K") {
+        value = perBag(tenderCostSummary.installationTotal, readNullable("K"));
+      } else if (line.code === "I_TOTAL") {
+        value = tenderCostSummary.materialPerBag;
+      } else if (line.code === "II_TOTAL") {
+        value = tenderCostSummary.operatingPerBag;
+      } else if (line.code === "III_TOTAL") {
+        value = tenderCostSummary.additionalPerBag;
+      }
+
+      return {
+        ...line,
+        costPerBag: value,
+        percentOfTotal:
+          totalCostPricePerBag !== null && totalCostPricePerBag > 0 && value !== null
+            ? (value / totalCostPricePerBag) * 100
+            : 0,
+      };
+    });
+  }, [
+    form.costLines,
+    materialLineOverrides,
+    tenderCostSummary,
   ]);
 
   const currentLineValues = useMemo(
@@ -988,25 +1161,14 @@ export const CostBuildUpPage = () => {
   );
 
   const totals = useMemo(() => {
-    const findValue = (code: string) =>
-      calculatedLines.find((line) => line.code === code)?.costPerBag ?? null;
-
-    const totalMaterialCostPerBag = findValue("I_TOTAL");
-    const totalOperatingCostPerBag = findValue("II_TOTAL");
-    const totalAdditionalCostPerBag = findValue("III_TOTAL");
-    const totalCostPricePerBag =
-      (totalMaterialCostPerBag ?? 0) + (totalOperatingCostPerBag ?? 0) + (totalAdditionalCostPerBag ?? 0);
-    const totalCostPriceForOrder =
-      quantity !== null && Number.isFinite(quantity) ? totalCostPricePerBag * quantity : null;
-
     return {
-      totalMaterialCostPerBag,
-      totalOperatingCostPerBag,
-      totalAdditionalCostPerBag,
-      totalCostPricePerBag,
-      totalCostPriceForOrder,
+      totalMaterialCostPerBag: tenderCostSummary.materialPerBag,
+      totalOperatingCostPerBag: tenderCostSummary.operatingPerBag,
+      totalAdditionalCostPerBag: tenderCostSummary.additionalPerBag,
+      totalCostPricePerBag: tenderCostSummary.totalPerBag,
+      totalCostPriceForOrder: tenderCostSummary.totalCost,
     };
-  }, [calculatedLines, quantity]);
+  }, [tenderCostSummary]);
 
   const tenderDefaultEffectiveExchangeRate =
     tender?.exchangeRate !== null &&
@@ -1016,40 +1178,11 @@ export const CostBuildUpPage = () => {
       ? tender.exchangeRate * (1 + tender.currencySafetyFactorPercent / 100)
       : null;
 
-  const salesSummary = useMemo(() => {
-    const overtimeCostPerBag = currentLineValues.get("I_RUSH") ?? 0;
-    const transportationCostPerBag = currentLineValues.get("J") ?? 0;
-    const installationCostPerBag = currentLineValues.get("K") ?? 0;
-    const fixedSalesAmount = numberOrNull(form.salesFixedAmount) ?? 0;
-    const salesPercent = numberOrNull(form.salesPercent) ?? 0;
-    const salesCostPerBag = currentLineValues.get("H") ?? 0;
-    const totalBeforeSalesPerBag =
-      (totals.totalMaterialCostPerBag ?? 0) +
-      ((currentLineValues.get("F") ?? 0) + (currentLineValues.get("G") ?? 0) + (currentLineValues.get("G2") ?? 0)) +
-      overtimeCostPerBag +
-      transportationCostPerBag +
-      installationCostPerBag;
-
-    return {
-      overtimeCostPerBag,
-      transportationCostPerBag,
-      installationCostPerBag,
-      fixedSalesAmount,
-      salesPercent,
-      salesCostPerBag,
-      totalBeforeSalesPerBag,
-      totalBeforeSalesOrder:
-        quantity !== null && Number.isFinite(quantity) ? totalBeforeSalesPerBag * quantity : null,
-    };
-  }, [currentLineValues, form.salesFixedAmount, form.salesPercent, quantity, totals.totalMaterialCostPerBag]);
-
   const chartData = [
     { name: "Material Cost", value: totals.totalMaterialCostPerBag ?? 0 },
     { name: "Operating Cost", value: totals.totalOperatingCostPerBag ?? 0 },
     { name: "Additional Cost", value: totals.totalAdditionalCostPerBag ?? 0 },
   ];
-
-  const sourcingBreakdown = materialSourcing?.componentSelections ?? [];
 
   const lineABreakdown = useMemo(() => {
     const components = sourcingBreakdown
@@ -1127,70 +1260,6 @@ export const CostBuildUpPage = () => {
     };
   }, [effectiveExchangeRate, materialSourcing, materials, sourcingBreakdown]);
 
-  const productCards = useMemo(
-    () =>
-      productSnapshots.map((product) => ({
-        productId: product.productId,
-        productName: product.productName || "Untitled product",
-        productType: product.productType,
-        requestedQuantity: product.requestedQuantity,
-        isOutOfSync: productSyncStatuses.get(product.productId)?.isOutOfSync ?? false,
-        componentsCount: product.components.length,
-        bagBodyCount: product.components.filter(
-          (component) =>
-          component.componentType.trim().toLowerCase() === "bag" ||
-          component.componentName.trim().toLowerCase() === "bag" ||
-          component.componentType.trim().toLowerCase() === "bag body" ||
-          component.componentName.trim().toLowerCase() === "bag body",
-        ).length,
-        factoryOverheadPerBag: product.factoryOverheadPerBag ?? null,
-        manufacturingOverheadPerBag: product.manufacturingOverheadPerBag ?? null,
-        managementOverheadPerBag: product.managementOverheadPerBag ?? null,
-      })),
-    [productSnapshots, productSyncStatuses],
-  );
-
-  const productCostCards = useMemo(
-    () =>
-      productCards.map((product) => {
-        const sourcingLines = sourcingBreakdown.filter((selection) => selection.productId === product.productId);
-        const requestedQuantity = product.requestedQuantity ?? null;
-        const sourcedMaterialTotal = sourcingLines.reduce(
-          (total, selection) => total + (selection.totalMaterialCostEgp ?? 0),
-          0,
-        );
-        const sourcedMaterialCostPerBag =
-          requestedQuantity && requestedQuantity > 0 ? sourcedMaterialTotal / requestedQuantity : null;
-
-        const packagingCost = currentLineValues.get("D") ?? 0;
-        const productOverheads = productOverheadValues.find((item) => item.productId === product.productId);
-        const factoryOverhead = productOverheads?.factoryOverheadPerBag ?? (currentLineValues.get("F") ?? 0);
-        const manufacturingOverhead =
-          productOverheads?.manufacturingOverheadPerBag ?? (currentLineValues.get("G") ?? 0);
-        const managementOverhead =
-          productOverheads?.managementOverheadPerBag ?? (currentLineValues.get("G2") ?? 0);
-        const salesCost = currentLineValues.get("H") ?? 0;
-        const rushCost = currentLineValues.get("I_RUSH") ?? 0;
-        const transportationCost = currentLineValues.get("J") ?? 0;
-        const installationCost = currentLineValues.get("K") ?? 0;
-
-        const materialPerBag = (sourcedMaterialCostPerBag ?? 0) + packagingCost;
-        const operatingPerBag =
-          factoryOverhead + manufacturingOverhead + managementOverhead + salesCost;
-        const additionalPerBag = rushCost + transportationCost + installationCost;
-        const totalPerBag = materialPerBag + operatingPerBag + additionalPerBag;
-
-        return {
-          ...product,
-          materialPerBag,
-          operatingPerBag,
-          additionalPerBag,
-          totalPerBag,
-        };
-      }),
-    [currentLineValues, productCards, productOverheadValues, sourcingBreakdown],
-  );
-
   const tenderMaterialTotalCost = useMemo(
     () => sourcingBreakdown.reduce((total, selection) => total + (selection.totalMaterialCostEgp ?? 0), 0),
     [sourcingBreakdown],
@@ -1263,16 +1332,9 @@ export const CostBuildUpPage = () => {
           product.requestedQuantity !== null && product.requestedQuantity !== undefined && product.requestedQuantity > 0
             ? accessoryMaterialTotalCost / product.requestedQuantity
             : null;
-        const overheads = productOverheadValues.find((item) => item.productId === product.productId);
         const costSummary = productCostCards.find((item) => item.productId === product.productId);
         const totalUnitCost = costSummary?.totalPerBag ?? productMaterialUnitCost;
-        const totalCost =
-          totalUnitCost !== null &&
-          product.requestedQuantity !== null &&
-          product.requestedQuantity !== undefined &&
-          product.requestedQuantity > 0
-            ? totalUnitCost * product.requestedQuantity
-            : productMaterialTotalCost;
+        const totalCost = costSummary?.totalCost ?? productMaterialTotalCost;
 
         return {
           ...product,
@@ -1283,7 +1345,7 @@ export const CostBuildUpPage = () => {
           bagMaterialTotalCost,
           accessoryMaterialUnitCost,
           accessoryMaterialTotalCost,
-          overheads,
+          overheads: costSummary?.overheads ?? null,
           materialPerBag: costSummary?.materialPerBag ?? productMaterialUnitCost ?? 0,
           operatingPerBag: costSummary?.operatingPerBag ?? 0,
           additionalPerBag: costSummary?.additionalPerBag ?? 0,
@@ -1291,19 +1353,51 @@ export const CostBuildUpPage = () => {
           totalCost,
         };
       }),
-    [productCards, productCostCards, productOverheadValues, productSnapshots, sourcingBreakdown],
+    [productCards, productCostCards, productSnapshots, sourcingBreakdown],
   );
 
   const tenderGridSummary = useMemo(() => {
-    const totalQuantity = materialBreakdownGrid.reduce((sum, product) => sum + (product.requestedQuantity ?? 0), 0);
-    const totalCost = materialBreakdownGrid.reduce((sum, product) => sum + (product.totalCost ?? 0), 0);
+    return {
+      totalQuantity: tenderCostSummary.totalQuantity ?? quantity,
+      unitCost: tenderCostSummary.totalPerBag,
+      totalCost: tenderCostSummary.totalCost,
+    };
+  }, [quantity, tenderCostSummary]);
+
+  const salesSummary = useMemo(() => {
+    const fixedSalesAmount = numberOrNull(form.salesFixedAmount) ?? 0;
+    const salesPercent = numberOrNull(form.salesPercent) ?? 0;
+    const totalBeforeSalesOrder = tenderCostSummary.totalCost - tenderCostSummary.salesTotal;
+    const totalBeforeSalesPerBag =
+      totalBeforeSalesOrder !== null &&
+      tenderCostSummary.totalQuantity !== null &&
+      Number.isFinite(tenderCostSummary.totalQuantity) &&
+      tenderCostSummary.totalQuantity > 0
+        ? totalBeforeSalesOrder / tenderCostSummary.totalQuantity
+        : null;
 
     return {
-      totalQuantity: totalQuantity > 0 ? totalQuantity : quantity,
-      unitCost: totalQuantity > 0 ? totalCost / totalQuantity : null,
-      totalCost,
+      overtimeCostPerBag:
+        tenderCostSummary.totalQuantity && tenderCostSummary.totalQuantity > 0
+          ? tenderCostSummary.rushTotal / tenderCostSummary.totalQuantity
+          : 0,
+      transportationCostPerBag:
+        tenderCostSummary.totalQuantity && tenderCostSummary.totalQuantity > 0
+          ? tenderCostSummary.transportationTotal / tenderCostSummary.totalQuantity
+          : 0,
+      installationCostPerBag:
+        tenderCostSummary.totalQuantity && tenderCostSummary.totalQuantity > 0
+          ? tenderCostSummary.installationTotal / tenderCostSummary.totalQuantity
+          : 0,
+      fixedSalesAmount,
+      salesPercent,
+      salesCostPerBag: tenderCostSummary.totalPerBag !== null && totalBeforeSalesPerBag !== null
+        ? tenderCostSummary.totalPerBag - totalBeforeSalesPerBag
+        : 0,
+      totalBeforeSalesPerBag,
+      totalBeforeSalesOrder,
     };
-  }, [materialBreakdownGrid, quantity]);
+  }, [form.salesFixedAmount, form.salesPercent, tenderCostSummary]);
 
   const costCompletion = useMemo(() => {
     const trackedValues = [
@@ -1378,8 +1472,8 @@ export const CostBuildUpPage = () => {
         {
           code: "H_FIXED",
           category: "Sales Input",
-          description: "Stored fixed sales amount input for cost build-up.",
-          calculationBasis: "Used when sales mode is fixed",
+          description: "Stored fixed sales amount input for the full tender cost build-up.",
+          calculationBasis: "Used when sales mode is fixed for the whole tender",
           costPerBag: form.salesInputMode === "fixed" ? numberOrNull(form.salesFixedAmount) : null,
           editable: true,
         },
@@ -1564,7 +1658,7 @@ export const CostBuildUpPage = () => {
                         <div>
                           <p className="text-sm font-semibold text-slate-900">Sales Input</p>
                           <p className="mt-1 text-sm text-muted-foreground">
-                            Use a percentage of the tender cost before sales, or set a fixed sales amount per bag.
+                            Use a percentage of the tender cost before sales, or set one fixed sales amount for the whole tender.
                           </p>
                         </div>
                         <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
@@ -1597,13 +1691,11 @@ export const CostBuildUpPage = () => {
                         <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-700">
                           <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Sales Basis</p>
                           <p className="mt-2 font-semibold text-slate-900">
-                            {form.salesInputMode === "percent"
-                              ? `${formatMetric(salesSummary.totalBeforeSalesOrder, 2, " EGP")} total tender cost before sales`
-                              : "Fixed amount entered directly per bag"}
+                            {`${formatMetric(salesSummary.totalBeforeSalesOrder, 2, " EGP")} total tender cost before sales`}
                           </p>
                         </div>
                         <label className="space-y-2 text-sm font-medium text-slate-700">
-                          {form.salesInputMode === "percent" ? "Sales Percentage %" : "Sales Fixed Amount / Bag"}
+                          {form.salesInputMode === "percent" ? "Sales Percentage %" : "Sales Fixed"}
                           <Input
                             inputMode="decimal"
                             value={form.salesInputMode === "percent" ? form.salesPercent : form.salesFixedAmount}

@@ -334,6 +334,9 @@ const normalizeCostBuildUpPayload = (
   alternativeId: payload.alternativeId?.trim() ?? "base",
   quantity: toNullableNumber(payload.quantity),
   currency: "EGP",
+  exchangeRate: toNullableNumber(payload.exchangeRate),
+  currencySafetyFactorPercent: toNullableNumber(payload.currencySafetyFactorPercent),
+  effectiveExchangeRate: toNullableNumber(payload.effectiveExchangeRate),
   costLines: Array.isArray(payload.costLines)
     ? payload.costLines.map((line) => ({
         code: line.code?.trim() ?? "",
@@ -628,14 +631,20 @@ const sanitizeScenarioAlternative = (item: StoredEntity | null): ScenarioAlterna
     scenarios: Array.isArray(item.scenarios)
       ? item.scenarios.map((scenario) => {
           const record = (scenario ?? {}) as Record<string, unknown>;
-          return {
-            scenarioId: String(record.scenarioId ?? crypto.randomUUID()),
-            label: String(record.label ?? ""),
-            profitPercent: toNullableNumber(record.profitPercent),
-            factorOfSafetyPercent: toNullableNumber(record.factorOfSafetyPercent),
-            customerCommissionPercent: toNullableNumber(record.customerCommissionPercent),
-            salesPersonCommissionPercent: toNullableNumber(record.salesPersonCommissionPercent),
-            pricePerBag: toNullableNumber(record.pricePerBag),
+        return {
+          scenarioId: String(record.scenarioId ?? crypto.randomUUID()),
+          label: String(record.label ?? ""),
+          profitPercent: toNullableNumber(record.profitPercent),
+          customerCommissionPercent: toNullableNumber(record.customerCommissionPercent),
+          salesPersonCommissionMode:
+            record.salesPersonCommissionMode === "fixed" ||
+            toNullableNumber(record.salesPersonCommissionFixedAmount) !== null
+              ? "fixed"
+              : "percent",
+          salesPersonCommissionPercent: toNullableNumber(record.salesPersonCommissionPercent),
+          salesPersonCommissionFixedAmount: toNullableNumber(record.salesPersonCommissionFixedAmount),
+          totalCost: toNullableNumber(record.totalCost),
+          pricePerBag: toNullableNumber(record.pricePerBag),
             totalPrice: toNullableNumber(record.totalPrice),
             notes: String(record.notes ?? ""),
           };
@@ -879,6 +888,9 @@ const sanitizeCostBuildUp = (item: StoredEntity | null): CostBuildUp | null => {
     alternativeId: String(item.alternativeId ?? "base"),
     quantity: toNullableNumber(item.quantity),
     currency: "EGP",
+    exchangeRate: toNullableNumber(item.exchangeRate),
+    currencySafetyFactorPercent: toNullableNumber(item.currencySafetyFactorPercent),
+    effectiveExchangeRate: toNullableNumber(item.effectiveExchangeRate),
     costLines: Array.isArray(item.costLines)
       ? item.costLines.map((line) => {
           const record = line as Record<string, unknown>;
@@ -1894,7 +1906,6 @@ const saveMaterialSourcing = async (
 
   await putRecord(context.tableName, item);
   await createAuditActivity(context, tenderId, "MATERIAL_SOURCE_SELECTION", existing, item);
-  await clearTenderWorkflowStage(context.tableName, tenderId, "COST_BUILDUP#base");
   await updateTenderStatus(context, tenderId, "MATERIAL_SOURCING");
   return sanitizeMaterialSourceSelection(item)!;
 };
@@ -2275,9 +2286,35 @@ const saveAlternatives = async (
     sectionConfig.alternatives.sk(tenderId),
   );
   const syncedPayload: ScenarioAlternative = {
-    ...payload,
+    entityType: "ScenarioAlternative",
+    tenantId: context.tenantId,
+    tenderId,
+    alternativeId: String(payload.alternativeId ?? "base"),
+    currency: "EGP",
     quantity: currentCostBuildUp.quantity,
     baseCostPerBag: currentCostBuildUp.totalCostPricePerBag,
+    scenarios: Array.isArray(payload.scenarios)
+      ? payload.scenarios.map((scenario) => ({
+        scenarioId: String(scenario.scenarioId ?? crypto.randomUUID()),
+        label: String(scenario.label ?? ""),
+        profitPercent: toNullableNumber(scenario.profitPercent),
+        customerCommissionPercent: toNullableNumber(scenario.customerCommissionPercent),
+        salesPersonCommissionMode:
+          scenario.salesPersonCommissionMode === "fixed" ||
+          toNullableNumber(scenario.salesPersonCommissionFixedAmount) !== null
+            ? "fixed"
+            : "percent",
+        salesPersonCommissionPercent: toNullableNumber(scenario.salesPersonCommissionPercent),
+        salesPersonCommissionFixedAmount: toNullableNumber(scenario.salesPersonCommissionFixedAmount),
+        totalCost: toNullableNumber(scenario.totalCost),
+        pricePerBag: toNullableNumber(scenario.pricePerBag),
+        totalPrice: toNullableNumber(scenario.totalPrice),
+        notes: String(scenario.notes ?? ""),
+        }))
+      : [],
+    notes: String(payload.notes ?? ""),
+    createdAt: payload.createdAt ?? "",
+    updatedAt: payload.updatedAt ?? "",
   };
   const item = await saveTenderSection(context, tenderId, "alternatives", syncedPayload);
   await createAuditActivity(context, tenderId, "ALTERNATIVES", existing, item);
@@ -2408,6 +2445,8 @@ const seedDevData = async (context: RequestContext) => {
     requestedMaterialNotes: "Development-only seeded record.",
     knownRequiredPrice: 112500,
     knownCompetitorPrice: 109950,
+    exchangeRate: null,
+    currencySafetyFactorPercent: null,
     customerCommissionPercent: 2.5,
     priceNegotiationExpected: true,
     requestedDeliveryTime: "4 weeks after confirmation",

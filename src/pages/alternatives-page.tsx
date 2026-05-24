@@ -11,6 +11,7 @@ import { Input } from "../components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Textarea } from "../components/ui/textarea";
 import { api, ApiError, isApiConfigured } from "../lib/api";
+import { cn } from "../lib/utils";
 import {
   confirmDiscardUnsavedChanges,
   useUnsavedChangesWarning,
@@ -27,9 +28,10 @@ type AlternativeScenarioForm = {
   scenarioId: string;
   label: string;
   profitPercent: string;
-  factorOfSafetyPercent: string;
   customerCommissionPercent: string;
+  salesPersonCommissionMode: "percent" | "fixed";
   salesPersonCommissionPercent: string;
+  salesPersonCommissionFixedAmount: string;
   pricePerBag: string;
   totalPrice: string;
   notes: string;
@@ -55,9 +57,10 @@ type CalculatedScenario = {
   scenarioId: string;
   label: string;
   profitPercent: number | null;
-  factorOfSafetyPercent: number | null;
   customerCommissionPercent: number | null;
+  salesPersonCommissionMode: "percent" | "fixed";
   salesPersonCommissionPercent: number | null;
+  salesPersonCommissionFixedAmount: number | null;
   markupPercent: number | null;
   marginPercent: number | null;
   pricePerBag: number | null;
@@ -101,19 +104,59 @@ const formatMetric = (value: number | null, digits = 2, suffix = "") =>
         maximumFractionDigits: digits,
       })}${suffix}`;
 
-const createScenario = (index: number): AlternativeScenarioForm => ({
+type SalesCommissionDefaults = {
+  salesPersonCommissionMode: "percent" | "fixed";
+  salesPersonCommissionPercent: string;
+  salesPersonCommissionFixedAmount: string;
+};
+
+const defaultSalesCommissionDefaults: SalesCommissionDefaults = {
+  salesPersonCommissionMode: "percent",
+  salesPersonCommissionPercent: "",
+  salesPersonCommissionFixedAmount: "",
+};
+
+const inferSalesCommissionDefaults = (costBuildUp: CostBuildUp | null): SalesCommissionDefaults => {
+  const percentValue = costBuildUp?.costLines.find((line) => line.code === "H_PERCENT")?.costPerBag;
+  const fixedValue = costBuildUp?.costLines.find((line) => line.code === "H_FIXED")?.costPerBag;
+
+  return {
+    salesPersonCommissionMode:
+      fixedValue !== null && fixedValue !== undefined ? "fixed" : "percent",
+    salesPersonCommissionPercent: percentValue?.toString() ?? "",
+    salesPersonCommissionFixedAmount: fixedValue?.toString() ?? "",
+  };
+};
+
+const formatSalesCommission = (scenario: {
+  salesPersonCommissionMode: "percent" | "fixed";
+  salesPersonCommissionPercent: number | null;
+  salesPersonCommissionFixedAmount: number | null;
+}) =>
+  scenario.salesPersonCommissionMode === "fixed"
+    ? formatMetric(scenario.salesPersonCommissionFixedAmount, 2, " EGP")
+    : formatMetric(scenario.salesPersonCommissionPercent, 2, "%");
+
+const createScenario = (
+  index: number,
+  defaults: SalesCommissionDefaults = defaultSalesCommissionDefaults,
+): AlternativeScenarioForm => ({
   scenarioId: crypto.randomUUID(),
   label: `Scenario ${index + 1}`,
   profitPercent: "",
-  factorOfSafetyPercent: "",
   customerCommissionPercent: "",
-  salesPersonCommissionPercent: "",
+  salesPersonCommissionMode: defaults.salesPersonCommissionMode,
+  salesPersonCommissionPercent: defaults.salesPersonCommissionPercent,
+  salesPersonCommissionFixedAmount: defaults.salesPersonCommissionFixedAmount,
   pricePerBag: "",
   totalPrice: "",
   notes: "",
 });
 
-const initialForm = (tenderId: string): AlternativesForm => ({
+const initialForm = (
+  tenderId: string,
+  salesDefaults: SalesCommissionDefaults = defaultSalesCommissionDefaults,
+): AlternativesForm => ({
   tenantId: "alimex-demo",
   tenderId,
   alternativeId: "base",
@@ -121,7 +164,7 @@ const initialForm = (tenderId: string): AlternativesForm => ({
   quantity: "",
   baseCostPerBag: "",
   notes: "",
-  scenarios: [createScenario(0)],
+  scenarios: [createScenario(0, salesDefaults)],
 });
 
 const toForm = (payload: ScenarioAlternative): AlternativesForm => ({
@@ -138,9 +181,10 @@ const toForm = (payload: ScenarioAlternative): AlternativesForm => ({
           scenarioId: scenario.scenarioId,
           label: scenario.label,
           profitPercent: scenario.profitPercent?.toString() ?? "",
-          factorOfSafetyPercent: scenario.factorOfSafetyPercent?.toString() ?? "",
           customerCommissionPercent: scenario.customerCommissionPercent?.toString() ?? "",
+          salesPersonCommissionMode: scenario.salesPersonCommissionMode ?? "percent",
           salesPersonCommissionPercent: scenario.salesPersonCommissionPercent?.toString() ?? "",
+          salesPersonCommissionFixedAmount: scenario.salesPersonCommissionFixedAmount?.toString() ?? "",
           pricePerBag: scenario.pricePerBag?.toString() ?? "",
           totalPrice: scenario.totalPrice?.toString() ?? "",
           notes: scenario.notes ?? "",
@@ -245,14 +289,6 @@ const ScenarioDrawer = ({
                 />
               </label>
               <label className="space-y-2 text-sm font-medium text-slate-700">
-                Factor of Safety %
-                <Input
-                  inputMode="decimal"
-                  value={draft.factorOfSafetyPercent}
-                  onChange={(event) => onUpdate({ factorOfSafetyPercent: event.target.value })}
-                />
-              </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
                 Customer Commission %
                 <Input
                   inputMode="decimal"
@@ -260,14 +296,50 @@ const ScenarioDrawer = ({
                   onChange={(event) => onUpdate({ customerCommissionPercent: event.target.value })}
                 />
               </label>
-              <label className="space-y-2 text-sm font-medium text-slate-700">
-                Sales Person Commission %
+              <div className="space-y-2 text-sm font-medium text-slate-700 sm:col-span-2">
+                <span>Sales Commission</span>
+                <div className="inline-flex rounded-xl border border-border bg-slate-50 p-1">
+                  <button
+                    className={cn(
+                      "rounded-lg px-3 py-1.5 text-sm transition-colors",
+                      draft.salesPersonCommissionMode === "percent"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-muted-foreground hover:text-slate-900",
+                    )}
+                    onClick={() => onUpdate({ salesPersonCommissionMode: "percent" })}
+                    type="button"
+                  >
+                    Percentage
+                  </button>
+                  <button
+                    className={cn(
+                      "rounded-lg px-3 py-1.5 text-sm transition-colors",
+                      draft.salesPersonCommissionMode === "fixed"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-muted-foreground hover:text-slate-900",
+                    )}
+                    onClick={() => onUpdate({ salesPersonCommissionMode: "fixed" })}
+                    type="button"
+                  >
+                    Fixed
+                  </button>
+                </div>
                 <Input
                   inputMode="decimal"
-                  value={draft.salesPersonCommissionPercent}
-                  onChange={(event) => onUpdate({ salesPersonCommissionPercent: event.target.value })}
+                  value={
+                    draft.salesPersonCommissionMode === "percent"
+                      ? draft.salesPersonCommissionPercent
+                      : draft.salesPersonCommissionFixedAmount
+                  }
+                  onChange={(event) =>
+                    onUpdate(
+                      draft.salesPersonCommissionMode === "percent"
+                        ? { salesPersonCommissionPercent: event.target.value }
+                        : { salesPersonCommissionFixedAmount: event.target.value },
+                    )
+                  }
                 />
-              </label>
+              </div>
               <label className="space-y-2 text-sm font-medium text-slate-700 sm:col-span-2">
                 Notes
                 <Textarea
@@ -394,8 +466,9 @@ export const AlternativesPage = () => {
           return;
         }
 
+        const salesDefaults = inferSalesCommissionDefaults(loadedCostBuildUp);
         const nextForm = syncFormWithCostBuildUp({
-          ...initialForm(tenderId),
+          ...initialForm(tenderId, salesDefaults),
           tenantId: loadedTender.tenantId,
         }, loadedCostBuildUp);
         setForm(nextForm);
@@ -420,12 +493,17 @@ export const AlternativesPage = () => {
 
   const quantity = numberOrNull(form.quantity);
   const baseCostPerBag = numberOrNull(form.baseCostPerBag);
-  const effectiveQuantity = costBuildUp?.quantity ?? quantity;
-  const effectiveBaseCostPerBag = costBuildUp?.totalCostPricePerBag ?? baseCostPerBag;
-  const productSnapshots = productConfiguration?.productSnapshots ?? [];
-  const sourcingBreakdown = materialSourcing?.componentSelections ?? [];
   const readCostLineValue = (code: string) =>
     costBuildUp?.costLines.find((line) => line.code === code)?.costPerBag ?? 0;
+  const effectiveQuantity = costBuildUp?.quantity ?? quantity;
+  const effectiveBaseCostPerBag = costBuildUp?.totalCostPricePerBag ?? baseCostPerBag;
+  const salesCommissionDefaults = useMemo(
+    () => inferSalesCommissionDefaults(costBuildUp),
+    [costBuildUp],
+  );
+  const includedSalesCostPerBag = readCostLineValue("H");
+  const productSnapshots = productConfiguration?.productSnapshots ?? [];
+  const sourcingBreakdown = materialSourcing?.componentSelections ?? [];
 
   const productCostCards = useMemo(
     () =>
@@ -522,22 +600,47 @@ export const AlternativesPage = () => {
     return total > 0 ? total : costBuildUp?.totalCostPriceForOrder ?? null;
   }, [costBuildUp?.totalCostPriceForOrder, productCostCards, productSnapshots, sourcingBreakdown]);
 
+  const baseIncludedSalesTotal = useMemo(
+    () =>
+      effectiveQuantity !== null && effectiveQuantity > 0
+        ? includedSalesCostPerBag * effectiveQuantity
+        : null,
+    [effectiveQuantity, includedSalesCostPerBag],
+  );
+
+  const salesCommissionBasisTotal = useMemo(() => {
+    if (effectiveQuantity === null || effectiveQuantity <= 0) {
+      return null;
+    }
+
+    const materialPerBag = readCostLineValue("I_TOTAL");
+    const manufacturingPerBag = readCostLineValue("G");
+    const additionalPerBag = readCostLineValue("III_TOTAL");
+
+    return (materialPerBag + manufacturingPerBag + additionalPerBag) * effectiveQuantity;
+  }, [costBuildUp?.costLines, effectiveQuantity]);
+
   const scenarios = useMemo(
     (): CalculatedScenario[] =>
       form.scenarios.map((scenario) => {
         const profitPercent = numberOrNull(scenario.profitPercent) ?? 0;
-        const factorOfSafetyPercent = numberOrNull(scenario.factorOfSafetyPercent) ?? 0;
         const customerCommissionPercent = numberOrNull(scenario.customerCommissionPercent) ?? 0;
         const salesPersonCommissionPercent = numberOrNull(scenario.salesPersonCommissionPercent) ?? 0;
-        const markupPercent =
-          profitPercent +
-          factorOfSafetyPercent +
-          customerCommissionPercent +
-          salesPersonCommissionPercent;
-        const totalCost = orderTotalCost;
+        const salesPersonCommissionFixedAmount = numberOrNull(scenario.salesPersonCommissionFixedAmount) ?? 0;
+        const percentageMarkup = profitPercent + customerCommissionPercent;
+        const salesCommissionAmount =
+          scenario.salesPersonCommissionMode === "fixed"
+            ? salesPersonCommissionFixedAmount
+            : salesCommissionBasisTotal !== null
+              ? salesCommissionBasisTotal * (salesPersonCommissionPercent / 100)
+              : null;
+        const totalCost =
+          orderTotalCost !== null
+            ? orderTotalCost - (baseIncludedSalesTotal ?? 0) + (salesCommissionAmount ?? (baseIncludedSalesTotal ?? 0))
+            : null;
         const totalPrice =
           totalCost !== null
-            ? totalCost * (1 + markupPercent / 100)
+            ? totalCost * (1 + percentageMarkup / 100)
             : null;
         const pricePerBag =
           totalPrice !== null && effectiveQuantity !== null && effectiveQuantity > 0
@@ -545,6 +648,10 @@ export const AlternativesPage = () => {
             : null;
         const profitValue =
           totalPrice !== null && totalCost !== null ? totalPrice - totalCost : null;
+        const markupPercent =
+          totalCost !== null && totalCost > 0 && totalPrice !== null
+            ? ((totalPrice - totalCost) / totalCost) * 100
+            : null;
         const marginPercent =
           pricePerBag !== null && effectiveBaseCostPerBag !== null && pricePerBag > 0
             ? ((pricePerBag - effectiveBaseCostPerBag) / pricePerBag) * 100
@@ -553,9 +660,10 @@ export const AlternativesPage = () => {
         return {
           ...scenario,
           profitPercent,
-          factorOfSafetyPercent,
           customerCommissionPercent,
+          salesPersonCommissionMode: scenario.salesPersonCommissionMode,
           salesPersonCommissionPercent,
+          salesPersonCommissionFixedAmount,
           markupPercent,
           marginPercent,
           pricePerBag,
@@ -564,7 +672,7 @@ export const AlternativesPage = () => {
           totalPrice,
         };
       }),
-    [effectiveBaseCostPerBag, effectiveQuantity, form.scenarios, orderTotalCost],
+    [baseIncludedSalesTotal, effectiveBaseCostPerBag, effectiveQuantity, form.scenarios, orderTotalCost, salesCommissionBasisTotal],
   );
 
   const activeDrawerScenario = useMemo(
@@ -603,7 +711,7 @@ export const AlternativesPage = () => {
   };
 
   const addScenario = () => {
-    const nextScenario = createScenario(form.scenarios.length);
+    const nextScenario = createScenario(form.scenarios.length, salesCommissionDefaults);
     setForm((current) => ({
       ...current,
       scenarios: [...current.scenarios, nextScenario],
@@ -637,9 +745,9 @@ export const AlternativesPage = () => {
       const isBlank =
         scenario &&
         !scenario.profitPercent.trim() &&
-        !scenario.factorOfSafetyPercent.trim() &&
         !scenario.customerCommissionPercent.trim() &&
         !scenario.salesPersonCommissionPercent.trim() &&
+        !scenario.salesPersonCommissionFixedAmount.trim() &&
         !scenario.notes.trim() &&
         scenario.label.trim() === `Scenario ${form.scenarios.length}`;
 
@@ -665,9 +773,11 @@ export const AlternativesPage = () => {
         scenarioId: scenario.scenarioId,
         label: scenario.label.trim(),
         profitPercent: scenario.profitPercent,
-        factorOfSafetyPercent: scenario.factorOfSafetyPercent,
         customerCommissionPercent: scenario.customerCommissionPercent,
+        salesPersonCommissionMode: scenario.salesPersonCommissionMode,
         salesPersonCommissionPercent: scenario.salesPersonCommissionPercent,
+        salesPersonCommissionFixedAmount: scenario.salesPersonCommissionFixedAmount,
+        totalCost: scenario.totalCost,
         pricePerBag: scenario.pricePerBag,
         totalPrice: scenario.totalPrice,
         notes: scenario.notes.trim(),
@@ -768,7 +878,7 @@ export const AlternativesPage = () => {
           <div>
             <CardTitle>Alternatives</CardTitle>
             <CardDescription>
-              Build one or more pricing scenarios from the current cost build-up using profit, safety, and commission assumptions.
+              Build one or more pricing scenarios from the current cost build-up using profit and commission assumptions.
             </CardDescription>
           </div>
           <Badge variant="default">ALTERNATIVES</Badge>
@@ -800,15 +910,14 @@ export const AlternativesPage = () => {
                 <CardContent>
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead>Scenario</TableHead>
-                        <TableHead>Profit %</TableHead>
-                        <TableHead>Safety %</TableHead>
-                        <TableHead>Customer Comm. %</TableHead>
-                        <TableHead>Sales Comm. %</TableHead>
-                        <TableHead>Order Cost</TableHead>
-                        <TableHead>Order Price</TableHead>
-                        <TableHead>Order Profit</TableHead>
+                        <TableRow>
+                          <TableHead>Scenario</TableHead>
+                          <TableHead>Profit %</TableHead>
+                          <TableHead>Customer Comm. %</TableHead>
+                          <TableHead>Sales Comm.</TableHead>
+                          <TableHead>Order Cost</TableHead>
+                          <TableHead>Order Price</TableHead>
+                          <TableHead>Order Profit</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -817,9 +926,8 @@ export const AlternativesPage = () => {
                         <TableRow key={scenario.scenarioId}>
                           <TableCell className="font-medium text-slate-900">{scenario.label || "Unnamed scenario"}</TableCell>
                           <TableCell>{formatMetric(scenario.profitPercent, 2, "%")}</TableCell>
-                          <TableCell>{formatMetric(scenario.factorOfSafetyPercent, 2, "%")}</TableCell>
                           <TableCell>{formatMetric(scenario.customerCommissionPercent, 2, "%")}</TableCell>
-                          <TableCell>{formatMetric(scenario.salesPersonCommissionPercent, 2, "%")}</TableCell>
+                          <TableCell>{formatSalesCommission(scenario)}</TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
                               <span>{formatMetric(scenario.totalCost, 2, " EGP")}</span>

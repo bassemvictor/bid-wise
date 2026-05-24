@@ -150,11 +150,21 @@ const resolvePricingChoice = (
     return null;
   }
 
+  const totalCost =
+    firstScenario.totalCost ??
+    (alternatives?.baseCostPerBag !== null &&
+    alternatives?.baseCostPerBag !== undefined &&
+    alternatives?.quantity !== null &&
+    alternatives?.quantity !== undefined
+      ? alternatives.baseCostPerBag * alternatives.quantity
+      : null);
   const markupPercent =
-    (firstScenario.profitPercent ?? 0) +
-    (firstScenario.factorOfSafetyPercent ?? 0) +
-    (firstScenario.customerCommissionPercent ?? 0) +
-    (firstScenario.salesPersonCommissionPercent ?? 0);
+    totalCost !== null &&
+    totalCost > 0 &&
+    firstScenario.totalPrice !== null &&
+    firstScenario.totalPrice !== undefined
+      ? ((firstScenario.totalPrice - totalCost) / totalCost) * 100
+      : null;
 
   return {
     label: firstScenario.label,

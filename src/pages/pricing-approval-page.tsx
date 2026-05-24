@@ -15,6 +15,7 @@ import { TenderWorkflowStepper } from "../components/tenders/tender-workflow-ste
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Textarea } from "../components/ui/textarea";
 import { api, ApiError, isApiConfigured } from "../lib/api";
 import {
@@ -28,9 +29,11 @@ type DecisionForm = {
   label: string;
   status: PricingApprovalDecisionStatus;
   profitPercent: number | null;
-  factorOfSafetyPercent: number | null;
   customerCommissionPercent: number | null;
+  salesPersonCommissionMode: "percent" | "fixed";
   salesPersonCommissionPercent: number | null;
+  salesPersonCommissionFixedAmount: number | null;
+  totalCost: number | null;
   pricePerBag: number | null;
   totalPrice: number | null;
   notes: string;
@@ -61,6 +64,18 @@ const formatPercent = (value: number | null | undefined) =>
         maximumFractionDigits: 2,
       })}%`;
 
+const formatSalesCommission = (decision: {
+  salesPersonCommissionMode: "percent" | "fixed";
+  salesPersonCommissionPercent: number | null;
+  salesPersonCommissionFixedAmount: number | null;
+}) =>
+  decision.salesPersonCommissionMode === "fixed"
+    ? formatCurrency(decision.salesPersonCommissionFixedAmount)
+    : formatPercent(decision.salesPersonCommissionPercent);
+
+const calculateProfit = (totalPrice: number | null, totalCost: number | null) =>
+  totalPrice !== null && totalCost !== null ? totalPrice - totalCost : null;
+
 const buildInitialForm = (
   tenderId: string,
   alternatives: ScenarioAlternative,
@@ -82,9 +97,11 @@ const buildInitialForm = (
         label: scenario.label,
         status: existing?.status ?? "pending",
         profitPercent: scenario.profitPercent,
-        factorOfSafetyPercent: scenario.factorOfSafetyPercent,
         customerCommissionPercent: scenario.customerCommissionPercent,
+        salesPersonCommissionMode: scenario.salesPersonCommissionMode ?? "percent",
         salesPersonCommissionPercent: scenario.salesPersonCommissionPercent,
+        salesPersonCommissionFixedAmount: scenario.salesPersonCommissionFixedAmount,
+        totalCost: scenario.totalCost,
         pricePerBag: scenario.pricePerBag,
         totalPrice: scenario.totalPrice,
         notes: existing?.notes ?? "",
@@ -534,113 +551,94 @@ export const PricingApprovalPage = () => {
                 </div>
               </div>
 
-              <div className="space-y-4">
-                {form.decisions.map((decision) => (
-                  <div key={decision.scenarioId} className="rounded-[1.35rem] border border-border bg-slate-50/70 p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-base font-semibold text-slate-900">{decision.label || "Unnamed scenario"}</h3>
-                          <Badge variant={getStatusTone(decision.status)}>{decision.status.toUpperCase()}</Badge>
-                        </div>
-                        <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
-                          <span>Total Cost: {formatCurrency(orderTotalCost)}</span>
-                          <span>Total Price: {formatCurrency(decision.totalPrice)}</span>
-                          <span>
-                            Profit: {formatCurrency(
-                              decision.totalPrice !== null && orderTotalCost !== null
-                                ? decision.totalPrice - orderTotalCost
-                                : null,
-                            )}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          className={cn("min-w-[7.5rem]", getStatusButtonClassName("pending", decision.status === "pending"))}
-                          onClick={() => updateDecision(decision.scenarioId, { status: "pending" })}
-                          type="button"
-                          variant="outline"
-                        >
-                          <Clock3 className="h-4 w-4" />
-                          Pending
-                        </Button>
-                        <Button
-                          className={cn("min-w-[7.5rem]", getStatusButtonClassName("approved", decision.status === "approved"))}
-                          onClick={() => updateDecision(decision.scenarioId, { status: "approved" })}
-                          type="button"
-                          variant="outline"
-                        >
-                          <CheckCircle2 className="h-4 w-4" />
-                          Approve
-                        </Button>
-                        <Button
-                          className={cn("min-w-[7.5rem]", getStatusButtonClassName("denied", decision.status === "denied"))}
-                          onClick={() => updateDecision(decision.scenarioId, { status: "denied" })}
-                          type="button"
-                          variant="outline"
-                        >
-                          <XCircle className="h-4 w-4" />
-                          Deny
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid gap-3 lg:grid-cols-[repeat(2,minmax(0,1fr))_minmax(16rem,1.4fr)]">
-                      <div className="rounded-2xl border border-border bg-white px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Profit %</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-900">{formatPercent(decision.profitPercent)}</p>
-                      </div>
-                      <div className="rounded-2xl border border-border bg-white px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Factor of Safety %</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-900">
-                          {formatPercent(decision.factorOfSafetyPercent)}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-border bg-white px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Customer Commission %</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-900">
-                          {formatPercent(decision.customerCommissionPercent)}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-border bg-white px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Sales Commission %</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-900">
-                          {formatPercent(decision.salesPersonCommissionPercent)}
-                        </p>
-                      </div>
-                      <div className="rounded-2xl border border-border bg-white px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Cost</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-900">{formatCurrency(orderTotalCost)}</p>
-                      </div>
-                      <div className="rounded-2xl border border-border bg-white px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Price</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-900">{formatCurrency(decision.totalPrice)}</p>
-                      </div>
-                      <div className="rounded-2xl border border-border bg-white px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Profit</p>
-                        <p className="mt-2 text-sm font-semibold text-slate-900">
-                          {formatCurrency(
-                            decision.totalPrice !== null && orderTotalCost !== null
-                              ? decision.totalPrice - orderTotalCost
-                              : null,
-                          )}
-                        </p>
-                      </div>
-                      <label className="space-y-2 text-sm font-medium text-slate-700 lg:col-span-2">
-                        Approval Notes
-                        <Textarea
-                          rows={2}
-                          value={decision.notes}
-                          onChange={(event) => updateDecision(decision.scenarioId, { notes: event.target.value })}
-                          placeholder="Reason for approval, hold, or rejection"
-                        />
-                      </label>
+              <Card className="border-border/80 shadow-none">
+                <CardHeader>
+                  <div className="grid w-full gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+                    <div>
+                      <CardTitle>Scenario Comparison</CardTitle>
+                      <CardDescription>
+                        Review the same scenario comparison used in Alternatives and add approval decisions with notes.
+                      </CardDescription>
                     </div>
                   </div>
-                ))}
-              </div>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Scenario</TableHead>
+                        <TableHead>Profit %</TableHead>
+                        <TableHead>Customer Comm. %</TableHead>
+                        <TableHead>Sales Comm.</TableHead>
+                        <TableHead>Order Cost</TableHead>
+                        <TableHead>Order Price</TableHead>
+                        <TableHead>Order Profit</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="min-w-[16rem]">Approval Notes</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {form.decisions.map((decision) => (
+                        <TableRow key={decision.scenarioId}>
+                          <TableCell className="font-medium text-slate-900">
+                            <div className="space-y-2">
+                              <span>{decision.label || "Unnamed scenario"}</span>
+                              <Badge variant={getStatusTone(decision.status)}>{decision.status.toUpperCase()}</Badge>
+                            </div>
+                          </TableCell>
+                          <TableCell>{formatPercent(decision.profitPercent)}</TableCell>
+                          <TableCell>{formatPercent(decision.customerCommissionPercent)}</TableCell>
+                          <TableCell>{formatSalesCommission(decision)}</TableCell>
+                          <TableCell>{formatCurrency(decision.totalCost ?? orderTotalCost)}</TableCell>
+                          <TableCell>{formatCurrency(decision.totalPrice)}</TableCell>
+                          <TableCell>
+                            {formatCurrency(calculateProfit(decision.totalPrice, decision.totalCost ?? orderTotalCost))}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex min-w-[8rem] flex-col gap-2">
+                              <Button
+                                className={cn("justify-start", getStatusButtonClassName("pending", decision.status === "pending"))}
+                                onClick={() => updateDecision(decision.scenarioId, { status: "pending" })}
+                                type="button"
+                                variant="outline"
+                              >
+                                <Clock3 className="h-4 w-4" />
+                                Pending
+                              </Button>
+                              <Button
+                                className={cn("justify-start", getStatusButtonClassName("approved", decision.status === "approved"))}
+                                onClick={() => updateDecision(decision.scenarioId, { status: "approved" })}
+                                type="button"
+                                variant="outline"
+                              >
+                                <CheckCircle2 className="h-4 w-4" />
+                                Approve
+                              </Button>
+                              <Button
+                                className={cn("justify-start", getStatusButtonClassName("denied", decision.status === "denied"))}
+                                onClick={() => updateDecision(decision.scenarioId, { status: "denied" })}
+                                type="button"
+                                variant="outline"
+                              >
+                                <XCircle className="h-4 w-4" />
+                                Deny
+                              </Button>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Textarea
+                              rows={3}
+                              value={decision.notes}
+                              onChange={(event) => updateDecision(decision.scenarioId, { notes: event.target.value })}
+                              placeholder="Reason for approval, hold, or rejection"
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
 
               <label className="space-y-2 text-sm font-medium text-slate-700">
                 Overall Notes

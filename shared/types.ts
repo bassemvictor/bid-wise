@@ -278,9 +278,11 @@ export type AlternativeScenario = {
   scenarioId: string;
   label: string;
   profitPercent: number | null;
-  factorOfSafetyPercent: number | null;
   customerCommissionPercent: number | null;
+  salesPersonCommissionMode: "percent" | "fixed";
   salesPersonCommissionPercent: number | null;
+  salesPersonCommissionFixedAmount: number | null;
+  totalCost: number | null;
   pricePerBag: number | null;
   totalPrice: number | null;
   notes?: string;

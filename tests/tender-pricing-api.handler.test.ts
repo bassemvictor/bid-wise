@@ -468,10 +468,6 @@ test("saves material sourcing with tender-based keys and updates tender status",
         };
       }
 
-      if (command.constructor.name === "DeleteCommand") {
-        return {};
-      }
-
       assert.equal(command.constructor.name, "PutCommand");
       return {};
     }) as DynamoDBDocumentClient,
@@ -534,11 +530,7 @@ test("saves material sourcing with tender-based keys and updates tender status",
   assert.equal(putCommands.length, 4);
 
   const deleteCommands = seenCommands.filter((command) => command.constructor.name === "DeleteCommand");
-  assert.equal(deleteCommands.length, 1);
-  assert.deepEqual(deleteCommands[0]?.input?.Key, {
-    PK: "TENDER#TDR-5001",
-    SK: "COST_BUILDUP#base",
-  });
+  assert.equal(deleteCommands.length, 0);
 
   const sourcingItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "MATERIAL_SOURCE#base")
     ?.input?.Item as Record<string, unknown>;
@@ -632,6 +624,9 @@ test("saves cost build-up with tender-based keys and updates tender status", asy
           alternativeId: "base",
           quantity: 1000,
           currency: "EGP",
+          exchangeRate: 50,
+          currencySafetyFactorPercent: 3,
+          effectiveExchangeRate: 51.5,
           costLines: [
             {
               code: "A",
@@ -665,6 +660,9 @@ test("saves cost build-up with tender-based keys and updates tender status", asy
   assert.equal(costItem.PK, "TENDER#TDR-6001");
   assert.equal(costItem.SK, "COST_BUILDUP#base");
   assert.equal(costItem.entityType, "COST_BUILDUP");
+  assert.equal(costItem.exchangeRate, 50);
+  assert.equal(costItem.currencySafetyFactorPercent, 3);
+  assert.equal(costItem.effectiveExchangeRate, 51.5);
 
   const activityItem = putCommands.find(
     (command) =>
@@ -682,6 +680,9 @@ test("saves cost build-up with tender-based keys and updates tender status", asy
   assert.equal(body.PK, undefined);
   assert.equal(body.SK, undefined);
   assert.equal(body.entityType, "COST_BUILDUP");
+  assert.equal(body.exchangeRate, 50);
+  assert.equal(body.currencySafetyFactorPercent, 3);
+  assert.equal(body.effectiveExchangeRate, 51.5);
 });
 
 test("lists tender activities with actor and field-level changes", async () => {
@@ -1205,6 +1206,9 @@ test("duplicates tender with related workflow snapshots", async () => {
                 alternativeId: "base",
                 quantity: 60,
                 currency: "EGP",
+                exchangeRate: 50,
+                currencySafetyFactorPercent: 3,
+                effectiveExchangeRate: 51.5,
                 costLines: [],
                 totalMaterialCostPerBag: 205.67,
                 totalOperatingCostPerBag: 12.5,
