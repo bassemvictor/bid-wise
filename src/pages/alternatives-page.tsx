@@ -6,6 +6,7 @@ import { TenderWorkflowStepper } from "../components/tenders/tender-workflow-ste
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Dialog } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Textarea } from "../components/ui/textarea";
@@ -14,7 +15,13 @@ import {
   confirmDiscardUnsavedChanges,
   useUnsavedChangesWarning,
 } from "../lib/use-unsaved-changes";
-import type { CostBuildUp, ScenarioAlternative, TenderRequest } from "../../shared/types";
+import type {
+  CostBuildUp,
+  MaterialSourceSelection,
+  ProductConfiguration,
+  ScenarioAlternative,
+  TenderRequest,
+} from "../../shared/types";
 
 type AlternativeScenarioForm = {
   scenarioId: string;
@@ -60,6 +67,9 @@ type CalculatedScenario = {
   notes: string;
 };
 
+const productOverheadLineCode = (baseCode: "F" | "G" | "G2", productId: string) =>
+  `${baseCode}::${productId}`;
+
 const numberOrNull = (value: string) => {
   if (value.trim() === "") {
     return null;
@@ -67,6 +77,20 @@ const numberOrNull = (value: string) => {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const divideOrNull = (total: number | null, count: number | null) => {
+  if (
+    total === null ||
+    count === null ||
+    !Number.isFinite(total) ||
+    !Number.isFinite(count) ||
+    count === 0
+  ) {
+    return null;
+  }
+
+  return total / count;
 };
 
 const formatMetric = (value: number | null, digits = 2, suffix = "") =>
@@ -122,6 +146,15 @@ const toForm = (payload: ScenarioAlternative): AlternativesForm => ({
           notes: scenario.notes ?? "",
         }))
       : [createScenario(0)],
+});
+
+const syncFormWithCostBuildUp = (
+  form: AlternativesForm,
+  costBuildUp: CostBuildUp | null,
+): AlternativesForm => ({
+  ...form,
+  quantity: costBuildUp?.quantity?.toString() ?? form.quantity,
+  baseCostPerBag: costBuildUp?.totalCostPricePerBag?.toString() ?? form.baseCostPerBag,
 });
 
 const ScenarioDrawer = ({
@@ -279,7 +312,10 @@ export const AlternativesPage = () => {
   const [form, setForm] = useState<AlternativesForm>(() => initialForm(tenderId));
   const [tender, setTender] = useState<TenderRequest | null>(null);
   const [costBuildUp, setCostBuildUp] = useState<CostBuildUp | null>(null);
+  const [productConfiguration, setProductConfiguration] = useState<ProductConfiguration | null>(null);
+  const [materialSourcing, setMaterialSourcing] = useState<MaterialSourceSelection | null>(null);
   const [drawerState, setDrawerState] = useState<ScenarioDrawerState | null>(null);
+  const [costHelpScenarioId, setCostHelpScenarioId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -306,10 +342,20 @@ export const AlternativesPage = () => {
       setError("");
 
       try {
-        const [loadedTender, loadedCostBuildUp, saved] = await Promise.all([
+        const [loadedTender, loadedCostBuildUp, loadedProductConfiguration, loadedMaterialSourcing, saved] = await Promise.all([
           api.get<TenderRequest>(`/tenders/${tenderId}?tenantId=alimex-demo`),
           api
             .get<CostBuildUp>(`/tenders/${tenderId}/cost-build-up?tenantId=alimex-demo`)
+            .catch((reason) => {
+              if (reason instanceof ApiError && reason.status === 404) {
+                return null;
+              }
+
+              throw reason;
+            }),
+          api.get<ProductConfiguration>(`/tenders/${tenderId}/product-configuration?tenantId=alimex-demo`),
+          api
+            .get<MaterialSourceSelection>(`/tenders/${tenderId}/material-sourcing?tenantId=alimex-demo`)
             .catch((reason) => {
               if (reason instanceof ApiError && reason.status === 404) {
                 return null;
@@ -334,24 +380,24 @@ export const AlternativesPage = () => {
 
         setTender(loadedTender);
         setCostBuildUp(loadedCostBuildUp);
+        setProductConfiguration(loadedProductConfiguration);
+        setMaterialSourcing(loadedMaterialSourcing);
 
         if (!loadedCostBuildUp) {
           setError("Complete Cost Build-Up before preparing alternatives.");
         }
 
         if (saved) {
-          const nextForm = toForm(saved);
+          const nextForm = syncFormWithCostBuildUp(toForm(saved), loadedCostBuildUp);
           setForm(nextForm);
           setLastSavedSignature(JSON.stringify(nextForm));
           return;
         }
 
-        const nextForm = {
+        const nextForm = syncFormWithCostBuildUp({
           ...initialForm(tenderId),
           tenantId: loadedTender.tenantId,
-          quantity: loadedCostBuildUp?.quantity?.toString() ?? "",
-          baseCostPerBag: loadedCostBuildUp?.totalCostPricePerBag?.toString() ?? "",
-        };
+        }, loadedCostBuildUp);
         setForm(nextForm);
         setLastSavedSignature(JSON.stringify(nextForm));
       } catch (reason) {
@@ -374,6 +420,107 @@ export const AlternativesPage = () => {
 
   const quantity = numberOrNull(form.quantity);
   const baseCostPerBag = numberOrNull(form.baseCostPerBag);
+  const effectiveQuantity = costBuildUp?.quantity ?? quantity;
+  const effectiveBaseCostPerBag = costBuildUp?.totalCostPricePerBag ?? baseCostPerBag;
+  const productSnapshots = productConfiguration?.productSnapshots ?? [];
+  const sourcingBreakdown = materialSourcing?.componentSelections ?? [];
+  const readCostLineValue = (code: string) =>
+    costBuildUp?.costLines.find((line) => line.code === code)?.costPerBag ?? 0;
+
+  const productCostCards = useMemo(
+    () =>
+      productSnapshots.map((product) => {
+        const sourcingLines = sourcingBreakdown.filter((selection) => selection.productId === product.productId);
+        const requestedQuantity = product.requestedQuantity ?? null;
+        const sourcedMaterialTotal = sourcingLines.reduce(
+          (total, selection) => total + (selection.totalMaterialCostEgp ?? 0),
+          0,
+        );
+        const sourcedMaterialCostPerBag =
+          requestedQuantity && requestedQuantity > 0 ? sourcedMaterialTotal / requestedQuantity : null;
+
+        const packagingCost = readCostLineValue("D");
+        const factoryOverhead =
+          costBuildUp?.costLines.find((line) => line.code === productOverheadLineCode("F", product.productId))?.costPerBag ??
+          product.factoryOverheadPerBag ??
+          readCostLineValue("F");
+        const manufacturingOverhead =
+          costBuildUp?.costLines.find((line) => line.code === productOverheadLineCode("G", product.productId))?.costPerBag ??
+          product.manufacturingOverheadPerBag ??
+          readCostLineValue("G");
+        const managementOverhead =
+          costBuildUp?.costLines.find((line) => line.code === productOverheadLineCode("G2", product.productId))?.costPerBag ??
+          product.managementOverheadPerBag ??
+          readCostLineValue("G2");
+        const salesCost = readCostLineValue("H");
+        const rushCost = readCostLineValue("I_RUSH");
+        const transportationCost = readCostLineValue("J");
+        const installationCost = readCostLineValue("K");
+
+        const materialPerBag = (sourcedMaterialCostPerBag ?? 0) + packagingCost;
+        const operatingPerBag =
+          factoryOverhead + manufacturingOverhead + managementOverhead + salesCost;
+        const additionalPerBag = rushCost + transportationCost + installationCost;
+        const totalPerBag = materialPerBag + operatingPerBag + additionalPerBag;
+
+        return {
+          productId: product.productId,
+          totalPerBag,
+        };
+      }),
+    [costBuildUp?.costLines, productSnapshots, sourcingBreakdown],
+  );
+
+  const orderTotalCost = useMemo(() => {
+    if (!productSnapshots.length) {
+      return costBuildUp?.totalCostPriceForOrder ?? null;
+    }
+
+    const total = productSnapshots.reduce((sum, product) => {
+      const productSnapshot = productSnapshots.find((item) => item.productId === product.productId);
+      const components = productSnapshot?.components ?? [];
+      const productMaterialTotalCost = components.reduce((componentSum, component) => {
+        const sourcedSelection = sourcingBreakdown.find(
+          (selection) => selection.productId === product.productId && selection.componentId === component.componentId,
+        );
+        const accessoryPerBag = component.accessorySnapshot?.totalPricePerBagEgp ?? null;
+        const requestedQuantity = product.requestedQuantity ?? sourcedSelection?.requestedQuantity ?? null;
+        const sourcedTotalCost = sourcedSelection?.totalMaterialCostEgp ?? null;
+        const sourcedRequestedQuantity = sourcedSelection?.requestedQuantity ?? null;
+        const sourcedUnitCost =
+          sourcedSelection?.materialCostPerBagEgp ??
+          (sourcedTotalCost !== null &&
+          sourcedRequestedQuantity !== null &&
+          sourcedRequestedQuantity > 0
+            ? sourcedTotalCost / sourcedRequestedQuantity
+            : null);
+        const unitCost = sourcedUnitCost ?? accessoryPerBag;
+        const totalCost =
+          sourcedTotalCost ??
+          (requestedQuantity !== null && unitCost !== null ? requestedQuantity * unitCost : null);
+
+        return componentSum + (totalCost ?? 0);
+      }, 0);
+
+      const productMaterialUnitCost =
+        product.requestedQuantity !== null && product.requestedQuantity !== undefined && product.requestedQuantity > 0
+          ? productMaterialTotalCost / product.requestedQuantity
+          : null;
+      const costSummary = productCostCards.find((item) => item.productId === product.productId);
+      const totalUnitCost = costSummary?.totalPerBag ?? productMaterialUnitCost;
+      const totalCost =
+        totalUnitCost !== null &&
+        product.requestedQuantity !== null &&
+        product.requestedQuantity !== undefined &&
+        product.requestedQuantity > 0
+          ? totalUnitCost * product.requestedQuantity
+          : productMaterialTotalCost;
+
+      return sum + (totalCost ?? 0);
+    }, 0);
+
+    return total > 0 ? total : costBuildUp?.totalCostPriceForOrder ?? null;
+  }, [costBuildUp?.totalCostPriceForOrder, productCostCards, productSnapshots, sourcingBreakdown]);
 
   const scenarios = useMemo(
     (): CalculatedScenario[] =>
@@ -387,17 +534,20 @@ export const AlternativesPage = () => {
           factorOfSafetyPercent +
           customerCommissionPercent +
           salesPersonCommissionPercent;
-        const pricePerBag =
-          baseCostPerBag !== null ? baseCostPerBag * (1 + markupPercent / 100) : null;
-        const totalCost =
-          baseCostPerBag !== null && quantity !== null ? baseCostPerBag * quantity : null;
+        const totalCost = orderTotalCost;
         const totalPrice =
-          pricePerBag !== null && quantity !== null ? pricePerBag * quantity : null;
+          totalCost !== null
+            ? totalCost * (1 + markupPercent / 100)
+            : null;
+        const pricePerBag =
+          totalPrice !== null && effectiveQuantity !== null && effectiveQuantity > 0
+            ? totalPrice / effectiveQuantity
+            : null;
         const profitValue =
           totalPrice !== null && totalCost !== null ? totalPrice - totalCost : null;
         const marginPercent =
-          pricePerBag !== null && baseCostPerBag !== null && pricePerBag > 0
-            ? ((pricePerBag - baseCostPerBag) / pricePerBag) * 100
+          pricePerBag !== null && effectiveBaseCostPerBag !== null && pricePerBag > 0
+            ? ((pricePerBag - effectiveBaseCostPerBag) / pricePerBag) * 100
             : null;
 
         return {
@@ -414,7 +564,7 @@ export const AlternativesPage = () => {
           totalPrice,
         };
       }),
-    [baseCostPerBag, form.scenarios, quantity],
+    [effectiveBaseCostPerBag, effectiveQuantity, form.scenarios, orderTotalCost],
   );
 
   const activeDrawerScenario = useMemo(
@@ -432,6 +582,16 @@ export const AlternativesPage = () => {
         : null,
     [drawerState, scenarios],
   );
+
+  const activeCostHelpScenario = useMemo(
+    () =>
+      costHelpScenarioId
+        ? scenarios.find((scenario) => scenario.scenarioId === costHelpScenarioId) ?? null
+        : null,
+    [costHelpScenarioId, scenarios],
+  );
+  const orderCostPerBag = divideOrNull(activeCostHelpScenario?.totalCost ?? null, effectiveQuantity);
+  const orderPricePerBag = divideOrNull(activeCostHelpScenario?.totalPrice ?? null, effectiveQuantity);
 
   const updateScenario = (scenarioId: string, patch: Partial<AlternativeScenarioForm>) => {
     setForm((current) => ({
@@ -498,8 +658,8 @@ export const AlternativesPage = () => {
       tenderId,
       alternativeId: form.alternativeId,
       currency: form.currency,
-      quantity,
-      baseCostPerBag,
+      quantity: effectiveQuantity ?? costBuildUp?.quantity ?? quantity,
+      baseCostPerBag: effectiveBaseCostPerBag,
       notes: form.notes.trim(),
       scenarios: scenarios.map((scenario) => ({
         scenarioId: scenario.scenarioId,
@@ -515,7 +675,7 @@ export const AlternativesPage = () => {
       createdAt: "",
       updatedAt: "",
     }),
-    [baseCostPerBag, form.alternativeId, form.currency, form.notes, form.tenantId, quantity, scenarios, tenderId],
+    [costBuildUp, effectiveBaseCostPerBag, effectiveQuantity, form.alternativeId, form.currency, form.notes, form.tenantId, quantity, scenarios, tenderId],
   );
   const currentSignature = useMemo(() => JSON.stringify(form), [form]);
   const isDirty = currentSignature !== lastSavedSignature;
@@ -523,8 +683,15 @@ export const AlternativesPage = () => {
   useUnsavedChangesWarning(isDirty);
 
   const validate = () => {
-    if (baseCostPerBag === null || quantity === null) {
-      setError("Cost Build-Up must provide a base cost per bag and quantity before alternatives can be saved.");
+    if (
+      costBuildUp?.totalCostPricePerBag === null ||
+      costBuildUp?.totalCostPricePerBag === undefined ||
+      costBuildUp?.totalCostPriceForOrder === null ||
+      costBuildUp?.totalCostPriceForOrder === undefined ||
+      costBuildUp?.quantity === null ||
+      costBuildUp?.quantity === undefined
+    ) {
+      setError("Cost Build-Up must provide the current per-bag cost, order total, and quantity before alternatives can be saved.");
       return false;
     }
 
@@ -577,7 +744,7 @@ export const AlternativesPage = () => {
         payload,
       );
 
-      const nextForm = toForm(response);
+      const nextForm = syncFormWithCostBuildUp(toForm(response), costBuildUp);
       setForm(nextForm);
       setLastSavedSignature(JSON.stringify(nextForm));
       setMessage(mode === "draft" ? "Alternatives saved." : "Alternatives saved. Continuing to pricing approval.");
@@ -653,7 +820,19 @@ export const AlternativesPage = () => {
                           <TableCell>{formatMetric(scenario.factorOfSafetyPercent, 2, "%")}</TableCell>
                           <TableCell>{formatMetric(scenario.customerCommissionPercent, 2, "%")}</TableCell>
                           <TableCell>{formatMetric(scenario.salesPersonCommissionPercent, 2, "%")}</TableCell>
-                          <TableCell>{formatMetric(scenario.totalCost, 2, " EGP")}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <span>{formatMetric(scenario.totalCost, 2, " EGP")}</span>
+                              <button
+                                aria-label={`Explain order cost for ${scenario.label || "scenario"}`}
+                                className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-slate-50 text-[11px] font-medium text-muted-foreground transition hover:border-slate-300 hover:text-slate-700"
+                                onClick={() => setCostHelpScenarioId(scenario.scenarioId)}
+                                type="button"
+                              >
+                                ?
+                              </button>
+                            </div>
+                          </TableCell>
                           <TableCell>{formatMetric(scenario.totalPrice, 2, " EGP")}</TableCell>
                           <TableCell>{formatMetric(scenario.profitValue, 2, " EGP")}</TableCell>
                           <TableCell className="text-right">
@@ -746,6 +925,60 @@ export const AlternativesPage = () => {
           updateScenario(drawerState.scenarioId, patch);
         }}
       />
+
+      <Dialog
+        open={activeCostHelpScenario !== null}
+        onClose={() => setCostHelpScenarioId(null)}
+        title={activeCostHelpScenario ? `${activeCostHelpScenario.label} Pricing Breakdown` : "Pricing Breakdown"}
+        description="These values show the per-bag amount before scenario markup, the adjusted per-bag price after markup, and how each total is calculated."
+      >
+        <div className="space-y-4 text-sm text-slate-700">
+          <div className="rounded-2xl border border-border bg-slate-50 p-4">
+            <p className="font-medium text-slate-900">Order Cost Formula</p>
+            <p className="mt-2">
+              Order Cost = Order Total ÷ Quantity
+            </p>
+            <p className="mt-2 text-base font-semibold text-slate-900">
+              {formatMetric(activeCostHelpScenario?.totalCost ?? null, 2, " EGP")} ÷ {formatMetric(effectiveQuantity, 0, " bags")} = {formatMetric(orderCostPerBag, 2, " EGP per bag")}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-slate-50 p-4">
+            <p className="font-medium text-slate-900">Order Price Formula</p>
+            <p className="mt-2">
+              Order Price = Order Price Total ÷ Quantity
+            </p>
+            <p className="mt-2 text-base font-semibold text-slate-900">
+              {formatMetric(activeCostHelpScenario?.totalPrice ?? null, 2, " EGP")} ÷ {formatMetric(effectiveQuantity, 0, " bags")} = {formatMetric(orderPricePerBag, 2, " EGP per bag")}
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-border bg-white p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Before Markup</p>
+              <p className="mt-2 text-base font-semibold text-slate-900">
+                {formatMetric(orderCostPerBag, 2, " EGP per bag")}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border bg-white p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">After Markup</p>
+              <p className="mt-2 text-base font-semibold text-slate-900">
+                {formatMetric(orderPricePerBag, 2, " EGP per bag")}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border bg-white p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Quantity</p>
+              <p className="mt-2 text-base font-semibold text-slate-900">
+                {formatMetric(effectiveQuantity, 0, " bags")}
+              </p>
+            </div>
+          </div>
+
+          <p className="text-muted-foreground">
+            These per-bag values are derived the same way as the blue summary card: total divided by quantity.
+          </p>
+        </div>
+      </Dialog>
     </div>
   );
 };

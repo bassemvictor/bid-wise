@@ -2255,12 +2255,31 @@ const saveAlternatives = async (
   tenderId: string,
   payload: ScenarioAlternative,
 ) => {
+  const currentCostBuildUp = await getCostBuildUp(context, tenderId);
+
+  if (
+    !currentCostBuildUp ||
+    currentCostBuildUp.quantity === null ||
+    currentCostBuildUp.quantity === undefined ||
+    currentCostBuildUp.totalCostPricePerBag === null ||
+    currentCostBuildUp.totalCostPricePerBag === undefined ||
+    currentCostBuildUp.totalCostPriceForOrder === null ||
+    currentCostBuildUp.totalCostPriceForOrder === undefined
+  ) {
+    throw new Error("Cost Build-Up must be saved before alternatives can be stored.");
+  }
+
   const existing = await getRecord<StoredEntity>(
     context.tableName,
     context.tenantId,
     sectionConfig.alternatives.sk(tenderId),
   );
-  const item = await saveTenderSection(context, tenderId, "alternatives", payload);
+  const syncedPayload: ScenarioAlternative = {
+    ...payload,
+    quantity: currentCostBuildUp.quantity,
+    baseCostPerBag: currentCostBuildUp.totalCostPricePerBag,
+  };
+  const item = await saveTenderSection(context, tenderId, "alternatives", syncedPayload);
   await createAuditActivity(context, tenderId, "ALTERNATIVES", existing, item);
   await updateTenderStatus(context, tenderId, "ALTERNATIVES");
   return sanitizeScenarioAlternative(item)!;

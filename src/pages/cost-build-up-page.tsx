@@ -49,6 +49,9 @@ type CostBuildUpForm = Omit<
   exchangeRate: string;
   currencySafetyFactorPercent: string;
   effectiveExchangeRate: string;
+  salesInputMode: "percent" | "fixed";
+  salesPercent: string;
+  salesFixedAmount: string;
   costLines: CostLineForm[];
   totalMaterialCostPerBag: string;
   totalOperatingCostPerBag: string;
@@ -181,6 +184,7 @@ const lineDefinitions: Array<Omit<CostLine, "costPerBag"> & { costPerBag?: numbe
     description: "Urgency surcharge when production must be accelerated.",
     calculationBasis: "Rush order premium per bag",
     editable: true,
+    costPerBag: 0,
   },
   {
     code: "J",
@@ -188,6 +192,7 @@ const lineDefinitions: Array<Omit<CostLine, "costPerBag"> & { costPerBag?: numbe
     description: "Transport and dispatch cost loaded per bag.",
     calculationBasis: "Transportation allocation per bag",
     editable: true,
+    costPerBag: 0,
   },
   {
     code: "K",
@@ -195,6 +200,7 @@ const lineDefinitions: Array<Omit<CostLine, "costPerBag"> & { costPerBag?: numbe
     description: "Installation and site support where applicable.",
     calculationBasis: "Installation allocation per bag",
     editable: true,
+    costPerBag: 0,
   },
   {
     code: "III_TOTAL",
@@ -426,6 +432,9 @@ const initialForm = (tenderId: string): CostBuildUpForm => ({
   exchangeRate: "",
   currencySafetyFactorPercent: "",
   effectiveExchangeRate: "",
+  salesInputMode: "percent",
+  salesPercent: "",
+  salesFixedAmount: "",
   costLines: buildDefaultLines({ A: null, B: null, C: null }).map((line) => ({
     ...line,
     costPerBag: line.costPerBag?.toString() ?? "",
@@ -525,6 +534,14 @@ const mergeCostLines = (
   });
 };
 
+const inferSalesInputMode = (savedLines: CostLine[] | undefined): "percent" | "fixed" => {
+  const savedByCode = new Map((savedLines ?? []).map((line) => [line.code, line]));
+  return savedByCode.get("H_FIXED")?.costPerBag !== null &&
+    savedByCode.get("H_FIXED")?.costPerBag !== undefined
+    ? "fixed"
+    : "percent";
+};
+
 const syncProductConfigurationOverheads = (
   configuration: ProductConfiguration,
   costLines: Array<{ code: string; costPerBag: string | number | null }>,
@@ -569,6 +586,11 @@ const toForm = (
   exchangeRate: payload.exchangeRate?.toString() ?? "",
   currencySafetyFactorPercent: payload.currencySafetyFactorPercent?.toString() ?? "",
   effectiveExchangeRate: payload.effectiveExchangeRate?.toString() ?? "",
+  salesInputMode: inferSalesInputMode(payload.costLines),
+  salesPercent:
+    payload.costLines.find((line) => line.code === "H_PERCENT")?.costPerBag?.toString() ?? "",
+  salesFixedAmount:
+    payload.costLines.find((line) => line.code === "H_FIXED")?.costPerBag?.toString() ?? "",
   costLines: mergeCostLines(payload.costLines, materialLineOverrides, defaults, products),
   totalMaterialCostPerBag: payload.totalMaterialCostPerBag?.toString() ?? "",
   totalOperatingCostPerBag: payload.totalOperatingCostPerBag?.toString() ?? "",
@@ -589,6 +611,10 @@ export const CostBuildUpPage = () => {
   const [activeLineHelp, setActiveLineHelp] = useState<{
     code: string;
     title: string;
+    description: string;
+    emptyMessage: string;
+    summaryLabel: string;
+    summaryDescription?: string;
     total: number | null;
     totalCost: number | null;
     totalRequestedQuantity: number | null;
@@ -616,12 +642,25 @@ export const CostBuildUpPage = () => {
         totalCostEgp: number | null;
       }>;
     }>;
+    breakdownSections: Array<{
+      id: string;
+      title: string;
+      description: string;
+      costPerBag: number | null;
+      totalCost: number | null;
+      items: Array<{
+        id: string;
+        label: string;
+        costPerBag: number | null;
+        totalCost: number | null;
+        valueType?: "currency" | "quantity";
+      }>;
+    }>;
   } | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [saveMode, setSaveMode] = useState<"draft" | "continue" | null>(null);
-  const [isMaterialSourcingDetailOpen, setIsMaterialSourcingDetailOpen] = useState(false);
   const [collapsedProducts, setCollapsedProducts] = useState<Record<string, boolean>>({});
   const [lastSavedSignature, setLastSavedSignature] = useState(() =>
     JSON.stringify(initialForm(tenderId)),
@@ -835,6 +874,8 @@ export const CostBuildUpPage = () => {
 
     const readNullable = (code: string) => editableByCode.get(code)?.costPerBag ?? null;
     const read = (code: string) => readNullable(code) ?? 0;
+    const salesPercent = numberOrNull(form.salesPercent) ?? 0;
+    const salesFixedAmount = numberOrNull(form.salesFixedAmount) ?? 0;
     const resolveWeightedProductOverhead = (
       selector: (
         product: (typeof productOverheadValues)[number],
@@ -878,11 +919,21 @@ export const CostBuildUpPage = () => {
     );
     const materialCostPerBag =
       fabricMaterialCost + ringMaterialCost + threadingMaterialCost + packagingMaterialCost;
+    const salesBasePerBag =
+      materialCostPerBag +
+      (factoryOverheadPerBag ?? 0) +
+      (manufacturingOverheadPerBag ?? 0) +
+      (managementOverheadPerBag ?? 0) +
+      read("I_RUSH") +
+      read("J") +
+      read("K");
+    const salesCostPerBag =
+      form.salesInputMode === "percent" ? salesBasePerBag * (salesPercent / 100) : salesFixedAmount;
     const operatingCostPerBag =
       (factoryOverheadPerBag ?? 0) +
       (manufacturingOverheadPerBag ?? 0) +
       (managementOverheadPerBag ?? 0) +
-      read("H");
+      salesCostPerBag;
     const additionalCostPerBag = read("I_RUSH") + read("J") + read("K");
     const totalCostPricePerBag = materialCostPerBag + operatingCostPerBag + additionalCostPerBag;
     const totalCostPriceForOrder =
@@ -903,6 +954,8 @@ export const CostBuildUpPage = () => {
         value = manufacturingOverheadPerBag;
       } else if (line.code === "G2") {
         value = managementOverheadPerBag;
+      } else if (line.code === "H") {
+        value = salesCostPerBag;
       } else if (line.code === "I_TOTAL") {
         value = materialCostPerBag;
       } else if (line.code === "II_TOTAL") {
@@ -918,7 +971,21 @@ export const CostBuildUpPage = () => {
           totalCostPricePerBag > 0 && value !== null ? (value / totalCostPricePerBag) * 100 : 0,
       };
     });
-  }, [form.costLines, materialLineOverrides, productOverheadValues, quantity]);
+  }, [
+    form.costLines,
+    form.salesFixedAmount,
+    form.salesInputMode,
+    form.salesPercent,
+    materialLineOverrides,
+    productOverheadValues,
+    quantity,
+  ]);
+
+  const currentLineValues = useMemo(
+    () =>
+      new Map(calculatedLines.map((line) => [line.code, line.costPerBag ?? 0])),
+    [calculatedLines],
+  );
 
   const totals = useMemo(() => {
     const findValue = (code: string) =>
@@ -940,6 +1007,41 @@ export const CostBuildUpPage = () => {
       totalCostPriceForOrder,
     };
   }, [calculatedLines, quantity]);
+
+  const tenderDefaultEffectiveExchangeRate =
+    tender?.exchangeRate !== null &&
+    tender?.exchangeRate !== undefined &&
+    tender?.currencySafetyFactorPercent !== null &&
+    tender?.currencySafetyFactorPercent !== undefined
+      ? tender.exchangeRate * (1 + tender.currencySafetyFactorPercent / 100)
+      : null;
+
+  const salesSummary = useMemo(() => {
+    const overtimeCostPerBag = currentLineValues.get("I_RUSH") ?? 0;
+    const transportationCostPerBag = currentLineValues.get("J") ?? 0;
+    const installationCostPerBag = currentLineValues.get("K") ?? 0;
+    const fixedSalesAmount = numberOrNull(form.salesFixedAmount) ?? 0;
+    const salesPercent = numberOrNull(form.salesPercent) ?? 0;
+    const salesCostPerBag = currentLineValues.get("H") ?? 0;
+    const totalBeforeSalesPerBag =
+      (totals.totalMaterialCostPerBag ?? 0) +
+      ((currentLineValues.get("F") ?? 0) + (currentLineValues.get("G") ?? 0) + (currentLineValues.get("G2") ?? 0)) +
+      overtimeCostPerBag +
+      transportationCostPerBag +
+      installationCostPerBag;
+
+    return {
+      overtimeCostPerBag,
+      transportationCostPerBag,
+      installationCostPerBag,
+      fixedSalesAmount,
+      salesPercent,
+      salesCostPerBag,
+      totalBeforeSalesPerBag,
+      totalBeforeSalesOrder:
+        quantity !== null && Number.isFinite(quantity) ? totalBeforeSalesPerBag * quantity : null,
+    };
+  }, [currentLineValues, form.salesFixedAmount, form.salesPercent, quantity, totals.totalMaterialCostPerBag]);
 
   const chartData = [
     { name: "Material Cost", value: totals.totalMaterialCostPerBag ?? 0 },
@@ -1025,12 +1127,6 @@ export const CostBuildUpPage = () => {
     };
   }, [effectiveExchangeRate, materialSourcing, materials, sourcingBreakdown]);
 
-  const currentLineValues = useMemo(
-    () =>
-      new Map(calculatedLines.map((line) => [line.code, line.costPerBag ?? 0])),
-    [calculatedLines],
-  );
-
   const productCards = useMemo(
     () =>
       productSnapshots.map((product) => ({
@@ -1103,33 +1199,69 @@ export const CostBuildUpPage = () => {
   const materialBreakdownGrid = useMemo(
     () =>
       productCards.map((product) => {
-        const components = sourcingBreakdown
-          .filter((selection) => selection.productId === product.productId)
-          .map((selection) => {
-            const specification = formatComponentSpecification(selection);
-            const unitCost =
-              selection.materialCostPerBagEgp ??
-              ((selection.totalMaterialCostEgp ?? null) !== null &&
-              selection.requestedQuantity !== null &&
-              selection.requestedQuantity > 0
-                ? (selection.totalMaterialCostEgp ?? 0) / selection.requestedQuantity
-                : null);
+        const productSnapshot = productSnapshots.find((item) => item.productId === product.productId);
+        const components = (productSnapshot?.components ?? []).map((component) => {
+          const sourcedSelection = sourcingBreakdown.find(
+            (selection) => selection.productId === product.productId && selection.componentId === component.componentId,
+          );
+          const specification = sourcedSelection
+            ? formatComponentSpecification(sourcedSelection)
+            : {
+                primary: component.material || component.accessorySnapshot?.accessoryName || "Not set",
+                secondary: component.componentType || "Component",
+              };
+          const accessoryPerBag = component.accessorySnapshot?.totalPricePerBagEgp ?? null;
+          const requestedQuantity = product.requestedQuantity ?? sourcedSelection?.requestedQuantity ?? null;
+          const sourcedTotalCost = sourcedSelection?.totalMaterialCostEgp ?? null;
+          const sourcedRequestedQuantity = sourcedSelection?.requestedQuantity ?? null;
+          const sourcedUnitCost =
+            sourcedSelection?.materialCostPerBagEgp ??
+            (sourcedTotalCost !== null &&
+            sourcedRequestedQuantity !== null &&
+            sourcedRequestedQuantity > 0
+              ? sourcedTotalCost / sourcedRequestedQuantity
+              : null);
+          const unitCost = sourcedUnitCost ?? accessoryPerBag;
+          const totalCost =
+            sourcedTotalCost ??
+            (requestedQuantity !== null && unitCost !== null ? requestedQuantity * unitCost : null);
 
-            return {
-              componentId: selection.componentId,
-              componentName: selection.componentName,
-              materialId: specification.primary,
-              detail: specification.secondary,
-              requestedQuantity: selection.requestedQuantity ?? null,
-              unitCost,
-              totalCost: selection.totalMaterialCostEgp ?? null,
-            };
-          });
+          return {
+            componentId: component.componentId,
+            componentName: component.componentName,
+            componentType: component.componentType,
+            materialId: specification.primary,
+            detail: specification.secondary,
+            requestedQuantity,
+            unitCost,
+            totalCost,
+          };
+        });
 
         const productMaterialTotalCost = components.reduce((sum, component) => sum + (component.totalCost ?? 0), 0);
         const productMaterialUnitCost =
           product.requestedQuantity !== null && product.requestedQuantity !== undefined && product.requestedQuantity > 0
             ? productMaterialTotalCost / product.requestedQuantity
+            : null;
+        const bagMaterialTotalCost = components.reduce((sum, component) => {
+          const normalizedType = component.componentType.trim().toLowerCase();
+          const normalizedName = component.componentName.trim().toLowerCase();
+          const isBagComponent =
+            normalizedType === "bag" ||
+            normalizedType === "bag body" ||
+            normalizedName === "bag" ||
+            normalizedName === "bag body";
+
+          return isBagComponent ? sum + (component.totalCost ?? 0) : sum;
+        }, 0);
+        const accessoryMaterialTotalCost = Math.max(0, productMaterialTotalCost - bagMaterialTotalCost);
+        const bagMaterialUnitCost =
+          product.requestedQuantity !== null && product.requestedQuantity !== undefined && product.requestedQuantity > 0
+            ? bagMaterialTotalCost / product.requestedQuantity
+            : null;
+        const accessoryMaterialUnitCost =
+          product.requestedQuantity !== null && product.requestedQuantity !== undefined && product.requestedQuantity > 0
+            ? accessoryMaterialTotalCost / product.requestedQuantity
             : null;
         const overheads = productOverheadValues.find((item) => item.productId === product.productId);
         const costSummary = productCostCards.find((item) => item.productId === product.productId);
@@ -1147,24 +1279,48 @@ export const CostBuildUpPage = () => {
           components,
           productMaterialUnitCost,
           productMaterialTotalCost,
+          bagMaterialUnitCost,
+          bagMaterialTotalCost,
+          accessoryMaterialUnitCost,
+          accessoryMaterialTotalCost,
           overheads,
+          materialPerBag: costSummary?.materialPerBag ?? productMaterialUnitCost ?? 0,
+          operatingPerBag: costSummary?.operatingPerBag ?? 0,
+          additionalPerBag: costSummary?.additionalPerBag ?? 0,
           totalUnitCost,
           totalCost,
         };
       }),
-    [productCards, productCostCards, productOverheadValues, sourcingBreakdown],
+    [productCards, productCostCards, productOverheadValues, productSnapshots, sourcingBreakdown],
   );
 
+  const tenderGridSummary = useMemo(() => {
+    const totalQuantity = materialBreakdownGrid.reduce((sum, product) => sum + (product.requestedQuantity ?? 0), 0);
+    const totalCost = materialBreakdownGrid.reduce((sum, product) => sum + (product.totalCost ?? 0), 0);
+
+    return {
+      totalQuantity: totalQuantity > 0 ? totalQuantity : quantity,
+      unitCost: totalQuantity > 0 ? totalCost / totalQuantity : null,
+      totalCost,
+    };
+  }, [materialBreakdownGrid, quantity]);
+
   const costCompletion = useMemo(() => {
-    const editableLines = calculatedLines.filter((line) => line.editable);
-    const filledLines = editableLines.filter((line) => line.costPerBag !== null).length;
+    const trackedValues = [
+      form.exchangeRate,
+      form.currencySafetyFactorPercent,
+      form.costLines.find((line) => line.code === "I_RUSH")?.costPerBag ?? "",
+      form.costLines.find((line) => line.code === "J")?.costPerBag ?? "",
+      form.costLines.find((line) => line.code === "K")?.costPerBag ?? "",
+      form.salesInputMode === "percent" ? form.salesPercent : form.salesFixedAmount,
+    ];
+    const filledLines = trackedValues.filter((value) => value.trim() !== "").length;
     return {
       filledLines,
-      totalLines: editableLines.length,
-      percent:
-        editableLines.length > 0 ? Math.round((filledLines / editableLines.length) * 100) : 0,
+      totalLines: trackedValues.length,
+      percent: trackedValues.length > 0 ? Math.round((filledLines / trackedValues.length) * 100) : 0,
     };
-  }, [calculatedLines]);
+  }, [form]);
 
   const updateLineCost = (code: string, value: string) => {
     const nextValue = value.trim() === "" ? "0" : value;
@@ -1188,11 +1344,7 @@ export const CostBuildUpPage = () => {
     }));
   };
 
-  const rowCellClassName = (
-    base: string,
-    rowBackground: string,
-    withBottomBorder = true,
-  ) => `${rowBackground} ${withBottomBorder ? "border-b border-border" : ""} ${base}`;
+  const rowCellClassName = (base: string, rowBackground: string) => `${rowBackground} ${base}`;
 
   const payload = useMemo<CostBuildUp>(
     () => ({
@@ -1206,14 +1358,32 @@ export const CostBuildUpPage = () => {
       exchangeRate,
       currencySafetyFactorPercent,
       effectiveExchangeRate,
-      costLines: calculatedLines.map((line) => ({
-        code: line.code,
-        category: line.category,
-        description: line.description,
-        calculationBasis: line.calculationBasis,
-        costPerBag: line.costPerBag,
-        editable: line.editable,
-      })),
+      costLines: [
+        ...calculatedLines.map((line) => ({
+          code: line.code,
+          category: line.category,
+          description: line.description,
+          calculationBasis: line.calculationBasis,
+          costPerBag: line.costPerBag,
+          editable: line.editable,
+        })),
+        {
+          code: "H_PERCENT",
+          category: "Sales Input",
+          description: "Stored sales percentage input for cost build-up.",
+          calculationBasis: "Used when sales mode is percent",
+          costPerBag: form.salesInputMode === "percent" ? numberOrNull(form.salesPercent) : null,
+          editable: true,
+        },
+        {
+          code: "H_FIXED",
+          category: "Sales Input",
+          description: "Stored fixed sales amount input for cost build-up.",
+          calculationBasis: "Used when sales mode is fixed",
+          costPerBag: form.salesInputMode === "fixed" ? numberOrNull(form.salesFixedAmount) : null,
+          editable: true,
+        },
+      ],
       totalMaterialCostPerBag: totals.totalMaterialCostPerBag,
       totalOperatingCostPerBag: totals.totalOperatingCostPerBag,
       totalAdditionalCostPerBag: totals.totalAdditionalCostPerBag,
@@ -1233,6 +1403,9 @@ export const CostBuildUpPage = () => {
       currencySafetyFactorPercent,
       effectiveExchangeRate,
       calculatedLines,
+      form.salesFixedAmount,
+      form.salesInputMode,
+      form.salesPercent,
       totals,
     ],
   );
@@ -1317,20 +1490,20 @@ export const CostBuildUpPage = () => {
                 <Badge variant="default">COST_BUILDUP</Badge>
               </CardHeader>
               <CardContent className="space-y-6 pt-6">
-                  <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
-                    <div className="mb-4 flex items-start justify-between gap-4">
+                  <section className="rounded-[1.25rem] border border-blue-100 bg-gradient-to-br from-sky-50 via-white to-blue-50 p-5">
+                    <div className="mb-5 flex items-start justify-between gap-4">
                       <div>
-                        <h3 className="text-base font-semibold text-slate-900">Landed Cost Inputs</h3>
+                        <h3 className="text-base font-semibold text-slate-900">Cost Inputs</h3>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          Exchange defaults come from Tender Intake. You can override them here and the sourced fabric cost will recalculate.
+                          Tender defaults load automatically, and any overrides here update the full cost build-up.
                         </p>
                       </div>
-                      <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
+                      <div className="rounded-2xl bg-blue-100 p-3 text-blue-700">
                         <Calculator className="h-5 w-5" />
                       </div>
                     </div>
 
-                    <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                       <label className="space-y-2 text-sm font-medium text-slate-700">
                         Exchange Rate
                         <Input
@@ -1338,6 +1511,9 @@ export const CostBuildUpPage = () => {
                           value={form.exchangeRate}
                           onChange={(event) => updateField("exchangeRate", event.target.value)}
                         />
+                        <p className="text-xs text-muted-foreground">
+                          Tender default: {formatMetric(tender?.exchangeRate ?? null, 3)}
+                        </p>
                       </label>
                       <label className="space-y-2 text-sm font-medium text-slate-700">
                         Currency Safety Factor %
@@ -1346,164 +1522,109 @@ export const CostBuildUpPage = () => {
                           value={form.currencySafetyFactorPercent}
                           onChange={(event) => updateField("currencySafetyFactorPercent", event.target.value)}
                         />
+                        <p className="text-xs text-muted-foreground">
+                          Tender default: {formatMetric(tender?.currencySafetyFactorPercent ?? null, 2, "%")}
+                        </p>
                       </label>
-                      <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-slate-700">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                          Effective Exchange Rate
-                        </p>
-                        <p className="mt-2 font-semibold text-slate-900">
-                          {formatMetric(effectiveExchangeRate, 3)}
-                        </p>
+                      <div className="rounded-2xl border border-blue-100 bg-white px-4 py-3 text-sm text-slate-700">
+                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Effective Exchange Rate</p>
+                        <p className="mt-2 font-semibold text-slate-900">{formatMetric(effectiveExchangeRate, 3)}</p>
                         <p className="mt-2 text-xs text-muted-foreground">
-                          Tender default: {formatMetric(
-                            tender?.exchangeRate !== null &&
-                              tender?.exchangeRate !== undefined &&
-                              tender?.currencySafetyFactorPercent !== null &&
-                              tender?.currencySafetyFactorPercent !== undefined
-                              ? tender.exchangeRate * (1 + tender.currencySafetyFactorPercent / 100)
-                              : null,
-                            3,
-                          )}
+                          Tender default: {formatMetric(tenderDefaultEffectiveExchangeRate, 3)}
                         </p>
                       </div>
-                      <div className="rounded-2xl border border-border bg-white px-4 py-3 text-sm text-slate-700">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                          Freight Cost / m²
-                        </p>
-                        <p className="mt-2 font-semibold text-slate-900">
-                          {formatMetric(materialSourcing?.freightCostPerM2Egp ?? null, 2, " EGP")}
-                        </p>
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          Managed in Material Sourcing & Costing.
-                        </p>
-                      </div>
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Overtime / Bag
+                        <Input
+                          inputMode="decimal"
+                          value={form.costLines.find((line) => line.code === "I_RUSH")?.costPerBag ?? "0"}
+                          onChange={(event) => updateLineCost("I_RUSH", event.target.value)}
+                        />
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Installation / Bag
+                        <Input
+                          inputMode="decimal"
+                          value={form.costLines.find((line) => line.code === "K")?.costPerBag ?? "0"}
+                          onChange={(event) => updateLineCost("K", event.target.value)}
+                        />
+                      </label>
+                      <label className="space-y-2 text-sm font-medium text-slate-700">
+                        Transportation Cost / Bag
+                        <Input
+                          inputMode="decimal"
+                          value={form.costLines.find((line) => line.code === "J")?.costPerBag ?? "0"}
+                          onChange={(event) => updateLineCost("J", event.target.value)}
+                        />
+                      </label>
                     </div>
-                  </section>
 
-                  <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
-                    <button
-                      aria-expanded={isMaterialSourcingDetailOpen}
-                      className="flex w-full items-start justify-between gap-4 text-left"
-                      onClick={() => setIsMaterialSourcingDetailOpen((current) => !current)}
-                      type="button"
-                    >
-                      <div>
-                        <h3 className="text-base font-semibold text-slate-900">Material Sourcing Detail</h3>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          This section shows how the sourced material cost flows into the final cost price.
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
-                          <ChevronDown
-                            className={`h-5 w-5 transition-transform ${isMaterialSourcingDetailOpen ? "rotate-180" : ""}`}
-                          />
+                    <div className="mt-4 rounded-[1.25rem] border border-blue-100 bg-white p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">Sales Input</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Use a percentage of the tender cost before sales, or set a fixed sales amount per bag.
+                          </p>
+                        </div>
+                        <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+                          <button
+                            className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                              form.salesInputMode === "percent"
+                                ? "bg-blue-600 text-white"
+                                : "text-slate-600 hover:text-slate-900"
+                            }`}
+                            onClick={() => updateField("salesInputMode", "percent")}
+                            type="button"
+                          >
+                            Percentage
+                          </button>
+                          <button
+                            className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                              form.salesInputMode === "fixed"
+                                ? "bg-blue-600 text-white"
+                                : "text-slate-600 hover:text-slate-900"
+                            }`}
+                            onClick={() => updateField("salesInputMode", "fixed")}
+                            type="button"
+                          >
+                            Fixed
+                          </button>
                         </div>
                       </div>
-                    </button>
 
-                    {isMaterialSourcingDetailOpen ? (
-                      <div className="mt-4 space-y-4">
-                        {sourcingBreakdown.length ? (
-                          sourcingBreakdown.map((component) => (
-                            <div key={component.componentId} className="rounded-2xl border border-border bg-white p-4">
-                              <div className="flex flex-wrap items-start justify-between gap-4">
-                                <div>
-                                  <p className="text-sm font-semibold text-slate-900">
-                                    {component.productName} · {component.componentName}
-                                  </p>
-                                  <p className="mt-1 text-sm text-muted-foreground">
-                                    Material ID: {component.materialId || "Not set"} · Requested quantity:{" "}
-                                    {component.requestedQuantity?.toLocaleString() ?? "Not set"}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-                                <table className="min-w-full text-sm">
-                                  <thead className="bg-slate-50 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                                    <tr>
-                                      <th className="px-4 py-3">Source</th>
-                                      <th className="px-4 py-3">Type</th>
-                                      <th className="px-4 py-3">Allocated Bags</th>
-                                      <th className="px-4 py-3">Actual Area / Bag</th>
-                                      <th className="px-4 py-3">Qty Used</th>
-                                      <th className="px-4 py-3">Unit Cost</th>
-                                      <th className="px-4 py-3">Total Cost</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {component.selectedSources.length ? (
-                                      component.selectedSources.map((source) => (
-                                        <tr key={`${component.componentId}-${source.sourceId}`} className="border-t border-border">
-                                          <td className="px-4 py-3 font-medium text-slate-900">{source.sourceName}</td>
-                                          <td className="px-4 py-3">{source.sourceType}</td>
-                                          <td className="px-4 py-3">{source.allocatedBags?.toLocaleString() ?? "-"}</td>
-                                          <td className="px-4 py-3">{formatMetric(source.actualAreaPerBagM2 ?? null, 4, " m²")}</td>
-                                          <td className="px-4 py-3">{formatMetric(source.qtyUsedM2 ?? null, 4, " m²")}</td>
-                                          <td className="px-4 py-3">
-                                            {source.actualAreaPerBagM2 !== null
-                                              ? (
-                                                  <div className="space-y-1">
-                                                    {source.sourceType === "stock" ? (
-                                                      <p>{formatMetric(source.landedCostEgp ?? null, 2, " EGP/m²")}</p>
-                                                    ) : (
-                                                      <>
-                                                        <p>{formatMetric(source.unitCostUsdPerM2 ?? null, 3, " USD/m²")}</p>
-                                                        <p className="text-xs text-muted-foreground">
-                                                          {formatMetric(
-                                                            source.unitCostUsdPerM2 !== null && effectiveExchangeRate !== null
-                                                              ? source.unitCostUsdPerM2 * effectiveExchangeRate
-                                                              : null,
-                                                            2,
-                                                            " EGP/m²",
-                                                          )}
-                                                        </p>
-                                                      </>
-                                                    )}
-                                                  </div>
-                                                )
-                                              : formatMetric(source.unitCostUsdPerM2 ?? null, 2, " EGP/bag")}
-                                          </td>
-                                          <td className="px-4 py-3">
-                                            {source.actualAreaPerBagM2 !== null
-                                              ? (
-                                                  <div className="space-y-1">
-                                                    <p>{formatMetric(source.totalCostUsd ?? null, 2, " USD")}</p>
-                                                    <p className="text-xs text-muted-foreground">
-                                                      {formatMetric(
-                                                        source.totalCostUsd !== null && effectiveExchangeRate !== null
-                                                          ? source.totalCostUsd * effectiveExchangeRate
-                                                          : null,
-                                                        2,
-                                                        " EGP",
-                                                      )}
-                                                    </p>
-                                                  </div>
-                                                )
-                                              : formatMetric(source.allocatedBags != null && source.unitCostUsdPerM2 !== null ? source.allocatedBags * source.unitCostUsdPerM2 : null, 2, " EGP")}
-                                          </td>
-                                        </tr>
-                                      ))
-                                    ) : (
-                                      <tr>
-                                        <td className="px-4 py-5 text-center text-muted-foreground" colSpan={7}>
-                                          No sourcing lines saved for this component yet.
-                                        </td>
-                                      </tr>
-                                    )}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="rounded-2xl border border-dashed border-border bg-white px-4 py-8 text-center text-sm text-muted-foreground">
-                            No material sourcing detail is available yet.
-                          </div>
-                        )}
+                      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_240px_280px]">
+                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-3 text-sm text-slate-700">
+                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Sales Basis</p>
+                          <p className="mt-2 font-semibold text-slate-900">
+                            {form.salesInputMode === "percent"
+                              ? `${formatMetric(salesSummary.totalBeforeSalesOrder, 2, " EGP")} total tender cost before sales`
+                              : "Fixed amount entered directly per bag"}
+                          </p>
+                        </div>
+                        <label className="space-y-2 text-sm font-medium text-slate-700">
+                          {form.salesInputMode === "percent" ? "Sales Percentage %" : "Sales Fixed Amount / Bag"}
+                          <Input
+                            inputMode="decimal"
+                            value={form.salesInputMode === "percent" ? form.salesPercent : form.salesFixedAmount}
+                            onChange={(event) =>
+                              form.salesInputMode === "percent"
+                                ? updateField("salesPercent", event.target.value)
+                                : updateField("salesFixedAmount", event.target.value)
+                            }
+                          />
+                        </label>
+                        <div className="rounded-2xl border border-blue-100 bg-blue-50/40 px-4 py-3 text-sm text-slate-700">
+                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Calculated Sales / Bag</p>
+                          <p className="mt-2 font-semibold text-slate-900">
+                            {formatMetric(currentLineValues.get("H") ?? null, 2, " EGP")}
+                          </p>
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            Base before sales: {formatMetric(salesSummary.totalBeforeSalesPerBag, 2, " EGP")}
+                          </p>
+                        </div>
                       </div>
-                    ) : null}
+                    </div>
                   </section>
 
                   <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
@@ -1511,7 +1632,7 @@ export const CostBuildUpPage = () => {
                       <div>
                         <h3 className="text-base font-semibold text-slate-900">Cost Breakdown Per Bag</h3>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          Review material, product overhead, and tender-level charges in one hierarchy grid.
+                          Review the tender total, nested products, and each bag or accessory component in one collapsed hierarchy.
                         </p>
                       </div>
                       <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
@@ -1522,20 +1643,13 @@ export const CostBuildUpPage = () => {
                     <div className="space-y-4">
                       <div className="overflow-hidden rounded-[1.25rem] border border-border bg-white">
                         <div className="overflow-x-auto">
-                          <div className="min-w-[1420px]">
-                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] bg-slate-50/90 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                          <div className="min-w-[650px]">
+                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px] bg-slate-50/90 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                               {[
                                 "Hierarchy",
                                 "Quantity",
                                 "Unit Cost",
                                 "Total Cost",
-                                "Factory Overhead",
-                                "Manufacturing Overhead",
-                                "Management Overhead",
-                                "Overtime / Rush Order",
-                                "Transportation",
-                                "Installation",
-                                "Sales",
                               ].map((label, index, allLabels) => (
                                 <div
                                   key={label}
@@ -1544,24 +1658,11 @@ export const CostBuildUpPage = () => {
                                   }`}
                                 >
                                   {label}
-                                  {[
-                                    "Factory Overhead",
-                                    "Manufacturing Overhead",
-                                    "Management Overhead",
-                                    "Overtime / Rush Order",
-                                    "Transportation",
-                                    "Installation",
-                                    "Sales",
-                                  ].includes(label) ? (
-                                    <span className="mt-1 block text-[10px] normal-case tracking-normal text-slate-400">
-                                      EGP / bag
-                                    </span>
-                                  ) : null}
                                 </div>
                               ))}
                             </div>
 
-                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] bg-white">
+                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px] border-b border-border bg-white">
                               <div className={rowCellClassName("px-4 py-4.5", "bg-white")}>
                                 <div className="flex items-start gap-3">
                                   <ChevronDown className="mt-1 h-4 w-4 text-slate-500" />
@@ -1576,53 +1677,63 @@ export const CostBuildUpPage = () => {
                                 </div>
                               </div>
                               <div className={rowCellClassName("px-4 py-4.5 text-base text-slate-700", "bg-white")}>
-                                {quantity !== null ? quantity.toLocaleString() : "-"}
+                                {tenderGridSummary.totalQuantity !== null
+                                  ? tenderGridSummary.totalQuantity.toLocaleString()
+                                  : "-"}
                               </div>
                               <div className={rowCellClassName("px-4 py-4.5", "bg-white")}>
                                 <div className="flex items-center gap-2 text-base text-slate-700">
-                                  <span>{formatMetric(totals.totalCostPricePerBag, 2, " EGP")}</span>
-                                  {lineABreakdown.components.length ? (
-                                    <button
-                                      className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-slate-50 text-[11px] font-medium text-muted-foreground transition hover:border-slate-300 hover:text-slate-700"
-                                      onClick={() =>
-                                        setActiveLineHelp({
-                                          code: "A",
-                                          title: "A · Material - Fabric",
-                                          total: lineABreakdown.total,
-                                          totalCost: lineABreakdown.totalCost,
-                                          totalRequestedQuantity: lineABreakdown.totalRequestedQuantity,
-                                          components: lineABreakdown.components,
-                                        })
-                                      }
-                                      type="button"
-                                    >
-                                      ?
-                                    </button>
-                                  ) : null}
+                                  <span>{formatMetric(tenderGridSummary.unitCost, 2, " EGP")}</span>
+                                  <button
+                                    className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-slate-50 text-[11px] font-medium text-muted-foreground transition hover:border-slate-300 hover:text-slate-700"
+                                    onClick={() =>
+                                      setActiveLineHelp({
+                                        code: "TENDER_TOTAL",
+                                        title: "Tender total",
+                                        description: "This is a simple summary of how the tender total is calculated.",
+                                        emptyMessage: "",
+                                        summaryLabel: "Tender total",
+                                        summaryDescription: undefined,
+                                        total: tenderGridSummary.unitCost,
+                                        totalCost: tenderGridSummary.totalCost,
+                                        totalRequestedQuantity: tenderGridSummary.totalQuantity,
+                                        components: [],
+                                        breakdownSections: [
+                                          {
+                                            id: "tender-total-summary",
+                                            title: "How it works",
+                                            description: "We add all product totals together, then divide by the total quantity to get the unit cost.",
+                                            costPerBag: tenderGridSummary.unitCost,
+                                            totalCost: tenderGridSummary.totalCost,
+                                            items: [
+                                              {
+                                                id: "tender-total-products",
+                                                label: "All product total costs added together",
+                                                costPerBag: null,
+                                                totalCost: tenderGridSummary.totalCost,
+                                                valueType: "currency",
+                                              },
+                                              {
+                                                id: "tender-total-quantity",
+                                                label: "Total quantity",
+                                                costPerBag: null,
+                                                totalCost: tenderGridSummary.totalQuantity,
+                                                valueType: "quantity",
+                                              },
+                                            ],
+                                          },
+                                        ],
+                                      })
+                                    }
+                                    type="button"
+                                  >
+                                    ?
+                                  </button>
                                 </div>
                               </div>
                               <div className={rowCellClassName("px-4 py-4.5 text-base font-semibold text-slate-900", "bg-white")}>
-                                {formatMetric(totals.totalCostPriceForOrder, 2, " EGP")}
+                                {formatMetric(tenderGridSummary.totalCost, 2, " EGP")}
                               </div>
-                              <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", "bg-white")}>-</div>
-                              <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", "bg-white")}>-</div>
-                              <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", "bg-white")}>-</div>
-                              {[
-                                { code: "I_RUSH", label: "Overtime / Rush Order" },
-                                { code: "J", label: "Transportation" },
-                                { code: "K", label: "Installation" },
-                                { code: "H", label: "Sales" },
-                              ].map((item) => (
-                                <div key={item.code} className={rowCellClassName("px-3 py-3", "bg-white")}>
-                                  <Input
-                                    aria-label={item.label}
-                                    className="h-10 rounded-xl border-slate-200 bg-white px-3 text-base"
-                                    inputMode="decimal"
-                                    value={form.costLines.find((line) => line.code === item.code)?.costPerBag || "0"}
-                                    onChange={(event) => updateLineCost(item.code, event.target.value)}
-                                  />
-                                </div>
-                              ))}
                             </div>
 
                             {materialBreakdownGrid.map((product, productIndex) => (
@@ -1631,70 +1742,234 @@ export const CostBuildUpPage = () => {
                                   {(() => {
                                     const rowBackground = productIndex % 2 === 0 ? "bg-white" : "bg-slate-50/35";
                                     return (
-                                  <button
-                                    aria-expanded={!collapsedProducts[product.productId]}
-                                    className="grid w-full grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] text-left"
-                                    onClick={() => toggleProductCollapse(product.productId)}
-                                    type="button"
-                                  >
-                                    <div className={rowCellClassName("px-4 py-4.5", rowBackground)}>
-                                      <div className="flex items-start gap-3 pl-8">
-                                        <ChevronDown
-                                          className={`mt-1 h-4 w-4 text-slate-500 transition-transform ${
-                                            collapsedProducts[product.productId] ? "-rotate-90" : ""
-                                          }`}
-                                        />
-                                        <div>
-                                          <div className="flex flex-wrap items-center gap-2">
-                                            <p className="text-base font-semibold text-slate-900">{product.productName}</p>
-                                            {product.isOutOfSync ? (
-                                              <Badge variant="warning">Needs Sync</Badge>
-                                            ) : null}
+                                      <div
+                                        className={`grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px] border-b border-border text-left ${rowBackground}`}
+                                      >
+                                        <div className={rowCellClassName("px-4 py-4.5", rowBackground)}>
+                                          <button
+                                            aria-expanded={!collapsedProducts[product.productId]}
+                                            className="flex w-full items-start gap-3 pl-8 text-left"
+                                            onClick={() => toggleProductCollapse(product.productId)}
+                                            type="button"
+                                          >
+                                            <ChevronDown
+                                              className={`mt-1 h-4 w-4 text-slate-500 transition-transform ${
+                                                collapsedProducts[product.productId] ? "-rotate-90" : ""
+                                              }`}
+                                            />
+                                            <div>
+                                              <div className="flex flex-wrap items-center gap-2">
+                                                <p className="text-base font-semibold text-slate-900">{product.productName}</p>
+                                                {product.isOutOfSync ? (
+                                                  <Badge variant="warning">Needs Sync</Badge>
+                                                ) : null}
+                                              </div>
+                                              <p className="mt-1 text-sm text-muted-foreground">
+                                                {product.productId} · {product.components.length} components
+                                              </p>
+                                            </div>
+                                          </button>
+                                        </div>
+                                        <div className={rowCellClassName("px-4 py-4.5 text-base text-slate-700", rowBackground)}>
+                                          {product.requestedQuantity !== null && product.requestedQuantity !== undefined
+                                            ? product.requestedQuantity.toLocaleString()
+                                            : "-"}
+                                        </div>
+                                        <div className={rowCellClassName("px-4 py-4.5 text-base text-slate-700", rowBackground)}>
+                                          <div className="flex items-center gap-2">
+                                            <span>{formatMetric(product.totalUnitCost, 2, " EGP")}</span>
+                                            <button
+                                              className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-slate-50 text-[11px] font-medium text-muted-foreground transition hover:border-slate-300 hover:text-slate-700"
+                                              onClick={() =>
+                                                setActiveLineHelp({
+                                                  code: product.productId,
+                                                  title: product.productName,
+                                                  description: "This shows the material, operational, and additional costs used to build this product total.",
+                                                  emptyMessage: "No component detail is available for this product yet.",
+                                                  summaryLabel: "Product total",
+                                                  summaryDescription: `${formatMetric(product.materialPerBag, 2, " EGP")} material cost + ${formatMetric(product.operatingPerBag, 2, " EGP")} operational cost + ${formatMetric(product.additionalPerBag, 2, " EGP")} additional cost = ${formatMetric(product.totalUnitCost, 2, " EGP per bag")}`,
+                                                  total: product.totalUnitCost,
+                                                  totalCost: product.totalCost,
+                                                  totalRequestedQuantity: product.requestedQuantity ?? null,
+                                                  components: product.components.map((component) => ({
+                                                    componentId: component.componentId,
+                                                    componentName: component.componentName,
+                                                    requestedQuantity: component.requestedQuantity,
+                                                    actualAreaPerBagM2: null,
+                                                    costPerBag: component.unitCost,
+                                                    recomputedTotal: component.totalCost,
+                                                    sources: [],
+                                                  })),
+                                                  breakdownSections: [
+                                                    {
+                                                      id: `${product.productId}-material`,
+                                                      title: "Material cost",
+                                                      description: "Sum of all component material costs plus packaging for this product.",
+                                                      costPerBag: product.materialPerBag,
+                                                      totalCost:
+                                                        product.requestedQuantity !== null &&
+                                                        product.requestedQuantity !== undefined
+                                                          ? product.materialPerBag * product.requestedQuantity
+                                                          : null,
+                                                      items: [
+                                                        {
+                                                          id: `${product.productId}-material-bag`,
+                                                          label: "Bag cost",
+                                                          costPerBag: product.bagMaterialUnitCost,
+                                                          totalCost: product.bagMaterialTotalCost,
+                                                        },
+                                                        {
+                                                          id: `${product.productId}-material-accessories`,
+                                                          label: "Accessories cost",
+                                                          costPerBag: product.accessoryMaterialUnitCost,
+                                                          totalCost: product.accessoryMaterialTotalCost,
+                                                        },
+                                                        {
+                                                          id: `${product.productId}-material-packaging`,
+                                                          label: "Packaging",
+                                                          costPerBag:
+                                                            Math.max(
+                                                              0,
+                                                              (product.materialPerBag ?? 0) -
+                                                                (product.productMaterialUnitCost ?? 0),
+                                                            ),
+                                                          totalCost:
+                                                            product.requestedQuantity !== null &&
+                                                            product.requestedQuantity !== undefined
+                                                              ? Math.max(
+                                                                  0,
+                                                                  (product.materialPerBag ?? 0) -
+                                                                    (product.productMaterialUnitCost ?? 0),
+                                                                ) * product.requestedQuantity
+                                                              : null,
+                                                        },
+                                                      ],
+                                                    },
+                                                    {
+                                                      id: `${product.productId}-operating`,
+                                                      title: "Operational cost",
+                                                      description: "Factory, manufacturing cost, management overhead, and sales cost allocated to this product.",
+                                                      costPerBag: product.operatingPerBag,
+                                                      totalCost:
+                                                        product.requestedQuantity !== null &&
+                                                        product.requestedQuantity !== undefined
+                                                          ? product.operatingPerBag * product.requestedQuantity
+                                                          : null,
+                                                      items: [
+                                                        {
+                                                          id: `${product.productId}-factory`,
+                                                          label: "Factory overhead",
+                                                          costPerBag: product.overheads?.factoryOverheadPerBag ?? null,
+                                                          totalCost:
+                                                            product.requestedQuantity !== null &&
+                                                            product.requestedQuantity !== undefined
+                                                              ? (product.overheads?.factoryOverheadPerBag ?? 0) *
+                                                                product.requestedQuantity
+                                                              : null,
+                                                        },
+                                                        {
+                                                          id: `${product.productId}-manufacturing`,
+                                                          label: "Manufacturing cost",
+                                                          costPerBag: product.overheads?.manufacturingOverheadPerBag ?? null,
+                                                          totalCost:
+                                                            product.requestedQuantity !== null &&
+                                                            product.requestedQuantity !== undefined
+                                                              ? (product.overheads?.manufacturingOverheadPerBag ?? 0) *
+                                                                product.requestedQuantity
+                                                              : null,
+                                                        },
+                                                        {
+                                                          id: `${product.productId}-management`,
+                                                          label: "Management overhead",
+                                                          costPerBag: product.overheads?.managementOverheadPerBag ?? null,
+                                                          totalCost:
+                                                            product.requestedQuantity !== null &&
+                                                            product.requestedQuantity !== undefined
+                                                              ? (product.overheads?.managementOverheadPerBag ?? 0) *
+                                                                product.requestedQuantity
+                                                              : null,
+                                                        },
+                                                        {
+                                                          id: `${product.productId}-sales`,
+                                                          label: "Sales cost",
+                                                          costPerBag: Math.max(
+                                                            0,
+                                                            (product.operatingPerBag ?? 0) -
+                                                              ((product.overheads?.factoryOverheadPerBag ?? 0) +
+                                                                (product.overheads?.manufacturingOverheadPerBag ?? 0) +
+                                                                (product.overheads?.managementOverheadPerBag ?? 0)),
+                                                          ),
+                                                          totalCost:
+                                                            product.requestedQuantity !== null &&
+                                                            product.requestedQuantity !== undefined
+                                                              ? Math.max(
+                                                                  0,
+                                                                  (product.operatingPerBag ?? 0) -
+                                                                    ((product.overheads?.factoryOverheadPerBag ?? 0) +
+                                                                      (product.overheads?.manufacturingOverheadPerBag ?? 0) +
+                                                                      (product.overheads?.managementOverheadPerBag ?? 0)),
+                                                                ) * product.requestedQuantity
+                                                              : null,
+                                                        },
+                                                      ],
+                                                    },
+                                                    {
+                                                      id: `${product.productId}-additional`,
+                                                      title: "Additional cost",
+                                                      description: "Rush, transportation, and installation cost allocated to this product.",
+                                                      costPerBag: product.additionalPerBag,
+                                                      totalCost:
+                                                        product.requestedQuantity !== null &&
+                                                        product.requestedQuantity !== undefined
+                                                          ? product.additionalPerBag * product.requestedQuantity
+                                                          : null,
+                                                      items: [
+                                                        {
+                                                          id: `${product.productId}-rush`,
+                                                          label: "Rush / overtime",
+                                                          costPerBag: currentLineValues.get("I_RUSH") ?? 0,
+                                                          totalCost:
+                                                            product.requestedQuantity !== null &&
+                                                            product.requestedQuantity !== undefined
+                                                              ? (currentLineValues.get("I_RUSH") ?? 0) *
+                                                                product.requestedQuantity
+                                                              : null,
+                                                        },
+                                                        {
+                                                          id: `${product.productId}-transport`,
+                                                          label: "Transportation",
+                                                          costPerBag: currentLineValues.get("J") ?? 0,
+                                                          totalCost:
+                                                            product.requestedQuantity !== null &&
+                                                            product.requestedQuantity !== undefined
+                                                              ? (currentLineValues.get("J") ?? 0) * product.requestedQuantity
+                                                              : null,
+                                                        },
+                                                        {
+                                                          id: `${product.productId}-installation`,
+                                                          label: "Installation",
+                                                          costPerBag: currentLineValues.get("K") ?? 0,
+                                                          totalCost:
+                                                            product.requestedQuantity !== null &&
+                                                            product.requestedQuantity !== undefined
+                                                              ? (currentLineValues.get("K") ?? 0) * product.requestedQuantity
+                                                              : null,
+                                                        },
+                                                      ],
+                                                    },
+                                                  ],
+                                                })
+                                              }
+                                              type="button"
+                                            >
+                                              ?
+                                            </button>
                                           </div>
-                                          <p className="mt-1 text-sm text-muted-foreground">{product.productId}</p>
+                                        </div>
+                                        <div className={rowCellClassName("px-4 py-4.5 text-base font-semibold text-slate-900", rowBackground)}>
+                                          {formatMetric(product.totalCost, 2, " EGP")}
                                         </div>
                                       </div>
-                                    </div>
-                                    <div className={rowCellClassName("px-4 py-4.5 text-base text-slate-700", rowBackground)}>
-                                      {product.requestedQuantity !== null && product.requestedQuantity !== undefined
-                                        ? product.requestedQuantity.toLocaleString()
-                                        : "-"}
-                                    </div>
-                                    <div className={rowCellClassName("px-4 py-4.5 text-base text-slate-700", rowBackground)}>
-                                      {formatMetric(product.totalUnitCost, 2, " EGP")}
-                                    </div>
-                                    <div className={rowCellClassName("px-4 py-4.5 text-base font-semibold text-slate-900", rowBackground)}>
-                                      {formatMetric(product.totalCost, 2, " EGP")}
-                                    </div>
-                                    {[
-                                      {
-                                        code: productOverheadLineCode("F", product.productId),
-                                        label: `Factory overhead for ${product.productName}`,
-                                      },
-                                      {
-                                        code: productOverheadLineCode("G", product.productId),
-                                        label: `Manufacturing overhead for ${product.productName}`,
-                                      },
-                                      {
-                                        code: productOverheadLineCode("G2", product.productId),
-                                        label: `Management overhead for ${product.productName}`,
-                                      },
-                                    ].map((item) => (
-                                      <div key={item.code} className={rowCellClassName("px-3 py-3", rowBackground)}>
-                                        <Input
-                                          aria-label={item.label}
-                                          className="h-10 rounded-xl border-slate-200 bg-white px-3 text-base"
-                                          inputMode="decimal"
-                                          value={form.costLines.find((line) => line.code === item.code)?.costPerBag || "0"}
-                                          onChange={(event) => updateLineCost(item.code, event.target.value)}
-                                        />
-                                      </div>
-                                    ))}
-                                    <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", rowBackground)}>-</div>
-                                    <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", rowBackground)}>-</div>
-                                    <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", rowBackground)}>-</div>
-                                    <div className={rowCellClassName("px-4 py-4.5 text-sm text-slate-300", rowBackground, true)}>-</div>
-                                  </button>
                                     );
                                   })()}
                                 </div>
@@ -1704,14 +1979,15 @@ export const CostBuildUpPage = () => {
                                     {product.components.map((component) => (
                                       <div
                                         key={component.componentId}
-                                        className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] bg-white"
+                                        className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px] border-b border-border bg-white"
                                       >
                                         <div className={rowCellClassName("px-4 py-4", "bg-white")}>
                                           <div className="pl-12">
-                                            <p className="text-[15px] font-medium text-slate-900">{component.componentName}</p>
-                                            <p className="mt-1 text-sm text-muted-foreground">
-                                              {component.materialId}
-                                            </p>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <p className="text-[15px] font-medium text-slate-900">{component.componentName}</p>
+                                              <Badge variant="neutral">{component.componentType}</Badge>
+                                            </div>
+                                            <p className="mt-1 text-sm text-muted-foreground">{component.materialId}</p>
                                             <p className="mt-1 max-w-[210px] text-sm leading-5 text-muted-foreground">
                                               {component.detail}
                                             </p>
@@ -1728,18 +2004,10 @@ export const CostBuildUpPage = () => {
                                         <div className={rowCellClassName("px-4 py-4 text-base font-semibold text-slate-900", "bg-white")}>
                                           {formatMetric(component.totalCost, 2, " EGP")}
                                         </div>
-                                        {Array.from({ length: 7 }).map((_, index) => (
-                                          <div
-                                            key={index}
-                                            className={rowCellClassName("px-4 py-4 text-sm text-slate-300", "bg-white")}
-                                          >
-                                            -
-                                          </div>
-                                        ))}
                                       </div>
                                     ))}
 
-                                    <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))] bg-slate-50/70">
+                                    <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px] border-b border-border bg-slate-50/70">
                                       <div className={rowCellClassName("px-4 py-4 pl-12 text-[15px] font-semibold text-slate-900", "bg-slate-50/70")}>
                                         Product Subtotal
                                       </div>
@@ -1754,56 +2022,26 @@ export const CostBuildUpPage = () => {
                                       <div className={rowCellClassName("px-4 py-4 text-base font-semibold text-slate-900", "bg-slate-50/70")}>
                                         {formatMetric(product.totalCost, 2, " EGP")}
                                       </div>
-                                      {Array.from({ length: 7 }).map((_, index) => (
-                                        <div
-                                          key={index}
-                                          className={rowCellClassName(
-                                            "px-4 py-4 text-sm text-slate-300",
-                                            "bg-slate-50/70",
-                                          )}
-                                        >
-                                          -
-                                        </div>
-                                      ))}
                                     </div>
                                   </>
                                 ) : null}
                               </div>
                             ))}
 
-                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px_repeat(7,minmax(132px,1fr))]">
-                              <div className={rowCellClassName("px-4 py-4 text-[15px] font-semibold text-slate-900", "bg-slate-50/90", false)}>
+                            <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px]">
+                              <div className={rowCellClassName("px-4 py-4 text-[15px] font-semibold text-slate-900", "bg-slate-50/90")}>
                                 Tender Total
                               </div>
-                              <div className={rowCellClassName("px-4 py-4 text-base text-slate-700", "bg-slate-50/90", false)}>
-                                {quantity !== null ? quantity.toLocaleString() : "-"}
+                              <div className={rowCellClassName("px-4 py-4 text-base text-slate-700", "bg-slate-50/90")}>
+                                {tenderGridSummary.totalQuantity !== null
+                                  ? tenderGridSummary.totalQuantity.toLocaleString()
+                                  : "-"}
                               </div>
-                              <div className={rowCellClassName("px-4 py-4 text-base text-slate-700", "bg-slate-50/90", false)}>
-                                {formatMetric(totals.totalCostPricePerBag, 2, " EGP")}
+                              <div className={rowCellClassName("px-4 py-4 text-base text-slate-700", "bg-slate-50/90")}>
+                                {formatMetric(tenderGridSummary.unitCost, 2, " EGP")}
                               </div>
-                              <div className={rowCellClassName("px-4 py-4 text-base font-semibold text-slate-900", "bg-slate-50/90", false)}>
-                                {formatMetric(totals.totalCostPriceForOrder, 2, " EGP")}
-                              </div>
-                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700", "bg-slate-50/90", false)}>
-                                {formatMetric(currentLineValues.get("F") ?? null, 2, " EGP")}
-                              </div>
-                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700", "bg-slate-50/90", false)}>
-                                {formatMetric(currentLineValues.get("G") ?? null, 2, " EGP")}
-                              </div>
-                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700", "bg-slate-50/90", false)}>
-                                {formatMetric(currentLineValues.get("G2") ?? null, 2, " EGP")}
-                              </div>
-                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700", "bg-slate-50/90", false)}>
-                                {formatMetric(currentLineValues.get("I_RUSH") ?? null, 2, " EGP")}
-                              </div>
-                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700", "bg-slate-50/90", false)}>
-                                {formatMetric(currentLineValues.get("J") ?? null, 2, " EGP")}
-                              </div>
-                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700", "bg-slate-50/90", false)}>
-                                {formatMetric(currentLineValues.get("K") ?? null, 2, " EGP")}
-                              </div>
-                              <div className={rowCellClassName("px-4 py-4 text-sm text-slate-700 rounded-br-[1.25rem]", "bg-slate-50/90", false)}>
-                                {formatMetric(currentLineValues.get("H") ?? null, 2, " EGP")}
+                              <div className={rowCellClassName("px-4 py-4 text-base font-semibold text-slate-900 rounded-br-[1.25rem]", "bg-slate-50/90")}>
+                                {formatMetric(tenderGridSummary.totalCost, 2, " EGP")}
                               </div>
                             </div>
                           </div>
@@ -1859,19 +2097,19 @@ export const CostBuildUpPage = () => {
                 <div className="space-y-4 p-5">
                   <div>
                     <p className="text-sm font-medium text-blue-100">Total Cost Overview</p>
-                    <h3 className="mt-2 text-3xl font-semibold tracking-tight">
-                      {formatMetric(totals.totalCostPricePerBag, 2, " EGP")}
-                    </h3>
                   </div>
 
                   <div className="rounded-[1.5rem] bg-white/8 p-4 ring-1 ring-white/10 backdrop-blur-sm">
                     <div className="rounded-2xl bg-white/10 px-4 py-4">
                       <p className="text-xs uppercase tracking-[0.16em] text-blue-100">Order Total</p>
                       <p className="mt-2 text-2xl font-semibold text-white">
-                        {formatMetric(totals.totalCostPriceForOrder, 2, " EGP")}
+                        {formatMetric(tenderGridSummary.totalCost, 2, " EGP")}
                       </p>
                       <p className="mt-2 text-sm text-blue-100">
-                        Quantity: {quantity !== null ? `${quantity.toLocaleString()} bags` : "Not set"}
+                        Cost / Bag: {formatMetric(tenderGridSummary.unitCost, 2, " EGP")}
+                      </p>
+                      <p className="mt-1 text-sm text-blue-100">
+                        Quantity: {tenderGridSummary.totalQuantity !== null ? `${tenderGridSummary.totalQuantity.toLocaleString()} bags` : "Not set"}
                       </p>
                     </div>
                     <div className="mt-4 rounded-2xl bg-white/10 px-4 py-4">
@@ -1892,6 +2130,7 @@ export const CostBuildUpPage = () => {
 
                   {productCostCards.length ? (
                     <div className="grid gap-3">
+                      <p className="text-xs uppercase tracking-[0.16em] text-blue-100">Bag Price By Product</p>
                       {productCostCards.map((product) => (
                         <div key={product.productId} className="rounded-2xl bg-white/12 px-4 py-3 backdrop-blur-sm">
                           <div className="flex items-start justify-between gap-3">
@@ -1991,7 +2230,7 @@ export const CostBuildUpPage = () => {
       ) : null}
 
       <Dialog
-        description="This shows the actual sourcing numbers used to build line A."
+        description={activeLineHelp?.description ?? "Calculation details"}
         onClose={() => setActiveLineHelp(null)}
         open={activeLineHelp !== null}
         size="lg"
@@ -1999,177 +2238,79 @@ export const CostBuildUpPage = () => {
       >
         {activeLineHelp ? (
           <div className="space-y-5">
-            {activeLineHelp.components.length ? (
-              activeLineHelp.components.map((component) => (
-                <div key={component.componentId} className="rounded-2xl border border-border bg-slate-50/70 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{component.componentName}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Requested quantity: {component.requestedQuantity?.toLocaleString() ?? "Not set"}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Component cost / bag</p>
-                      <p className="mt-2 text-sm font-semibold text-slate-900">
-                        {formatMetric(component.costPerBag, 2, " EGP")}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    {component.sources.map((source) => (
-                      <div key={source.sourceId} className="rounded-2xl border border-border bg-white p-4">
-                        <p className="text-sm font-semibold text-slate-900">{source.sourceName}</p>
-                        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Allocated bags</p>
-                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.allocatedBags ?? null, 0, " bags")}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Area / bag</p>
-                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.actualAreaPerBagM2 ?? null, 4, " m²/bag")}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Qty used</p>
-                            <p className="mt-1 text-sm text-slate-900">{formatMetric(source.qtyUsedM2, 4, " m²")}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Unit cost</p>
-                            <p className="mt-1 text-sm text-slate-900">
-                              {source.sourceType === "stock"
-                                ? formatMetric(source.landedCostEgp, 2, " EGP/m²")
-                                : formatMetric(source.unitCostUsdPerM2, 3, " USD/m²")}
-                            </p>
-                          </div>
-                          {source.sourceType === "stock" ? null : (
-                            <>
-                              <div>
-                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Effective FX</p>
-                                <p className="mt-1 text-sm text-slate-900">{formatMetric(effectiveExchangeRate, 3)}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Freight / m²</p>
-                                <p className="mt-1 text-sm text-slate-900">{formatMetric(source.freightCostPerM2Egp, 2, " EGP")}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Customes %</p>
-                                <p className="mt-1 text-sm text-slate-900">{formatMetric(source.customsPercent, 2, "%")}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Clearance / m²</p>
-                                <p className="mt-1 text-sm text-slate-900">{formatMetric(source.clearanceCostPerM2Egp, 2, " EGP")}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Customs cost / m²</p>
-                                <p className="mt-1 text-sm text-slate-900">{formatMetric(source.customsCostPerM2Egp, 2, " EGP")}</p>
-                              </div>
-                            </>
-                          )}
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Landed cost / m²</p>
-                            <p className="mt-1 text-sm font-semibold text-slate-900">
-                              {formatMetric(source.landedCostPerM2Egp, 2, " EGP/m²")}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Source total</p>
-                            <p className="mt-1 text-sm font-semibold text-slate-900">
-                              {formatMetric(source.totalCostEgp, 2, " EGP")}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="mt-4 space-y-2 border-t border-border pt-4">
-                          {source.sourceType === "stock" ? (
-                            <p className="text-sm text-muted-foreground">
-                              {`Source total = qty used [${formatMetric(
-                                source.qtyUsedM2,
-                                4,
-                                " m²",
-                              )}] × landing cost / m² [${formatMetric(
-                                source.landedCostPerM2Egp,
-                                2,
-                                " EGP/m²",
-                              )}]`}
-                            </p>
-                          ) : (
-                            <>
-                              <p className="text-sm text-muted-foreground">
-                                {`Freight / bag = (area / bag [${formatMetric(
-                                  source.actualAreaPerBagM2 ?? null,
-                                  4,
-                                  " m²/bag",
-                                )}] × freight cost / m² [${formatMetric(
-                                  source.freightCostPerM2Egp,
-                                  2,
-                                  " EGP/m²",
-                                )}])`}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                {`Clearance / bag = (area / bag [${formatMetric(
-                                  source.actualAreaPerBagM2 ?? null,
-                                  4,
-                                  " m²/bag",
-                                )}] × clearance cost / m² [${formatMetric(
-                                  source.clearanceCostPerM2Egp,
-                                  2,
-                                  " EGP/m²",
-                                )}])`}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                {`Customes / bag = ((area / bag [${formatMetric(
-                                  source.actualAreaPerBagM2 ?? null,
-                                  4,
-                                  " m²/bag",
-                                )}] × cost / m² [${formatMetric(
-                                  source.unitCostUsdPerM2,
-                                  3,
-                                  " USD/m²",
-                                )}] × effective exchange rate [${formatMetric(
-                                  effectiveExchangeRate,
-                                  3,
-                                  " EGP/USD",
-                                )}]) × customes % [${formatMetric(
-                                  source.customsPercent,
-                                  2,
-                                  "%",
-                                )}]) ÷ 100`}
-                              </p>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-4 rounded-2xl bg-blue-50 px-4 py-4">
-                    <p className="text-xs uppercase tracking-[0.16em] text-blue-700">Component total</p>
-                    <p className="mt-2 text-sm font-semibold text-slate-900">
-                      {formatMetric(component.recomputedTotal, 2, " EGP")}
-                    </p>
-                    <p className="mt-2 text-sm text-slate-700">
-                      {formatMetric(component.recomputedTotal, 2, " EGP")} /{" "}
-                      {component.requestedQuantity?.toLocaleString() ?? "Not set"} ={" "}
-                      {formatMetric(component.costPerBag, 2, " EGP per bag")}
-                    </p>
-                  </div>
-                </div>
-              ))
-            ) : (
+            {!activeLineHelp.breakdownSections.length ? (
               <div className="rounded-2xl border border-dashed border-border bg-slate-50 px-4 py-8 text-center text-sm text-muted-foreground">
-                No fabric sourcing detail is available for line A yet.
+                {activeLineHelp.emptyMessage}
               </div>
-            )}
+            ) : null}
+
+            {activeLineHelp.breakdownSections.length ? (
+              <div
+                className={
+                  activeLineHelp.breakdownSections.length === 1
+                    ? "w-full"
+                    : "grid gap-3 md:grid-cols-3"
+                }
+              >
+                {activeLineHelp.breakdownSections.map((section) => (
+                  <div key={section.id} className="rounded-2xl border border-border bg-white p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-blue-700">{section.title}</p>
+                    <p className="mt-2 text-lg font-semibold text-slate-900">
+                      {formatMetric(section.costPerBag, 2, " EGP / bag")}
+                    </p>
+                    <p className="mt-2 text-sm text-muted-foreground">{section.description}</p>
+                    <div className="mt-3 space-y-2 border-t border-border pt-3">
+                      {section.items
+                        .filter((item) => {
+                          if (item.valueType === "quantity") {
+                            return true;
+                          }
+
+                          const hasPerBagValue =
+                            item.costPerBag !== null && Number.isFinite(item.costPerBag) && Math.abs(item.costPerBag) > 0;
+                          const hasTotalValue =
+                            item.totalCost !== null && Number.isFinite(item.totalCost) && Math.abs(item.totalCost) > 0;
+
+                          return hasPerBagValue || hasTotalValue;
+                        })
+                        .map((item) => (
+                        <div key={item.id} className="flex items-start justify-between gap-3 text-sm">
+                          <span className="text-slate-700">{item.label}</span>
+                          <div className="text-right">
+                            {item.costPerBag !== null && Number.isFinite(item.costPerBag) ? (
+                              <p className="font-medium text-slate-900">
+                                {formatMetric(item.costPerBag, 2, " EGP / bag")}
+                              </p>
+                            ) : null}
+                            <p className="text-muted-foreground">
+                              {item.valueType === "quantity"
+                                ? item.totalCost !== null && Number.isFinite(item.totalCost)
+                                  ? item.totalCost.toLocaleString()
+                                  : "Not calculated"
+                                : formatMetric(item.totalCost, 2, " EGP")}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-3 text-sm text-slate-700">
+                      {formatMetric(section.totalCost, 2, " EGP")} total
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             <div className="rounded-2xl bg-blue-50 px-4 py-4">
-              <p className="text-xs uppercase tracking-[0.16em] text-blue-700">Line A total</p>
+              <p className="text-xs uppercase tracking-[0.16em] text-blue-700">{activeLineHelp.summaryLabel}</p>
               <p className="mt-2 text-lg font-semibold text-slate-900">
                 {formatMetric(activeLineHelp.total, 2, " EGP")}
               </p>
               <p className="mt-2 text-sm text-slate-700">
-                {formatMetric(activeLineHelp.totalCost, 2, " EGP")} /{" "}
-                {activeLineHelp.totalRequestedQuantity?.toLocaleString() ?? "Not set"} ={" "}
-                {formatMetric(activeLineHelp.total, 2, " EGP per bag")}
+                {activeLineHelp.summaryDescription ??
+                  `${formatMetric(activeLineHelp.totalCost, 2, " EGP")} / ${
+                    activeLineHelp.totalRequestedQuantity?.toLocaleString() ?? "Not set"
+                  } = ${formatMetric(activeLineHelp.total, 2, " EGP per bag")}`}
               </p>
             </div>
           </div>

@@ -3,8 +3,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import type {
+  CostBuildUp,
+  MaterialSourceSelection,
   PricingApproval,
   PricingApprovalDecisionStatus,
+  ProductConfiguration,
   ScenarioAlternative,
   TenderRequest,
 } from "../../shared/types";
@@ -118,11 +121,17 @@ const getStatusButtonClassName = (status: PricingApprovalDecisionStatus, active:
   return "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100";
 };
 
+const productOverheadLineCode = (baseCode: "F" | "G" | "G2", productId: string) =>
+  `${baseCode}::${productId}`;
+
 export const PricingApprovalPage = () => {
   const navigate = useNavigate();
   const { tenderId = "" } = useParams();
   const [tender, setTender] = useState<TenderRequest | null>(null);
+  const [costBuildUp, setCostBuildUp] = useState<CostBuildUp | null>(null);
   const [alternatives, setAlternatives] = useState<ScenarioAlternative | null>(null);
+  const [productConfiguration, setProductConfiguration] = useState<ProductConfiguration | null>(null);
+  const [materialSourcing, setMaterialSourcing] = useState<MaterialSourceSelection | null>(null);
   const [form, setForm] = useState<PricingApprovalForm | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -143,9 +152,28 @@ export const PricingApprovalPage = () => {
       setError("");
 
       try {
-        const [loadedTender, loadedAlternatives, savedApproval] = await Promise.all([
+        const [loadedTender, loadedCostBuildUp, loadedAlternatives, loadedProductConfiguration, loadedMaterialSourcing, savedApproval] = await Promise.all([
           api.get<TenderRequest>(`/tenders/${tenderId}?tenantId=alimex-demo`),
+          api
+            .get<CostBuildUp>(`/tenders/${tenderId}/cost-build-up?tenantId=alimex-demo`)
+            .catch((reason) => {
+              if (reason instanceof ApiError && reason.status === 404) {
+                return null;
+              }
+
+              throw reason;
+            }),
           api.get<ScenarioAlternative>(`/tenders/${tenderId}/alternatives?tenantId=alimex-demo`),
+          api.get<ProductConfiguration>(`/tenders/${tenderId}/product-configuration?tenantId=alimex-demo`),
+          api
+            .get<MaterialSourceSelection>(`/tenders/${tenderId}/material-sourcing?tenantId=alimex-demo`)
+            .catch((reason) => {
+              if (reason instanceof ApiError && reason.status === 404) {
+                return null;
+              }
+
+              throw reason;
+            }),
           api
             .get<PricingApproval>(`/tenders/${tenderId}/pricing-approval?tenantId=alimex-demo`)
             .catch((reason) => {
@@ -162,7 +190,10 @@ export const PricingApprovalPage = () => {
         }
 
         setTender(loadedTender);
+        setCostBuildUp(loadedCostBuildUp);
         setAlternatives(loadedAlternatives);
+        setProductConfiguration(loadedProductConfiguration);
+        setMaterialSourcing(loadedMaterialSourcing);
         const nextForm = buildInitialForm(tenderId, loadedAlternatives, savedApproval);
         setForm(nextForm);
         setLastSavedSignature(JSON.stringify(nextForm));
@@ -207,15 +238,111 @@ export const PricingApprovalPage = () => {
     [form],
   );
 
-  const orderTotalCost = useMemo(
+  const productSnapshots = productConfiguration?.productSnapshots ?? [];
+  const sourcingBreakdown = materialSourcing?.componentSelections ?? [];
+  const readCostLineValue = (code: string) =>
+    costBuildUp?.costLines.find((line) => line.code === code)?.costPerBag ?? 0;
+
+  const productCostCards = useMemo(
     () =>
-      alternatives?.baseCostPerBag !== null &&
-      alternatives?.baseCostPerBag !== undefined &&
-      alternatives?.quantity !== null &&
-      alternatives?.quantity !== undefined
-        ? alternatives.baseCostPerBag * alternatives.quantity
-        : null,
-    [alternatives],
+      productSnapshots.map((product) => {
+        const sourcingLines = sourcingBreakdown.filter((selection) => selection.productId === product.productId);
+        const requestedQuantity = product.requestedQuantity ?? null;
+        const sourcedMaterialTotal = sourcingLines.reduce(
+          (total, selection) => total + (selection.totalMaterialCostEgp ?? 0),
+          0,
+        );
+        const sourcedMaterialCostPerBag =
+          requestedQuantity && requestedQuantity > 0 ? sourcedMaterialTotal / requestedQuantity : null;
+
+        const packagingCost = readCostLineValue("D");
+        const factoryOverhead =
+          costBuildUp?.costLines.find((line) => line.code === productOverheadLineCode("F", product.productId))?.costPerBag ??
+          product.factoryOverheadPerBag ??
+          readCostLineValue("F");
+        const manufacturingOverhead =
+          costBuildUp?.costLines.find((line) => line.code === productOverheadLineCode("G", product.productId))?.costPerBag ??
+          product.manufacturingOverheadPerBag ??
+          readCostLineValue("G");
+        const managementOverhead =
+          costBuildUp?.costLines.find((line) => line.code === productOverheadLineCode("G2", product.productId))?.costPerBag ??
+          product.managementOverheadPerBag ??
+          readCostLineValue("G2");
+        const salesCost = readCostLineValue("H");
+        const rushCost = readCostLineValue("I_RUSH");
+        const transportationCost = readCostLineValue("J");
+        const installationCost = readCostLineValue("K");
+
+        const materialPerBag = (sourcedMaterialCostPerBag ?? 0) + packagingCost;
+        const operatingPerBag = factoryOverhead + manufacturingOverhead + managementOverhead + salesCost;
+        const additionalPerBag = rushCost + transportationCost + installationCost;
+
+        return {
+          productId: product.productId,
+          totalPerBag: materialPerBag + operatingPerBag + additionalPerBag,
+        };
+      }),
+    [costBuildUp?.costLines, productSnapshots, sourcingBreakdown],
+  );
+
+  const orderTotalCost = useMemo(
+    () => {
+      if (!productSnapshots.length) {
+        return (
+          costBuildUp?.totalCostPriceForOrder ??
+          (alternatives?.baseCostPerBag !== null &&
+          alternatives?.baseCostPerBag !== undefined &&
+          alternatives?.quantity !== null &&
+          alternatives?.quantity !== undefined
+            ? alternatives.baseCostPerBag * alternatives.quantity
+            : null)
+        );
+      }
+
+      const total = productSnapshots.reduce((sum, product) => {
+        const productMaterialTotalCost = product.components.reduce((componentSum, component) => {
+          const sourcedSelection = sourcingBreakdown.find(
+            (selection) => selection.productId === product.productId && selection.componentId === component.componentId,
+          );
+          const accessoryPerBag = component.accessorySnapshot?.totalPricePerBagEgp ?? null;
+          const requestedQuantity = product.requestedQuantity ?? sourcedSelection?.requestedQuantity ?? null;
+          const sourcedTotalCost = sourcedSelection?.totalMaterialCostEgp ?? null;
+          const sourcedRequestedQuantity = sourcedSelection?.requestedQuantity ?? null;
+          const sourcedUnitCost =
+            sourcedSelection?.materialCostPerBagEgp ??
+            (sourcedTotalCost !== null &&
+            sourcedRequestedQuantity !== null &&
+            sourcedRequestedQuantity > 0
+              ? sourcedTotalCost / sourcedRequestedQuantity
+              : null);
+          const unitCost = sourcedUnitCost ?? accessoryPerBag;
+          const totalCost =
+            sourcedTotalCost ??
+            (requestedQuantity !== null && unitCost !== null ? requestedQuantity * unitCost : null);
+
+          return componentSum + (totalCost ?? 0);
+        }, 0);
+
+        const productMaterialUnitCost =
+          product.requestedQuantity !== null && product.requestedQuantity !== undefined && product.requestedQuantity > 0
+            ? productMaterialTotalCost / product.requestedQuantity
+            : null;
+        const costSummary = productCostCards.find((item) => item.productId === product.productId);
+        const totalUnitCost = costSummary?.totalPerBag ?? productMaterialUnitCost;
+        const totalCost =
+          totalUnitCost !== null &&
+          product.requestedQuantity !== null &&
+          product.requestedQuantity !== undefined &&
+          product.requestedQuantity > 0
+            ? totalUnitCost * product.requestedQuantity
+            : productMaterialTotalCost;
+
+        return sum + (totalCost ?? 0);
+      }, 0);
+
+      return total > 0 ? total : costBuildUp?.totalCostPriceForOrder ?? null;
+    },
+    [alternatives, costBuildUp?.totalCostPriceForOrder, productCostCards, productSnapshots, sourcingBreakdown],
   );
 
   const hasApprovedScenario = decisionCounts.approved > 0;
