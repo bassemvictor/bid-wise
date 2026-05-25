@@ -2,7 +2,7 @@ import { formatTitle } from "./utils";
 
 const tenderSectionLabels: Record<string, string> = {
   "product-configuration": "Product Configuration",
-  "material-sourcing": "Material Sourcing & Costing",
+  "material-sourcing": "Material Sourcing",
   "cost-build-up": "Cost Build-Up Per Bag",
   alternatives: "Alternatives",
   "pricing-approval": "Pricing Approval",
