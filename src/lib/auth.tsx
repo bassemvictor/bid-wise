@@ -14,13 +14,14 @@ import {
 } from "react";
 
 import { isAmplifyAuthConfigured } from "./amplify";
+import type { AppCognitoGroup } from "../../shared/types";
 
 export type AppAuthUser = {
   id: string;
   username: string;
   email: string;
   name: string;
-  groups: string[];
+  groups: AppCognitoGroup[];
 };
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
@@ -41,17 +42,34 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const normalizeGroups = (rawGroups: unknown) => {
+export const ALL_GROUPS: AppCognitoGroup[] = [
+  "sales_engineer",
+  "sales_manager",
+  "pricing_engineer",
+  "admin",
+  "super_user",
+];
+
+const isAppGroup = (value: string): value is AppCognitoGroup =>
+  ALL_GROUPS.includes(value as AppCognitoGroup);
+
+const normalizeGroups = (rawGroups: unknown): AppCognitoGroup[] => {
   if (Array.isArray(rawGroups)) {
-    return rawGroups.map((group) => String(group));
+    return rawGroups.map((group) => String(group)).filter(isAppGroup);
   }
 
   if (typeof rawGroups === "string" && rawGroups.trim()) {
-    return [rawGroups];
+    return isAppGroup(rawGroups) ? [rawGroups] : [];
   }
 
   return [];
 };
+
+export const hasAnyGroup = (groups: readonly AppCognitoGroup[], allowedGroups: readonly AppCognitoGroup[]) =>
+  allowedGroups.some((group) => groups.includes(group));
+
+export const canManageAccess = (groups: readonly AppCognitoGroup[]) =>
+  hasAnyGroup(groups, ["admin", "super_user"]);
 
 const buildUserFromSession = async (): Promise<AppAuthUser | null> => {
   const currentUser = await getCurrentUser();
@@ -164,9 +182,10 @@ export const useAuth = () => {
 
 export const groupLabelMap: Record<string, string> = {
   admin: "Admin",
-  "sales-manager": "Sales Manager",
-  "pricing-engineer": "Pricing Engineer",
-  "sales-engineer": "Sales Engineer",
+  sales_manager: "Sales Manager",
+  pricing_engineer: "Pricing Engineer",
+  sales_engineer: "Sales Engineer",
+  super_user: "Super User",
 };
 
 export const formatGroupLabel = (group: string) => groupLabelMap[group] ?? group;

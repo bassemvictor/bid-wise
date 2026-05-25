@@ -1,10 +1,12 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import { RequireAuth } from "../components/auth/require-auth";
+import { RequireGroups } from "../components/auth/require-groups";
 import { AppShell } from "../components/layout/app-shell";
 import { AllTendersPage } from "../pages/all-tenders-page";
 import { AlternativesPage } from "../pages/alternatives-page";
 import { AccessoriesPage } from "../pages/accessories-page";
+import { AccessManagementPage } from "../pages/access-management-page";
 import { AuthPage } from "../pages/auth-page";
 import { CustomersPage } from "../pages/customers-page";
 import { DevelopmentPage } from "../pages/development-page";
@@ -81,6 +83,14 @@ export const router = createBrowserRouter([
       {
         path: "development",
         element: <DevelopmentPage />,
+      },
+      {
+        path: "access-management",
+        element: (
+          <RequireGroups groups={["admin", "super_user"]}>
+            <AccessManagementPage />
+          </RequireGroups>
+        ),
       },
       {
         path: "tenders/intake",

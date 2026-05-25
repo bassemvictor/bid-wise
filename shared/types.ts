@@ -5,6 +5,51 @@ export type EntityEnvelope = {
   updatedAt: string;
 };
 
+export type AppCognitoGroup =
+  | "sales_engineer"
+  | "sales_manager"
+  | "pricing_engineer"
+  | "admin"
+  | "super_user";
+
+export type AccessManagementUser = {
+  name: string;
+  email: string;
+  username: string;
+  enabled: boolean;
+  status: string;
+  groups: AppCognitoGroup[];
+};
+
+export type AccessManagementGroup = {
+  name: AppCognitoGroup;
+  description: string;
+};
+
+export type AccessManagementMe = {
+  userId: string;
+  username: string;
+  email?: string;
+  name?: string;
+  groups: AppCognitoGroup[];
+  canManageAccess: boolean;
+};
+
+export type AccessManagementUpdateGroupsRequest = {
+  groups: AppCognitoGroup[];
+};
+
+export type AccessManagementAuditEntry = EntityEnvelope & {
+  auditId: string;
+  actorUserId: string;
+  actorUsername: string;
+  actorEmail?: string;
+  targetUsername: string;
+  groupName: AppCognitoGroup;
+  actionType: "GROUP_ADDED" | "GROUP_REMOVED";
+  timestamp: string;
+};
+
 export type TenderRequestType =
   | "inquiry"
   | "public tender"

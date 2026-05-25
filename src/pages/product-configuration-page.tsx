@@ -96,7 +96,7 @@ type ComponentDrawerState = {
   value: ProductSnapshotComponentForm;
 };
 
-const componentTypeOptions = ["Bag", "Accessories", "Ring", "Thread", "Other"] as const;
+const componentTypeOptions = ["Bag", "Accessories", "Other"] as const;
 type ComponentTypeOption = (typeof componentTypeOptions)[number];
 
 const getMaterialCategoryForComponentType = (componentType: string): Material["category"] | null => {
@@ -570,6 +570,11 @@ const ProductComponentDrawer = ({
   const availableMaterials = selectedMaterialCategory
     ? materials.filter((material) => material.category === selectedMaterialCategory)
     : materials;
+  const selectableComponentTypeOptions = componentTypeOptions.includes(
+    draft.componentType as ComponentTypeOption,
+  )
+    ? componentTypeOptions
+    : [draft.componentType, ...componentTypeOptions];
 
   const addAccessoryPricingRow = () => {
     setDraft((current) => ({
@@ -750,7 +755,7 @@ const ProductComponentDrawer = ({
                     }));
                   }}
                 >
-                  {componentTypeOptions.map((componentType) => (
+                  {selectableComponentTypeOptions.map((componentType) => (
                     <option key={componentType} value={componentType}>
                       {componentType}
                     </option>

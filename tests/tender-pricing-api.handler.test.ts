@@ -5,6 +5,7 @@ import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import {
   handler,
   resetHandlerClientsForTesting,
+  setCognitoClientForTesting,
   setHandlerClientsForTesting,
 } from "../amplify/functions/tender-pricing-api/handler.js";
 
@@ -28,6 +29,7 @@ const asHttpResponse = (value: Awaited<ReturnType<typeof handler>>) =>
 beforeEach(() => {
   process.env.TENDER_PRICING_TABLE = "TenderPricingTable";
   process.env.ENABLE_DEV_ENDPOINTS = "true";
+  process.env.COGNITO_USER_POOL_ID = "us-east-1_example";
 });
 
 afterEach(() => {
@@ -1527,4 +1529,181 @@ test("creates supplier offer with material partition and supplier offer gsi", as
   assert.equal(item.GSI3PK, "SUPPLIER#SUP-1#OFFERS");
   assert.equal(item.GSI3SK, "OFFER#OFF-1");
   assert.equal(item.entityType, "SUPPLIER_OFFER");
+});
+
+test("blocks non-admin users from access management endpoints", async () => {
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/access-management/users",
+        requestContext: {
+          http: { method: "GET" },
+          authorizer: {
+            jwt: {
+              claims: {
+                sub: "user-1",
+                email: "user@example.com",
+                name: "Regular User",
+                "cognito:username": "regular-user",
+                "cognito:groups": ["sales_engineer"],
+              },
+            },
+          },
+        },
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 403);
+  assert.match(response.body ?? "", /permission to manage access/i);
+});
+
+test("allows admin users to update group membership and logs audit entries", async () => {
+  const seenDynamoCommands: MockCommand[] = [];
+  const seenCognitoCommands: MockCommand[] = [];
+
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      seenDynamoCommands.push(command);
+      if (command.constructor.name === "PutCommand") {
+        return {};
+      }
+
+      throw new Error(`Unexpected DynamoDB command: ${command.constructor.name}`);
+    }) as DynamoDBDocumentClient,
+  );
+
+  setCognitoClientForTesting(
+    createMockClient((command) => {
+      seenCognitoCommands.push(command);
+
+      if (command.constructor.name === "AdminListGroupsForUserCommand") {
+        const username = String(command.input?.Username ?? "");
+        return {
+          Groups:
+            username === "target-user"
+              ? [{ GroupName: "sales_engineer" }]
+              : [{ GroupName: "admin" }],
+        };
+      }
+
+      if (command.constructor.name === "AdminAddUserToGroupCommand") {
+        return {};
+      }
+
+      if (command.constructor.name === "ListUsersCommand") {
+        return {
+          Users: [
+            {
+              Username: "target-user",
+              Enabled: true,
+              UserStatus: "CONFIRMED",
+              Attributes: [
+                { Name: "email", Value: "target@example.com" },
+                { Name: "name", Value: "Target User" },
+              ],
+            },
+          ],
+        };
+      }
+
+      throw new Error(`Unexpected Cognito command: ${command.constructor.name}`);
+    }) as never,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/access-management/users/target-user/groups",
+        pathParameters: { username: "target-user" },
+        requestContext: {
+          http: { method: "POST" },
+          authorizer: {
+            jwt: {
+              claims: {
+                sub: "admin-1",
+                email: "admin@example.com",
+                name: "Admin User",
+                "cognito:username": "admin-user",
+                "cognito:groups": ["admin"],
+              },
+            },
+          },
+        },
+        body: JSON.stringify({
+          groups: ["sales_engineer", "pricing_engineer"],
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.ok(
+    seenCognitoCommands.some(
+      (command) =>
+        command.constructor.name === "AdminAddUserToGroupCommand" &&
+        command.input?.GroupName === "pricing_engineer",
+    ),
+  );
+  const auditCommand = seenDynamoCommands.find(
+    (command) =>
+      command.constructor.name === "PutCommand" &&
+      (command.input?.Item as Record<string, unknown>)?.entityType === "ACCESS_MANAGEMENT_AUDIT",
+  );
+  assert.ok(auditCommand);
+  assert.equal((auditCommand?.input?.Item as Record<string, unknown>)?.targetUsername, "target-user");
+  assert.equal((auditCommand?.input?.Item as Record<string, unknown>)?.groupName, "pricing_engineer");
+  assert.equal((auditCommand?.input?.Item as Record<string, unknown>)?.actionType, "GROUP_ADDED");
+});
+
+test("allows access management when Cognito shows admin even if token groups are stale", async () => {
+  setCognitoClientForTesting(
+    createMockClient((command) => {
+      if (command.constructor.name === "AdminListGroupsForUserCommand") {
+        const username = String(command.input?.Username ?? "");
+        return {
+          Groups: username === "admin-user" ? [{ GroupName: "admin" }] : [],
+        };
+      }
+
+      if (command.constructor.name === "ListGroupsCommand") {
+        return {
+          Groups: [{ GroupName: "admin" }, { GroupName: "super_user" }],
+        };
+      }
+
+      throw new Error(`Unexpected Cognito command: ${command.constructor.name}`);
+    }) as never,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/access-management/groups",
+        requestContext: {
+          http: { method: "GET" },
+          authorizer: {
+            jwt: {
+              claims: {
+                sub: "admin-1",
+                email: "admin@example.com",
+                name: "Admin User",
+                "cognito:username": "admin-user",
+                "cognito:groups": [],
+              },
+            },
+          },
+        },
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 200);
+  assert.match(response.body ?? "", /admin/);
 });

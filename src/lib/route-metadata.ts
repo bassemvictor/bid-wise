@@ -37,6 +37,10 @@ export const getPageTitle = (pathname: string) => {
     return "Development";
   }
 
+  if (pathname === "/access-management") {
+    return "Access Management";
+  }
+
   const segments = pathname.split("/").filter(Boolean);
 
   if (segments[0] === "price-scenarios" && segments[1]) {
@@ -106,6 +110,12 @@ export const getBreadcrumbs = (pathname: string) => {
 
   if (segments[0] === "development") {
     crumbs.push({ label: "Development" });
+    return crumbs;
+  }
+
+  if (segments[0] === "access-management") {
+    crumbs.push({ label: "Administration" });
+    crumbs.push({ label: "Access Management" });
     return crumbs;
   }
 

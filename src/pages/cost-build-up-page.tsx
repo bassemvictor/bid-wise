@@ -1179,9 +1179,9 @@ export const CostBuildUpPage = () => {
       : null;
 
   const chartData = [
-    { name: "Material Cost", value: totals.totalMaterialCostPerBag ?? 0 },
-    { name: "Operating Cost", value: totals.totalOperatingCostPerBag ?? 0 },
-    { name: "Additional Cost", value: totals.totalAdditionalCostPerBag ?? 0 },
+    { name: "Material Cost", value: tenderCostSummary.materialTotal ?? 0 },
+    { name: "Operating Cost", value: tenderCostSummary.operatingTotal ?? 0 },
+    { name: "Additional Cost", value: tenderCostSummary.additionalTotal ?? 0 },
   ];
 
   const lineABreakdown = useMemo(() => {
@@ -2191,33 +2191,17 @@ export const CostBuildUpPage = () => {
                     <p className="text-sm font-medium text-blue-100">Total Cost Overview</p>
                   </div>
 
-                  <div className="rounded-[1.5rem] bg-white/8 p-4 ring-1 ring-white/10 backdrop-blur-sm">
-                    <div className="rounded-2xl bg-white/10 px-4 py-4">
-                      <p className="text-xs uppercase tracking-[0.16em] text-blue-100">Order Total</p>
-                      <p className="mt-2 text-2xl font-semibold text-white">
-                        {formatMetric(tenderGridSummary.totalCost, 2, " EGP")}
-                      </p>
-                      <p className="mt-2 text-sm text-blue-100">
-                        Cost / Bag: {formatMetric(tenderGridSummary.unitCost, 2, " EGP")}
-                      </p>
-                      <p className="mt-1 text-sm text-blue-100">
-                        Quantity: {tenderGridSummary.totalQuantity !== null ? `${tenderGridSummary.totalQuantity.toLocaleString()} bags` : "Not set"}
-                      </p>
-                    </div>
-                    <div className="mt-4 rounded-2xl bg-white/10 px-4 py-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs uppercase tracking-[0.16em] text-blue-100">Input Completion</p>
-                        <Badge className="bg-white/15 text-white" variant="default">
-                          {costCompletion.filledLines}/{costCompletion.totalLines}
-                        </Badge>
-                      </div>
-                      <div className="mt-3 h-2 rounded-full bg-white/15">
-                        <div className="h-2 rounded-full bg-white" style={{ width: `${costCompletion.percent}%` }} />
-                      </div>
-                      <p className="mt-2 text-sm text-blue-100">
-                        {costCompletion.percent}% of editable cost inputs have values.
-                      </p>
-                    </div>
+                  <div className="rounded-2xl bg-white/10 px-4 py-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-blue-100">Order Total</p>
+                    <p className="mt-2 text-2xl font-semibold text-white">
+                      {formatMetric(tenderGridSummary.totalCost, 2, " EGP")}
+                    </p>
+                    <p className="mt-2 text-sm text-blue-100">
+                      Cost / Bag: {formatMetric(tenderGridSummary.unitCost, 2, " EGP")}
+                    </p>
+                    <p className="mt-1 text-sm text-blue-100">
+                      Quantity: {tenderGridSummary.totalQuantity !== null ? `${tenderGridSummary.totalQuantity.toLocaleString()} bags` : "Not set"}
+                    </p>
                   </div>
 
                   {productCostCards.length ? (
@@ -2266,6 +2250,21 @@ export const CostBuildUpPage = () => {
                       ))}
                     </div>
                   ) : null}
+
+                  <div className="rounded-2xl bg-white/10 px-4 py-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-xs uppercase tracking-[0.16em] text-blue-100">Input Completion</p>
+                      <Badge className="bg-white/15 text-white" variant="default">
+                        {costCompletion.filledLines}/{costCompletion.totalLines}
+                      </Badge>
+                    </div>
+                    <div className="mt-3 h-2 rounded-full bg-white/15">
+                      <div className="h-2 rounded-full bg-white" style={{ width: `${costCompletion.percent}%` }} />
+                    </div>
+                    <p className="mt-2 text-sm text-blue-100">
+                      {costCompletion.percent}% of editable cost inputs have values.
+                    </p>
+                  </div>
                 </div>
               </section>
 
@@ -2273,7 +2272,7 @@ export const CostBuildUpPage = () => {
                 <div className="mb-4">
                   <h3 className="text-base font-semibold text-slate-900">Cost Distribution</h3>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Visual share of material, operating, and additional cost within the total bag price.
+                    Visual share of material, operating, and additional cost within the total order cost.
                   </p>
                 </div>
                 <div className="space-y-4">

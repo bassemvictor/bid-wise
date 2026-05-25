@@ -1,9 +1,9 @@
-import { Bell, ChevronRight, LogOut, Menu, Search, Shield } from "lucide-react";
+import { Bell, Cat, ChevronRight, LogOut, Menu, Search, Shield } from "lucide-react";
 import { useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { Button } from "../ui/button";
-import { formatGroupLabel, useAuth } from "../../lib/auth";
+import { canManageAccess, formatGroupLabel, useAuth } from "../../lib/auth";
 import { getBreadcrumbs, getPageTitle } from "../../lib/route-metadata";
 import { cn } from "../../lib/utils";
 
@@ -58,6 +58,19 @@ export const AppShell = () => {
       .slice(0, 2)
       .toUpperCase();
   }, [user?.email, user?.name]);
+  const visibleNavigation = useMemo(() => {
+    if (!canManageAccess(user?.groups ?? [])) {
+      return navigation;
+    }
+
+    return [
+      ...navigation,
+      {
+        label: "Administration",
+        items: [{ label: "Access Management", href: "/access-management" }],
+      },
+    ];
+  }, [user?.groups]);
 
   return (
     <div className="min-h-screen bg-transparent">
@@ -72,7 +85,10 @@ export const AppShell = () => {
             <div className="mb-8 flex items-center justify-between">
               <div>
                 <p className="text-xs uppercase tracking-[0.22em] text-blue-200/80">Alimex</p>
-                <h1 className="mt-2 text-2xl font-semibold">BidWise</h1>
+                <div className="mt-2 flex items-center gap-2">
+                  <Cat className="h-6 w-6" />
+                  <h1 className="text-2xl font-semibold">BidWise</h1>
+                </div>
               </div>
               <button
                 className="rounded-lg p-2 text-blue-100 lg:hidden"
@@ -84,7 +100,7 @@ export const AppShell = () => {
             </div>
 
             <nav className="flex-1 space-y-7">
-              {navigation.map((section) => (
+              {visibleNavigation.map((section) => (
                 <div key={section.label}>
                   <p className="mb-3 text-xs uppercase tracking-[0.18em] text-blue-200/60">
                     {section.label}

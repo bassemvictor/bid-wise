@@ -1,5 +1,13 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
+  AdminAddUserToGroupCommand,
+  AdminListGroupsForUserCommand,
+  AdminRemoveUserFromGroupCommand,
+  CognitoIdentityProviderClient,
+  ListGroupsCommand,
+  ListUsersCommand,
+} from "@aws-sdk/client-cognito-identity-provider";
+import {
   BatchWriteCommand,
   DeleteCommand,
   DynamoDBDocumentClient,
@@ -12,6 +20,12 @@ import type { APIGatewayProxyHandlerV2 } from "aws-lambda";
 import type {
   BagBodySourcingSelection,
   Accessory,
+  AccessManagementAuditEntry,
+  AccessManagementGroup,
+  AccessManagementMe,
+  AccessManagementUpdateGroupsRequest,
+  AccessManagementUser,
+  AppCognitoGroup,
   CostBuildUp,
   Customer,
   DeliveryPlace,
@@ -58,21 +72,44 @@ type DashboardSummary = {
   supplierCount: number;
 };
 
+type AccessAuditPayload = {
+  actorUserId: string;
+  actorUsername: string;
+  actorEmail?: string;
+  targetUsername: string;
+  groupName: AppCognitoGroup;
+  actionType: AccessManagementAuditEntry["actionType"];
+  timestamp: string;
+};
+
 type RequestContext = {
   tenantId: string;
   tableName: string;
   actorId: string;
+  actorUsername: string;
   actorName: string;
   actorEmail?: string;
+  actorGroups: AppCognitoGroup[];
+  resolvedActorGroups?: AppCognitoGroup[];
 };
 
 type TenderActivitySection = TenderActivity["section"];
 
 let documentClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+let cognitoClient = new CognitoIdentityProviderClient({});
 
 const getTableName = () => process.env.TENDER_PRICING_TABLE ?? "";
+const getUserPoolId = () => process.env.COGNITO_USER_POOL_ID ?? "";
 const isDevEnabled = () => process.env.ENABLE_DEV_ENDPOINTS === "true";
 const isoNow = () => new Date().toISOString();
+const allGroups: AppCognitoGroup[] = [
+  "sales_engineer",
+  "sales_manager",
+  "pricing_engineer",
+  "admin",
+  "super_user",
+];
+const accessManagerGroups: AppCognitoGroup[] = ["admin", "super_user"];
 const tenantPk = (tenantId: string) => `TENANT#${tenantId}`;
 const tendersGsiPk = (tenantId: string) => `TENANT#${tenantId}#TENDERS`;
 const tenderStatusGsiPk = (tenantId: string, status: TenderRequest["status"]) =>
@@ -1144,6 +1181,34 @@ const getHeader = (
   return match?.[1];
 };
 
+const isAppGroup = (value: string): value is AppCognitoGroup =>
+  allGroups.includes(value as AppCognitoGroup);
+
+const normalizeGroups = (rawGroups: unknown): AppCognitoGroup[] => {
+  if (Array.isArray(rawGroups)) {
+    return rawGroups.map((group) => String(group)).filter(isAppGroup);
+  }
+
+  if (typeof rawGroups === "string" && rawGroups.trim()) {
+    return rawGroups
+      .split(",")
+      .map((group) => group.trim())
+      .filter(isAppGroup);
+  }
+
+  return [];
+};
+
+class HttpError extends Error {
+  statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.statusCode = statusCode;
+    this.name = "HttpError";
+  }
+}
+
 const toActivityValue = (value: unknown): string | number | boolean | null => {
   if (value === undefined) {
     return null;
@@ -1171,13 +1236,19 @@ const getActorIdentity = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
       | undefined
   )?.jwt?.claims;
   const bodyActor = parseBody<{ actorId?: string; actorName?: string; actorEmail?: string }>(event.body);
+  const actorGroups = normalizeGroups(claims?.["cognito:groups"]);
+  const actorUsername =
+    (typeof claims?.["cognito:username"] === "string" ? claims["cognito:username"] : undefined) ??
+    (typeof claims?.username === "string" ? claims.username : undefined) ??
+    bodyActor.actorId ??
+    "anonymous";
 
   const actorId =
     event.queryStringParameters?.actorId ??
     getHeader(event.headers, "x-user-id") ??
     bodyActor.actorId ??
     (typeof claims?.sub === "string" ? claims.sub : undefined) ??
-    (typeof claims?.["cognito:username"] === "string" ? claims["cognito:username"] : undefined) ??
+    actorUsername ??
     "anonymous";
   const actorEmail =
     event.queryStringParameters?.actorEmail ??
@@ -1195,9 +1266,60 @@ const getActorIdentity = (event: Parameters<APIGatewayProxyHandlerV2>[0]) => {
 
   return {
     actorId,
+    actorUsername,
     actorName,
     actorEmail,
+    actorGroups,
   };
+};
+
+const resolveActorGroups = async (context: RequestContext): Promise<AppCognitoGroup[]> => {
+  if (context.resolvedActorGroups) {
+    return context.resolvedActorGroups;
+  }
+
+  if (!context.actorUsername || context.actorUsername === "anonymous") {
+    context.resolvedActorGroups = context.actorGroups;
+    return context.resolvedActorGroups;
+  }
+
+  try {
+    const groups = await listGroupsForUsername(context.actorUsername);
+    context.resolvedActorGroups = groups;
+    return groups;
+  } catch {
+    context.resolvedActorGroups = context.actorGroups;
+    return context.resolvedActorGroups;
+  }
+};
+
+const assertAccessManager = async (context: RequestContext) => {
+  const actorGroups = await resolveActorGroups(context);
+
+  if (!actorGroups.some((group) => accessManagerGroups.includes(group))) {
+    throw new HttpError(403, "You do not have permission to manage access.");
+  }
+};
+
+const assertNotSelfTarget = (context: RequestContext, targetUsername: string) => {
+  if (context.actorUsername.toLowerCase() === targetUsername.toLowerCase()) {
+    throw new HttpError(403, "You cannot modify your own group membership.");
+  }
+};
+
+const assertValidGroups = (groups: string[]): AppCognitoGroup[] => {
+  if (!groups.length) {
+    return [];
+  }
+
+  const normalized = Array.from(new Set(groups.map((group) => group.trim()).filter(Boolean)));
+  const invalid = normalized.filter((group) => !isAppGroup(group));
+
+  if (invalid.length > 0) {
+    throw new HttpError(400, `Invalid group name: ${invalid.join(", ")}.`);
+  }
+
+  return normalized as AppCognitoGroup[];
 };
 
 const baseEnvelope = <T extends { tenantId: string; entityType?: string }>(
@@ -1316,6 +1438,266 @@ const queryTenant = async <T>(
   return (response.Items as T[] | undefined) ?? [];
 };
 
+const listSupportedGroups = async (): Promise<AccessManagementGroup[]> => {
+  const userPoolId = getUserPoolId();
+  const response = await cognitoClient.send(
+    new ListGroupsCommand({
+      UserPoolId: userPoolId,
+      Limit: 60,
+    }),
+  );
+  const availableGroups = new Set(
+    (response.Groups ?? [])
+      .map((group) => group.GroupName ?? "")
+      .filter(isAppGroup),
+  );
+
+  return allGroups
+    .filter((group) => availableGroups.has(group))
+    .map((group) => ({
+      name: group,
+      description:
+        group === "sales_engineer"
+          ? "Can work on sales engineering flows."
+          : group === "sales_manager"
+            ? "Can oversee sales management workflows."
+            : group === "pricing_engineer"
+              ? "Can work on pricing and costing workflows."
+              : group === "admin"
+                ? "Can manage users and access."
+                : "Has elevated access management privileges.",
+    }));
+};
+
+const listGroupsForUsername = async (username: string): Promise<AppCognitoGroup[]> => {
+  const response = await cognitoClient.send(
+    new AdminListGroupsForUserCommand({
+      UserPoolId: getUserPoolId(),
+      Username: username,
+    }),
+  );
+
+  return (response.Groups ?? [])
+    .map((group) => group.GroupName ?? "")
+    .filter(isAppGroup);
+};
+
+const getAttributeValue = (
+  attributes: Array<{ Name?: string; Value?: string }> | undefined,
+  name: string,
+) => attributes?.find((attribute) => attribute.Name === name)?.Value ?? "";
+
+const listAccessUsers = async (): Promise<AccessManagementUser[]> => {
+  const response = await cognitoClient.send(
+    new ListUsersCommand({
+      UserPoolId: getUserPoolId(),
+      Limit: 60,
+    }),
+  );
+
+  const users = await Promise.all(
+    (response.Users ?? []).map(async (user) => {
+      const username = user.Username ?? "";
+      const groups = username ? await listGroupsForUsername(username) : [];
+
+      return {
+        name: getAttributeValue(user.Attributes, "name") || getAttributeValue(user.Attributes, "given_name"),
+        email: getAttributeValue(user.Attributes, "email"),
+        username,
+        enabled: Boolean(user.Enabled),
+        status: user.UserStatus ?? "UNKNOWN",
+        groups,
+      } satisfies AccessManagementUser;
+    }),
+  );
+
+  return users.sort((left, right) => left.username.localeCompare(right.username));
+};
+
+const createAccessAuditEntry = async (
+  context: RequestContext,
+  payload: AccessAuditPayload,
+) => {
+  const timestamp = payload.timestamp || isoNow();
+  const auditId = crypto.randomUUID();
+  const record = baseEnvelope<AccessManagementAuditEntry & StoredEntity>(
+    {
+      PK: tenantPk(context.tenantId),
+      SK: `ACCESS_AUDIT#${timestamp}#${auditId}`,
+      entityType: "ACCESS_MANAGEMENT_AUDIT",
+      tenantId: context.tenantId,
+      auditId,
+      actorUserId: payload.actorUserId,
+      actorUsername: payload.actorUsername,
+      actorEmail: payload.actorEmail,
+      targetUsername: payload.targetUsername,
+      groupName: payload.groupName,
+      actionType: payload.actionType,
+      timestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    },
+    "ACCESS_MANAGEMENT_AUDIT",
+    timestamp,
+  );
+
+  console.info("Access management change", {
+    auditId,
+    actorUsername: payload.actorUsername,
+    targetUsername: payload.targetUsername,
+    groupName: payload.groupName,
+    actionType: payload.actionType,
+    timestamp,
+  });
+  await putRecord(context.tableName, record);
+};
+
+const getAccessMe = async (context: RequestContext): Promise<AccessManagementMe> => {
+  const actorGroups = await resolveActorGroups(context);
+
+  return {
+    userId: context.actorId,
+    username: context.actorUsername,
+    email: context.actorEmail,
+    name: context.actorName,
+    groups: actorGroups,
+    canManageAccess: actorGroups.some((group) => accessManagerGroups.includes(group)),
+  };
+};
+
+const updateAccessGroups = async (
+  context: RequestContext,
+  username: string,
+  payload: AccessManagementUpdateGroupsRequest,
+) => {
+  await assertAccessManager(context);
+  assertNotSelfTarget(context, username);
+
+  if (!username.trim()) {
+    throw new HttpError(400, "Username is required.");
+  }
+
+  const desiredGroups = assertValidGroups(Array.isArray(payload.groups) ? payload.groups : []);
+  const currentGroups = await listGroupsForUsername(username);
+  const groupsToAdd = desiredGroups.filter((group) => !currentGroups.includes(group));
+  const groupsToRemove = currentGroups.filter((group) => !desiredGroups.includes(group));
+
+  await Promise.all(
+    groupsToAdd.map(async (group) => {
+      await cognitoClient.send(
+        new AdminAddUserToGroupCommand({
+          UserPoolId: getUserPoolId(),
+          Username: username,
+          GroupName: group,
+        }),
+      );
+      await createAccessAuditEntry(context, {
+        actorUserId: context.actorId,
+        actorUsername: context.actorUsername,
+        actorEmail: context.actorEmail,
+        targetUsername: username,
+        groupName: group,
+        actionType: "GROUP_ADDED",
+        timestamp: isoNow(),
+      });
+    }),
+  );
+
+  await Promise.all(
+    groupsToRemove.map(async (group) => {
+      await cognitoClient.send(
+        new AdminRemoveUserFromGroupCommand({
+          UserPoolId: getUserPoolId(),
+          Username: username,
+          GroupName: group,
+        }),
+      );
+      await createAccessAuditEntry(context, {
+        actorUserId: context.actorId,
+        actorUsername: context.actorUsername,
+        actorEmail: context.actorEmail,
+        targetUsername: username,
+        groupName: group,
+        actionType: "GROUP_REMOVED",
+        timestamp: isoNow(),
+      });
+    }),
+  );
+
+  const users = await listAccessUsers();
+  const updatedUser = users.find((entry) => entry.username === username);
+
+  if (!updatedUser) {
+    throw new HttpError(404, "User not found after updating groups.");
+  }
+
+  return updatedUser;
+};
+
+const changeAccessGroupMembership = async (
+  context: RequestContext,
+  username: string,
+  groupName: string,
+  action: AccessManagementAuditEntry["actionType"],
+) => {
+  await assertAccessManager(context);
+  assertNotSelfTarget(context, username);
+
+  if (!username.trim()) {
+    throw new HttpError(400, "Username is required.");
+  }
+
+  const [validatedGroup] = assertValidGroups([groupName]);
+  const currentGroups = await listGroupsForUsername(username);
+
+  if (action === "GROUP_ADDED") {
+    if (!currentGroups.includes(validatedGroup)) {
+      await cognitoClient.send(
+        new AdminAddUserToGroupCommand({
+          UserPoolId: getUserPoolId(),
+          Username: username,
+          GroupName: validatedGroup,
+        }),
+      );
+      await createAccessAuditEntry(context, {
+        actorUserId: context.actorId,
+        actorUsername: context.actorUsername,
+        actorEmail: context.actorEmail,
+        targetUsername: username,
+        groupName: validatedGroup,
+        actionType: action,
+        timestamp: isoNow(),
+      });
+    }
+  } else if (currentGroups.includes(validatedGroup)) {
+    await cognitoClient.send(
+      new AdminRemoveUserFromGroupCommand({
+        UserPoolId: getUserPoolId(),
+        Username: username,
+        GroupName: validatedGroup,
+      }),
+    );
+    await createAccessAuditEntry(context, {
+      actorUserId: context.actorId,
+      actorUsername: context.actorUsername,
+      actorEmail: context.actorEmail,
+      targetUsername: username,
+      groupName: validatedGroup,
+      actionType: action,
+      timestamp: isoNow(),
+    });
+  }
+
+  const users = await listAccessUsers();
+  const updatedUser = users.find((entry) => entry.username === username);
+
+  if (!updatedUser) {
+    throw new HttpError(404, "User not found after updating groups.");
+  }
+
+  return updatedUser;
+};
+
 const decodeNextToken = (token?: string | null) => {
   if (!token) {
     return 0;
@@ -1361,9 +1743,14 @@ const sectionConfig = {
 
 const getRequestContext = (event: Parameters<APIGatewayProxyHandlerV2>[0]): RequestContext => {
   const tableName = getTableName();
+  const userPoolId = getUserPoolId();
 
   if (!tableName) {
     throw new Error("Missing TENDER_PRICING_TABLE environment variable.");
+  }
+
+  if (!userPoolId) {
+    throw new Error("Missing COGNITO_USER_POOL_ID environment variable.");
   }
 
   const actor = getActorIdentity(event);
@@ -1372,8 +1759,10 @@ const getRequestContext = (event: Parameters<APIGatewayProxyHandlerV2>[0]): Requ
     tableName,
     tenantId: getTenantId(event),
     actorId: actor.actorId,
+    actorUsername: actor.actorUsername,
     actorName: actor.actorName,
     actorEmail: actor.actorEmail,
+    actorGroups: actor.actorGroups,
   };
 };
 
@@ -3358,6 +3747,69 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       );
     }
 
+    if (method === "GET" && path === "/access-management/me") {
+      return json(200, await getAccessMe(context));
+    }
+
+    if (method === "GET" && path === "/access-management/groups") {
+      await assertAccessManager(context);
+      return json(200, await listSupportedGroups());
+    }
+
+    if (method === "GET" && path === "/access-management/users") {
+      await assertAccessManager(context);
+      return json(200, await listAccessUsers());
+    }
+
+    if (
+      method === "POST" &&
+      event.pathParameters?.username &&
+      path === `/access-management/users/${event.pathParameters.username}/groups`
+    ) {
+      return json(
+        200,
+        await updateAccessGroups(
+          context,
+          decodeURIComponent(event.pathParameters.username),
+          parseBody<AccessManagementUpdateGroupsRequest>(event.body),
+        ),
+      );
+    }
+
+    if (
+      method === "POST" &&
+      event.pathParameters?.username &&
+      event.pathParameters?.groupName &&
+      path === `/access-management/users/${event.pathParameters.username}/groups/${event.pathParameters.groupName}`
+    ) {
+      return json(
+        200,
+        await changeAccessGroupMembership(
+          context,
+          decodeURIComponent(event.pathParameters.username),
+          decodeURIComponent(event.pathParameters.groupName),
+          "GROUP_ADDED",
+        ),
+      );
+    }
+
+    if (
+      method === "DELETE" &&
+      event.pathParameters?.username &&
+      event.pathParameters?.groupName &&
+      path === `/access-management/users/${event.pathParameters.username}/groups/${event.pathParameters.groupName}`
+    ) {
+      return json(
+        200,
+        await changeAccessGroupMembership(
+          context,
+          decodeURIComponent(event.pathParameters.username),
+          decodeURIComponent(event.pathParameters.groupName),
+          "GROUP_REMOVED",
+        ),
+      );
+    }
+
     if (method === "POST" && path === "/dev/seed") {
       return seedDevData(context);
     }
@@ -3375,6 +3827,12 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
 
     return json(404, { message: "Route not found." });
   } catch (error) {
+    if (error instanceof HttpError) {
+      return json(error.statusCode, {
+        message: error.message,
+      });
+    }
+
     console.error("Tender pricing API failed", error);
 
     return json(500, {
@@ -3387,6 +3845,11 @@ export const setHandlerClientsForTesting = (client: DynamoDBDocumentClient) => {
   documentClient = client;
 };
 
+export const setCognitoClientForTesting = (client: CognitoIdentityProviderClient) => {
+  cognitoClient = client;
+};
+
 export const resetHandlerClientsForTesting = () => {
   documentClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+  cognitoClient = new CognitoIdentityProviderClient({});
 };

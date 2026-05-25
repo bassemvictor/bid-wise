@@ -198,6 +198,10 @@ const summaryCards = (summary: Summary) => [
   { label: "Profit", value: formatCurrency(summary.profitAmount) },
 ];
 
+const tableGridClassName =
+  "grid grid-cols-[minmax(0,2.2fr)_120px_150px_150px_110px_140px_140px] gap-4";
+const tableMinWidthClassName = "min-w-[1120px]";
+
 export const NestedTenderGrid = ({
   tender,
   productConfiguration,
@@ -612,21 +616,21 @@ export const NestedTenderGrid = ({
                 </Badge>
               </div>
 
-              <div className="overflow-hidden rounded-[1.25rem] border border-border">
-                <div className="grid grid-cols-[minmax(0,1.7fr)_110px_120px_120px_120px_110px_120px_120px] gap-3 bg-slate-50 px-4 py-3 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-                  <div>Hierarchy</div>
-                  <div>Quantity</div>
-                  <div>Unit Cost</div>
-                  <div>Total Cost</div>
-                  <div>Unit Price</div>
-                  <div>Margin %</div>
-                  <div>Profit</div>
-                  <div>Type / Detail</div>
+              <div className="overflow-x-auto rounded-[1.25rem] border border-border">
+                <div className={tableMinWidthClassName}>
+                <div className={`${tableGridClassName} bg-slate-50 px-4 py-3 text-[11px] uppercase tracking-[0.16em] text-muted-foreground`}>
+                  <div className="whitespace-nowrap">Hierarchy</div>
+                  <div className="whitespace-nowrap">Quantity</div>
+                  <div className="whitespace-nowrap">Total Cost</div>
+                  <div className="whitespace-nowrap">Total Price</div>
+                  <div className="whitespace-nowrap">Margin %</div>
+                  <div className="whitespace-nowrap">Profit</div>
+                  <div className="whitespace-nowrap">Type / Detail</div>
                 </div>
 
                 <div className="divide-y divide-border bg-white">
                   <button
-                    className="grid w-full grid-cols-[minmax(0,1.7fr)_110px_120px_120px_120px_110px_120px_120px] gap-3 px-4 py-3 text-left hover:bg-slate-50"
+                    className={`${tableGridClassName} w-full px-4 py-3 text-left hover:bg-slate-50`}
                     onClick={() => setSelectedId("tender")}
                     type="button"
                   >
@@ -637,9 +641,8 @@ export const NestedTenderGrid = ({
                       </p>
                     </div>
                     <div className="text-sm text-slate-700">{formatNumber(productConfiguration?.quantity, 0)}</div>
-                    <div className="text-sm text-slate-700">{formatCurrency(costBuildUp?.totalCostPricePerBag)}</div>
                     <div className="text-sm font-medium text-slate-900">{formatCurrency(tenderSummary.totalCost)}</div>
-                    <div className="text-sm text-slate-700">{formatCurrency(tenderSummary.unitPrice)}</div>
+                    <div className="text-sm text-slate-700">{formatCurrency(tenderSummary.totalPrice)}</div>
                     <div className="text-sm text-slate-700">{formatPercent(tenderSummary.marginPercent)}</div>
                     <div className="text-sm text-slate-700">{formatCurrency(tenderSummary.profitAmount)}</div>
                     <div className="text-sm text-slate-700">{pricingChoice?.label || "\u2014"}</div>
@@ -651,7 +654,7 @@ export const NestedTenderGrid = ({
                     return (
                       <Fragment key={product.id}>
                         <button
-                          className="grid w-full grid-cols-[minmax(0,1.7fr)_110px_120px_120px_120px_110px_120px_120px] gap-3 bg-slate-50/50 px-4 py-3 text-left hover:bg-slate-50"
+                          className={`${tableGridClassName} w-full bg-slate-50/50 px-4 py-3 text-left hover:bg-slate-50`}
                           onClick={() => {
                             setSelectedId(product.id);
                             setExpandedProducts((current) => ({ ...current, [product.id]: !productExpanded }));
@@ -670,9 +673,8 @@ export const NestedTenderGrid = ({
                             </div>
                           </div>
                           <div className="text-sm text-slate-700">{formatNumber(product.quantity, 0)}</div>
-                          <div className="text-sm text-slate-700">{formatCurrency(product.unitCost)}</div>
                           <div className="text-sm font-medium text-slate-900">{formatCurrency(product.totalCost)}</div>
-                          <div className="text-sm text-slate-700">{formatCurrency(product.unitPrice)}</div>
+                          <div className="text-sm text-slate-700">{formatCurrency(product.totalPrice)}</div>
                           <div className="text-sm text-slate-700">{formatPercent(product.summary.marginPercent)}</div>
                           <div className="text-sm text-slate-700">{formatCurrency(product.summary.profitAmount)}</div>
                           <div className="text-sm text-slate-700">{product.productType}</div>
@@ -685,7 +687,7 @@ export const NestedTenderGrid = ({
                               return (
                                 <Fragment key={component.id}>
                                   <button
-                                    className="grid w-full grid-cols-[minmax(0,1.7fr)_110px_120px_120px_120px_110px_120px_120px] gap-3 px-4 py-3 text-left hover:bg-slate-50"
+                                    className={`${tableGridClassName} w-full px-4 py-3 text-left hover:bg-slate-50`}
                                     onClick={() => {
                                       setSelectedId(component.id);
                                       setExpandedComponents((current) => ({
@@ -711,9 +713,8 @@ export const NestedTenderGrid = ({
                                       </div>
                                     </div>
                                     <div className="text-sm text-slate-700">{formatNumber(component.totalQuantity, 0)}</div>
-                                    <div className="text-sm text-slate-700">{formatCurrency(component.unitCost)}</div>
                                     <div className="text-sm font-medium text-slate-900">{formatCurrency(component.totalCost)}</div>
-                                    <div className="text-sm text-slate-700">{formatCurrency(component.summary.unitPrice)}</div>
+                                    <div className="text-sm text-slate-700">{formatCurrency(component.summary.totalPrice)}</div>
                                     <div className="text-sm text-slate-700">{formatPercent(component.summary.marginPercent)}</div>
                                     <div className="text-sm text-slate-700">{formatCurrency(component.summary.profitAmount)}</div>
                                     <div className="text-sm text-slate-700">{component.componentType}</div>
@@ -724,7 +725,7 @@ export const NestedTenderGrid = ({
                                       {component.children.map((source) => (
                                         <button
                                           key={source.id}
-                                          className="grid w-full grid-cols-[minmax(0,1.7fr)_110px_120px_120px_120px_110px_120px_120px] gap-3 bg-slate-50/30 px-4 py-3 text-left hover:bg-slate-50"
+                                          className={`${tableGridClassName} w-full bg-slate-50/30 px-4 py-3 text-left hover:bg-slate-50`}
                                           onClick={() => setSelectedId(source.id)}
                                           type="button"
                                         >
@@ -733,7 +734,6 @@ export const NestedTenderGrid = ({
                                             <p className="mt-1 text-sm text-muted-foreground">{source.supplierName}</p>
                                           </div>
                                           <div className="text-sm text-slate-700">{formatNumber(source.leadTime, 0)}</div>
-                                          <div className="text-sm text-slate-700">{formatCurrency(source.unitCost, 4, source.currency)}</div>
                                           <div className="text-sm font-medium text-slate-900">{formatCurrency(source.costImpact)}</div>
                                           <div className="text-sm text-slate-700">{formatCurrency(source.priceImpact)}</div>
                                           <div className="text-sm text-slate-700">{formatPercent(source.summary.marginPercent)}</div>
@@ -741,12 +741,11 @@ export const NestedTenderGrid = ({
                                           <div className="text-sm text-slate-700">{source.sourceType}</div>
                                         </button>
                                       ))}
-                                      <div className="grid grid-cols-[minmax(0,1.7fr)_110px_120px_120px_120px_110px_120px_120px] gap-3 border-t border-dashed border-border bg-slate-50 px-4 py-3 text-sm">
+                                      <div className={`${tableGridClassName} border-t border-dashed border-border bg-slate-50 px-4 py-3 text-sm`}>
                                         <div className="pl-12 font-medium text-slate-900">Component Subtotal</div>
                                         <div />
-                                        <div />
                                         <div className="font-medium text-slate-900">{formatCurrency(component.summary.totalCost)}</div>
-                                        <div className="text-slate-700">{formatCurrency(component.summary.unitPrice)}</div>
+                                        <div className="text-slate-700">{formatCurrency(component.summary.totalPrice)}</div>
                                         <div className="text-slate-700">{formatPercent(component.summary.marginPercent)}</div>
                                         <div className="text-slate-700">{formatCurrency(component.summary.profitAmount)}</div>
                                         <div className="text-slate-700">{formatPercent(component.priceContributionPercent)}</div>
@@ -756,12 +755,11 @@ export const NestedTenderGrid = ({
                                 </Fragment>
                               );
                             })}
-                            <div className="grid grid-cols-[minmax(0,1.7fr)_110px_120px_120px_120px_110px_120px_120px] gap-3 border-t border-border bg-slate-50 px-4 py-3 text-sm">
+                            <div className={`${tableGridClassName} border-t border-border bg-slate-50 px-4 py-3 text-sm`}>
                               <div className="pl-4 font-semibold text-slate-900">Product Subtotal</div>
                               <div className="text-slate-700">{formatNumber(product.quantity, 0)}</div>
-                              <div className="text-slate-700">{formatCurrency(product.unitCost)}</div>
                               <div className="font-semibold text-slate-900">{formatCurrency(product.totalCost)}</div>
-                              <div className="text-slate-700">{formatCurrency(product.unitPrice)}</div>
+                              <div className="text-slate-700">{formatCurrency(product.totalPrice)}</div>
                               <div className="text-slate-700">{formatPercent(product.summary.marginPercent)}</div>
                               <div className="text-slate-700">{formatCurrency(product.summary.profitAmount)}</div>
                               <div className="text-slate-700">{product.productType}</div>
@@ -771,6 +769,7 @@ export const NestedTenderGrid = ({
                       </Fragment>
                     );
                   })}
+                </div>
                 </div>
               </div>
             </CardContent>

@@ -1,5 +1,6 @@
 import { defineBackend } from "@aws-amplify/backend";
 import { Stack } from "aws-cdk-lib";
+import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { CorsHttpMethod, HttpApi, HttpMethod } from "aws-cdk-lib/aws-apigatewayv2";
 import { HttpUserPoolAuthorizer } from "aws-cdk-lib/aws-apigatewayv2-authorizers";
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
@@ -72,8 +73,21 @@ tenderPricingTable.addGlobalSecondaryIndex({
 
 backend.tenderPricingApi.addEnvironment("TENDER_PRICING_TABLE", tenderPricingTable.tableName);
 backend.tenderPricingApi.addEnvironment("ENABLE_DEV_ENDPOINTS", "true");
+backend.tenderPricingApi.addEnvironment("COGNITO_USER_POOL_ID", backend.auth.resources.userPool.userPoolId);
 
 tenderPricingTable.grantReadWriteData(backend.tenderPricingApi.resources.lambda);
+backend.tenderPricingApi.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      "cognito-idp:ListUsers",
+      "cognito-idp:ListGroups",
+      "cognito-idp:AdminListGroupsForUser",
+      "cognito-idp:AdminAddUserToGroup",
+      "cognito-idp:AdminRemoveUserFromGroup",
+    ],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  }),
+);
 
 const httpApi = new HttpApi(apiStack, "TenderPricingHttpApi", {
   apiName: "alimexTenderPricingApi",
@@ -160,6 +174,16 @@ addProtectedRoutes("/accessories/{accessoryId}", [HttpMethod.GET, HttpMethod.PUT
 addProtectedRoutes("/price-scenarios", [HttpMethod.GET, HttpMethod.POST]);
 
 addProtectedRoutes("/price-scenarios/{scenarioId}", [HttpMethod.GET, HttpMethod.PUT]);
+
+addProtectedRoutes("/access-management/me", [HttpMethod.GET]);
+
+addProtectedRoutes("/access-management/groups", [HttpMethod.GET]);
+
+addProtectedRoutes("/access-management/users", [HttpMethod.GET]);
+
+addProtectedRoutes("/access-management/users/{username}/groups", [HttpMethod.POST]);
+
+addProtectedRoutes("/access-management/users/{username}/groups/{groupName}", [HttpMethod.POST, HttpMethod.DELETE]);
 
 addProtectedRoutes("/dev/seed", [HttpMethod.POST]);
 
