@@ -16,7 +16,7 @@ export const CardHeader = ({
   className,
   ...props
 }: HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("flex items-start justify-between gap-4 p-6", className)} {...props} />
+  <div className={cn("flex flex-col items-start gap-4 p-4 sm:p-5 lg:flex-row lg:justify-between lg:p-6", className)} {...props} />
 );
 
 export const CardTitle = ({
@@ -37,5 +37,5 @@ export const CardContent = ({
   className,
   ...props
 }: HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("px-6 pb-6", className)} {...props} />
+  <div className={cn("px-4 pb-4 sm:px-5 sm:pb-5 lg:px-6 lg:pb-6", className)} {...props} />
 );

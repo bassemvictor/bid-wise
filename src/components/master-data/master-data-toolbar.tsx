@@ -25,7 +25,7 @@ export const MasterDataToolbar = ({
   actions,
 }: MasterDataToolbarProps) => (
   <div className="flex flex-col gap-4 rounded-[1.25rem] border border-border bg-white p-4 md:flex-row md:items-center md:justify-between">
-    <div className="grid gap-3 md:grid-cols-[1fr_180px] md:items-center">
+    <div className="grid gap-3 md:flex-1 md:grid-cols-[minmax(0,1fr)_180px] md:items-center">
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <Input
@@ -41,7 +41,7 @@ export const MasterDataToolbar = ({
         <option value="archived">Archived only</option>
       </Select>
     </div>
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
       {actions}
       <Button onClick={onAdd} type="button">
         {addLabel}

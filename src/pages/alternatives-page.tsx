@@ -231,7 +231,7 @@ const ScenarioDrawer = ({
         type="button"
       />
       <aside className="relative z-10 flex h-full w-full flex-col border-l border-border bg-white shadow-2xl sm:max-w-xl">
-        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-5">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5 sm:py-5">
           <div>
             <h3 className="text-lg font-semibold text-slate-900">
               {state.mode === "add" ? "Add Scenario" : "Edit Scenario"}
@@ -249,7 +249,7 @@ const ScenarioDrawer = ({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-5">
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
           <div className="space-y-5">
             <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-2xl border border-border bg-slate-50 px-4 py-3">
@@ -352,22 +352,22 @@ const ScenarioDrawer = ({
           </div>
         </div>
 
-        <div className="border-t border-border px-5 py-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="border-t border-border px-4 py-4 sm:px-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div className="text-sm text-muted-foreground">
               Save this scenario to update the summary and comparison below.
             </div>
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               {onDelete ? (
-                <Button onClick={onDelete} type="button" variant="ghost">
+                <Button className="w-full sm:w-auto" onClick={onDelete} type="button" variant="ghost">
                   <Trash2 className="h-4 w-4" />
                   Remove
                 </Button>
               ) : null}
-              <Button onClick={onClose} type="button" variant="outline">
+              <Button className="w-full sm:w-auto" onClick={onClose} type="button" variant="outline">
                 Cancel
               </Button>
-              <Button onClick={onSave} type="button">
+              <Button className="w-full sm:w-auto" onClick={onSave} type="button">
                 Save Scenario
               </Button>
             </div>
@@ -901,7 +901,7 @@ export const AlternativesPage = () => {
                         Side-by-side comparison of final price per bag and total order value for each scenario.
                       </CardDescription>
                     </div>
-                    <Button className="justify-self-end" onClick={addScenario} type="button">
+                    <Button className="w-full justify-self-start sm:w-auto md:justify-self-end" onClick={addScenario} type="button">
                       <Plus className="h-4 w-4" />
                       Add Scenario
                     </Button>
@@ -990,8 +990,9 @@ export const AlternativesPage = () => {
               {message ? <p className="mt-2 text-emerald-600">{message}</p> : null}
               {error ? <p className="mt-2 text-rose-600">{error}</p> : null}
             </div>
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
               <Button
+                className="w-full sm:w-auto"
                 type="button"
                 variant="ghost"
                 onClick={() => {
@@ -1005,11 +1006,11 @@ export const AlternativesPage = () => {
                 <ArrowLeft className="h-4 w-4" />
                 Back
               </Button>
-              <Button type="button" variant="outline" disabled={saveMode !== null} onClick={() => void save("draft")}>
+              <Button className="w-full sm:w-auto" type="button" variant="outline" disabled={saveMode !== null} onClick={() => void save("draft")}>
                 <Save className="h-4 w-4" />
                 {saveMode === "draft" ? "Saving..." : "Save Draft"}
               </Button>
-              <Button type="button" disabled={saveMode !== null} onClick={() => void save("continue")}>
+              <Button className="w-full sm:w-auto" type="button" disabled={saveMode !== null} onClick={() => void save("continue")}>
                 <ArrowRight className="h-4 w-4" />
                 {saveMode === "continue" ? "Saving..." : "Next: Pricing Approval"}
               </Button>

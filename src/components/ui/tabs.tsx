@@ -12,7 +12,7 @@ type TabsProps = {
 };
 
 export const RouteTabs = ({ items }: TabsProps) => (
-  <div className="overflow-x-auto">
+  <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
     <div className="inline-flex min-w-full gap-2 rounded-2xl border border-border bg-white p-2">
       {items.map((item) => (
         <NavLink
@@ -20,7 +20,7 @@ export const RouteTabs = ({ items }: TabsProps) => (
           to={item.href}
           className={({ isActive }) =>
             cn(
-              "rounded-xl px-4 py-2 text-sm font-medium text-muted-foreground transition-colors",
+              "rounded-xl px-3 py-2 text-sm font-medium text-muted-foreground transition-colors sm:px-4",
               isActive && "bg-primary text-primary-foreground",
             )
           }

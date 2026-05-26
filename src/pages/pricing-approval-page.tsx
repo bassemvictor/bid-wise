@@ -574,7 +574,7 @@ export const PricingApprovalPage = () => {
                         <TableHead>Order Price</TableHead>
                         <TableHead>Order Profit</TableHead>
                         <TableHead>Status</TableHead>
-                        <TableHead className="min-w-[16rem]">Approval Notes</TableHead>
+                        <TableHead className="min-w-[14rem] sm:min-w-[16rem]">Approval Notes</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -595,7 +595,7 @@ export const PricingApprovalPage = () => {
                             {formatCurrency(calculateProfit(decision.totalPrice, decision.totalCost ?? orderTotalCost))}
                           </TableCell>
                           <TableCell>
-                            <div className="flex min-w-[8rem] flex-col gap-2">
+                            <div className="flex min-w-[7.5rem] flex-col gap-2 sm:min-w-[8rem]">
                               <Button
                                 className={cn("justify-start", getStatusButtonClassName("pending", decision.status === "pending"))}
                                 onClick={() => updateDecision(decision.scenarioId, { status: "pending" })}
@@ -667,8 +667,9 @@ export const PricingApprovalPage = () => {
                   <ArrowLeft className="h-4 w-4" />
                   Back
                 </Button>
-                <div className="flex flex-wrap gap-3">
+                <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap">
                   <Button
+                    className="w-full sm:w-auto"
                     onClick={() => void save("draft")}
                     type="button"
                     variant="outline"
@@ -676,11 +677,12 @@ export const PricingApprovalPage = () => {
                     <Save className="h-4 w-4" />
                     {saveMode === "draft" ? "Saving..." : "Save Draft"}
                   </Button>
-                  <Button onClick={() => void save("final")} type="button">
+                  <Button className="w-full sm:w-auto" onClick={() => void save("final")} type="button">
                     <CheckCircle2 className="h-4 w-4" />
                     {saveMode === "final" ? "Saving..." : "Save Approval"}
                   </Button>
                   <Button
+                    className="w-full sm:w-auto"
                     disabled={!hasApprovedScenario || saveMode === "approve"}
                     onClick={() => void save("approve")}
                     type="button"

@@ -396,7 +396,7 @@ export const AccessoriesPage = () => {
             </div>
             <div className="space-y-3">
               {form.pricingItems.map((item, index) => (
-                <div key={index} className="grid gap-3 md:grid-cols-[1fr_220px_auto]">
+                <div key={index} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]">
                   <label className="space-y-2 text-sm font-medium text-slate-700">
                     Type / Category
                     <Input
@@ -455,9 +455,9 @@ export const AccessoriesPage = () => {
           </div>
           <label className="space-y-2 text-sm font-medium text-slate-700">Total Price per Bag (EGP)<Input value={totalPricePerBag.toFixed(2)} disabled /></label>
           <label className="flex items-center gap-3 rounded-2xl border border-border bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700"><input checked={form.active} onChange={(event) => setForm((c) => ({ ...c, active: event.target.checked }))} type="checkbox" />Active</label>
-          <div className="md:col-span-2 flex justify-end gap-3">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit">{editing ? "Save Changes" : "Create Accessory"}</Button>
+          <div className="md:col-span-2 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button className="w-full sm:w-auto" type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button className="w-full sm:w-auto" type="submit">{editing ? "Save Changes" : "Create Accessory"}</Button>
           </div>
         </form>
       </Dialog>

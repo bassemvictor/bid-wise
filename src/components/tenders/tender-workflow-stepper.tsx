@@ -38,19 +38,19 @@ export const TenderWorkflowStepper = ({
 
   return (
     <div className="rounded-[1.4rem] border border-border bg-white px-4 py-4 panel-shadow lg:px-5">
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm font-semibold text-slate-900">Tender Workflow</p>
         {isDirty ? <Badge variant="warning">Changed</Badge> : null}
       </div>
-      <div className="overflow-x-auto">
-        <div className="flex min-w-max w-full items-center">
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <div className="flex min-w-max items-start sm:w-full sm:items-center">
           {steps.map((step, index) => {
             const stepNumber = index + 1;
             const isCurrentStep = stepNumber === currentStep;
             const isComplete = stepNumber < currentStep || (isCurrentStep && currentStepCompleted);
             const isActive = isCurrentStep && !currentStepCompleted;
             const content = (
-              <div className="relative flex items-center justify-center gap-2 px-1 lg:gap-2.5">
+              <div className="relative flex w-[4.75rem] flex-col items-center justify-start gap-1.5 px-0.5 py-1 text-center sm:w-auto sm:flex-row sm:justify-center sm:gap-2 lg:gap-2.5">
                 <div
                   className={cn(
                     "flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-semibold transition-colors lg:h-9 lg:w-9",
@@ -63,7 +63,7 @@ export const TenderWorkflowStepper = ({
                 </div>
                 <p
                   className={cn(
-                    "whitespace-nowrap text-[12px] font-medium transition-colors lg:text-[13px] xl:text-sm",
+                    "text-[11px] font-medium leading-snug transition-colors sm:max-w-none sm:whitespace-nowrap sm:text-[12px] lg:text-[13px] xl:text-sm",
                     isActive && "text-primary",
                     isComplete && "text-slate-900",
                     !isActive && !isComplete && "text-slate-500",
@@ -76,14 +76,17 @@ export const TenderWorkflowStepper = ({
 
             return (
               <div
-                className={cn("flex min-w-0 items-center", index < steps.length - 1 && "flex-1")}
+                className={cn(
+                  "flex min-w-0 items-start sm:items-center",
+                  index < steps.length - 1 && "flex-none sm:flex-1",
+                )}
                 key={step.label}
               >
                 <div className="shrink-0 py-1">
                   {step.href ? (
                     <NavLink
                       className={cn(
-                        "flex items-center justify-center rounded-xl bg-white px-1 py-1 transition-opacity hover:opacity-85 lg:px-1.5",
+                        "flex items-center justify-center rounded-xl bg-white transition-opacity hover:opacity-85 sm:px-1 sm:py-1 lg:px-1.5",
                         !isActive && !isComplete && "hover:opacity-100",
                       )}
                       onClick={(event) => {
@@ -109,7 +112,7 @@ export const TenderWorkflowStepper = ({
                       {content}
                     </NavLink>
                   ) : (
-                    <div className="flex items-center justify-center bg-white px-1 py-1 lg:px-1.5">
+                    <div className="flex items-center justify-center bg-white sm:px-1 sm:py-1 lg:px-1.5">
                       {content}
                     </div>
                   )}
@@ -117,7 +120,7 @@ export const TenderWorkflowStepper = ({
                 {index < steps.length - 1 ? (
                   <div
                     className={cn(
-                      "mx-1 h-px min-w-8 flex-1 lg:mx-2 lg:min-w-10",
+                      "mt-[1.25rem] h-px w-8 shrink-0 self-start -mx-1 sm:mt-0 sm:mx-1 sm:min-w-8 sm:flex-1 lg:mx-2 lg:min-w-10",
                       isComplete ? "bg-primary/70" : "bg-slate-200",
                     )}
                   />

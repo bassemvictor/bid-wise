@@ -334,34 +334,38 @@ const TenderDetailContent = ({
         </Button>
       </div>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {summaryCards.map((card) => {
           const Icon = card.icon;
 
           return (
             <Card key={card.label}>
-              <CardHeader>
-                <div>
-                  <CardDescription>{card.label}</CardDescription>
-                  <CardTitle className="mt-2 text-xl">{card.value}</CardTitle>
+              <CardContent className="flex items-center justify-between gap-3 p-4">
+                <div className="min-w-0">
+                  <CardDescription className="text-xs font-medium uppercase tracking-[0.14em]">
+                    {card.label}
+                  </CardDescription>
+                  <CardTitle className="mt-1 break-words text-xl sm:text-2xl">{card.value}</CardTitle>
                 </div>
-                <div className="rounded-2xl bg-blue-50 p-3 text-blue-700">
-                  <Icon className="h-5 w-5" />
+                <div className="shrink-0 rounded-2xl bg-blue-50 p-2.5 text-blue-700">
+                  <Icon className="h-4 w-4" />
                 </div>
-              </CardHeader>
+              </CardContent>
             </Card>
           );
         })}
       </section>
 
-      <NestedTenderGrid
-        alternatives={overview?.alternatives ?? null}
-        costBuildUp={overview?.costBuildUp ?? null}
-        materialSourcing={overview?.materialSourcing ?? null}
-        pricingApproval={overview?.pricingApproval ?? null}
-        productConfiguration={overview?.productConfiguration ?? null}
-        tender={overview?.tender ?? null}
-      />
+      <div className="min-w-0">
+        <NestedTenderGrid
+          alternatives={overview?.alternatives ?? null}
+          costBuildUp={overview?.costBuildUp ?? null}
+          materialSourcing={overview?.materialSourcing ?? null}
+          pricingApproval={overview?.pricingApproval ?? null}
+          productConfiguration={overview?.productConfiguration ?? null}
+          tender={overview?.tender ?? null}
+        />
+      </div>
 
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
@@ -376,8 +380,9 @@ const TenderDetailContent = ({
           <Badge variant="default">{overview?.activities.length ?? 0} event(s)</Badge>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto rounded-2xl border border-border">
-            <table className="min-w-full text-sm">
+          <div className="-mx-4 overflow-x-auto sm:mx-0">
+            <div className="min-w-[720px] rounded-2xl border border-border">
+              <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3">When</th>
@@ -464,7 +469,8 @@ const TenderDetailContent = ({
                   </tr>
                 )}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
         </CardContent>
       </Card>

@@ -1573,7 +1573,7 @@ export const CostBuildUpPage = () => {
       {!isLoading ? (
         <>
           <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.35fr)_320px]">
-            <Card>
+            <Card className="min-w-0">
               <CardHeader>
                 <div>
                   <CardTitle>Cost Build-Up Per Bag</CardTitle>
@@ -1584,8 +1584,8 @@ export const CostBuildUpPage = () => {
                 <Badge variant="default">COST_BUILDUP</Badge>
               </CardHeader>
               <CardContent className="space-y-6 pt-6">
-                  <section className="rounded-[1.25rem] border border-blue-100 bg-gradient-to-br from-sky-50 via-white to-blue-50 p-5">
-                    <div className="mb-5 flex items-start justify-between gap-4">
+                  <section className="rounded-[1.25rem] border border-blue-100 bg-gradient-to-br from-sky-50 via-white to-blue-50 p-4 sm:p-5">
+                    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                       <div>
                         <h3 className="text-base font-semibold text-slate-900">Cost Inputs</h3>
                         <p className="mt-1 text-sm text-muted-foreground">
@@ -1719,8 +1719,8 @@ export const CostBuildUpPage = () => {
                     </div>
                   </section>
 
-                  <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
-                    <div className="mb-4 flex items-start justify-between gap-4">
+                  <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-4 sm:p-5">
+                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                       <div>
                         <h3 className="text-base font-semibold text-slate-900">Cost Breakdown Per Bag</h3>
                         <p className="mt-1 text-sm text-muted-foreground">
@@ -1734,7 +1734,7 @@ export const CostBuildUpPage = () => {
 
                     <div className="space-y-4">
                       <div className="overflow-hidden rounded-[1.25rem] border border-border bg-white">
-                        <div className="overflow-x-auto">
+                        <div className="max-w-full overflow-x-auto">
                           <div className="min-w-[650px]">
                             <div className="grid grid-cols-[minmax(260px,2.15fr)_100px_135px_155px] bg-slate-50/90 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                               {[
@@ -2184,7 +2184,7 @@ export const CostBuildUpPage = () => {
               </CardContent>
             </Card>
 
-            <div className="space-y-6 xl:sticky xl:top-6">
+            <div className="min-w-0 space-y-6 xl:sticky xl:top-6">
               <section className="overflow-hidden rounded-[1.5rem] border border-blue-100 bg-gradient-to-br from-blue-600 via-blue-600 to-sky-500 text-white">
                 <div className="space-y-4 p-5">
                   <div>

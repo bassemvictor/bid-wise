@@ -88,7 +88,7 @@ export const TenderRowActions = ({
       {open
         ? createPortal(
             <div
-              className="fixed z-[100] min-w-44 rounded-2xl border border-border bg-white p-2 shadow-xl"
+              className="fixed z-[100] min-w-44 max-w-[calc(100vw-2rem)] rounded-2xl border border-border bg-white p-2 shadow-xl"
               ref={menuRef}
               style={{ left: position.left, top: position.top }}
             >

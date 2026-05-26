@@ -176,14 +176,14 @@ export const AccessManagementPage = () => {
               Manage Cognito group membership. Users can belong to multiple groups at the same time.
             </CardDescription>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <Input
-              className="w-full min-w-[260px]"
+              className="w-full sm:min-w-[260px]"
               placeholder="Search by name, email, username, or group"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
-            <Button type="button" variant="outline" onClick={() => void load()}>
+            <Button className="w-full sm:w-auto" type="button" variant="outline" onClick={() => void load()}>
               Refresh
             </Button>
           </div>
@@ -315,11 +315,11 @@ export const AccessManagementPage = () => {
             ))}
           </div>
 
-          <div className="flex justify-end gap-3">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button className="w-full sm:w-auto" type="button" variant="outline" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button disabled={saving} type="button" onClick={() => void saveGroups()}>
+            <Button className="w-full sm:w-auto" disabled={saving} type="button" onClick={() => void saveGroups()}>
               {saving ? "Saving..." : "Save Groups"}
             </Button>
           </div>

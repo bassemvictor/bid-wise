@@ -406,9 +406,9 @@ export const MaterialsPage = () => {
             <input checked={form.active} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} type="checkbox" />
             Active
           </label>
-          <div className="md:col-span-2 flex justify-end gap-3">
-            <Button onClick={() => setOpen(false)} type="button" variant="outline">Cancel</Button>
-            <Button type="submit">{editing ? "Save Changes" : "Create Material"}</Button>
+          <div className="md:col-span-2 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button className="w-full sm:w-auto" onClick={() => setOpen(false)} type="button" variant="outline">Cancel</Button>
+            <Button className="w-full sm:w-auto" type="submit">{editing ? "Save Changes" : "Create Material"}</Button>
           </div>
         </form>
       </Dialog>

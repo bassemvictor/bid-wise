@@ -305,7 +305,7 @@ const OverflowMenu = ({
     >
       <MoreHorizontal className="h-4 w-4" />
     </summary>
-    <div className="absolute right-0 top-11 z-20 min-w-[160px] rounded-xl border border-border bg-white p-1 shadow-lg">
+    <div className="absolute right-0 top-11 z-20 min-w-[160px] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-white p-1 shadow-lg">
       {children}
     </div>
   </details>
@@ -325,11 +325,11 @@ const TenderSummaryBar = ({
   <div className="sticky top-3 z-20 rounded-2xl border border-border bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
       <div className="grid gap-3 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-center">
-        <div className="min-w-[180px]">
+        <div className="sm:min-w-[180px]">
           <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Total Tender Cost</p>
           <p className="mt-1 text-lg font-semibold text-slate-900">{formatMetric(totalTenderCost, 2, " EGP")}</p>
         </div>
-        <div className="min-w-[180px]">
+        <div className="sm:min-w-[180px]">
           <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Satisfied Components</p>
           <p className="mt-1 text-lg font-semibold text-slate-900">
             {satisfiedCount} / {totalCount}
@@ -434,7 +434,7 @@ const SourceSelectionDrawer = ({
     <div className="fixed inset-0 z-[70] flex justify-end bg-slate-950/30">
       <button aria-label="Close source picker overlay" className="absolute inset-0" onClick={onClose} type="button" />
       <aside className="relative z-10 flex h-full w-full flex-col bg-white shadow-2xl sm:max-w-[640px] sm:border-l sm:border-border">
-        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-5">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5 sm:py-5">
           <div>
             <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -450,7 +450,7 @@ const SourceSelectionDrawer = ({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-5">
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
           <div className="space-y-4">
             <div
               className={cn(
@@ -724,12 +724,12 @@ const SourceSelectionDrawer = ({
           </div>
         </div>
 
-        <div className="border-t border-border px-5 py-4">
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            <Button onClick={onClose} type="button" variant="outline">
+        <div className="border-t border-border px-4 py-4 sm:px-5">
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+            <Button className="w-full sm:w-auto" onClick={onClose} type="button" variant="outline">
               Cancel
             </Button>
-            <Button onClick={onDone} type="button" variant="outline">
+            <Button className="w-full sm:w-auto" onClick={onDone} type="button" variant="outline">
               Done
             </Button>
           </div>
@@ -1368,7 +1368,7 @@ const SourceManagementDrawer = ({
         type="button"
       />
       <aside className="relative z-10 flex h-full w-full flex-col border-l border-border bg-white shadow-2xl sm:max-w-[640px]">
-        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-5">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5 sm:py-5">
           <div>
             {onBack ? (
               <button
@@ -1395,7 +1395,7 @@ const SourceManagementDrawer = ({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-5">
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
           <div className="space-y-5">
             <div className="grid gap-3 md:grid-cols-4">
               <div className="rounded-2xl border border-border bg-slate-50 px-4 py-3">
@@ -1568,22 +1568,22 @@ const SourceManagementDrawer = ({
           </div>
         </div>
 
-        <div className="border-t border-border px-5 py-4">
+        <div className="border-t border-border px-4 py-4 sm:px-5">
           <div className="space-y-3">
             <div className="text-sm text-muted-foreground">
               {onDelete ? "Save this option to add or update its summary line." : "Save this option to add its summary line."}
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-3">
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
               {onDelete ? (
-                <Button onClick={onDelete} type="button" variant="ghost">
+                <Button className="w-full sm:w-auto" onClick={onDelete} type="button" variant="ghost">
                   <Trash2 className="h-4 w-4" />
                   Remove
                 </Button>
               ) : null}
-              <Button onClick={onClose} type="button" variant="outline">
+              <Button className="w-full sm:w-auto" onClick={onClose} type="button" variant="outline">
                 Cancel
               </Button>
-              <Button onClick={onSave} type="button">
+              <Button className="w-full sm:w-auto" onClick={onSave} type="button">
                 Save Option
               </Button>
             </div>
@@ -3179,7 +3179,7 @@ export const MaterialSourcingPage = () => {
                               </p>
                             </div>
                           </button>
-                          <div className="ml-auto flex flex-wrap items-center gap-3 text-sm">
+                          <div className="flex w-full flex-col gap-3 text-sm sm:ml-auto sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
                             <div className="text-right">
                               <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
                                 Progress
@@ -3285,11 +3285,12 @@ export const MaterialSourcingPage = () => {
                                         </button>
                                       </div>
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center md:justify-end">
                                       {isAccessory ? (
                                         <Badge variant="neutral">No source needed</Badge>
                                       ) : (
                                         <Button
+                                          className="w-full sm:w-auto"
                                           onClick={() => openSourcePicker(componentIndex)}
                                           type="button"
                                           variant={component.selectedSources.length ? "outline" : "default"}
@@ -3318,8 +3319,9 @@ export const MaterialSourcingPage = () => {
                 {message ? <p className="mt-2 text-emerald-600">{message}</p> : null}
                 {error ? <p className="mt-2 text-rose-600">{error}</p> : null}
               </div>
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                 <Button
+                  className="w-full sm:w-auto"
                   type="button"
                   variant="ghost"
                   onClick={() => {
@@ -3333,11 +3335,11 @@ export const MaterialSourcingPage = () => {
                   <ArrowLeft className="h-4 w-4" />
                   Back
                 </Button>
-                <Button type="button" variant="outline" disabled={saveMode !== null} onClick={() => void save("draft")}>
+                <Button className="w-full sm:w-auto" type="button" variant="outline" disabled={saveMode !== null} onClick={() => void save("draft")}>
                   <Save className="h-4 w-4" />
                   {saveMode === "draft" ? "Saving..." : "Save Draft"}
                 </Button>
-                <Button type="button" disabled={saveMode !== null} onClick={() => void save("continue")}>
+                <Button className="w-full sm:w-auto" type="button" disabled={saveMode !== null} onClick={() => void save("continue")}>
                   <ArrowRight className="h-4 w-4" />
                   {saveMode === "continue" ? "Saving..." : "Save & Continue"}
                 </Button>

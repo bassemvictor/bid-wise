@@ -675,7 +675,7 @@ const ProductComponentDrawer = ({
         type="button"
       />
       <aside className="relative z-10 flex h-full w-full flex-col border-l border-border bg-white shadow-2xl sm:max-w-xl">
-        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-5">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5 sm:py-5">
           <div>
             <h3 className="text-lg font-semibold text-slate-900">
               {state.mode === "add" ? "Add Component" : "Edit Component"}
@@ -693,7 +693,7 @@ const ProductComponentDrawer = ({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-5">
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-2 text-sm font-medium text-slate-700 sm:col-span-2">
@@ -994,11 +994,11 @@ const ProductComponentDrawer = ({
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-border px-5 py-4">
-          <Button onClick={onClose} type="button" variant="outline">
+        <div className="flex flex-col-reverse gap-3 border-t border-border px-4 py-4 sm:flex-row sm:justify-end sm:px-5">
+          <Button className="w-full sm:w-auto" onClick={onClose} type="button" variant="outline">
             Cancel
           </Button>
-          <Button disabled={!draft.componentName.trim()} onClick={save} type="button">
+          <Button className="w-full sm:w-auto" disabled={!draft.componentName.trim()} onClick={save} type="button">
             Save Component
           </Button>
         </div>
@@ -1414,7 +1414,7 @@ export const ProductConfigurationPage = () => {
 
           {!isLoading ? (
             <>
-              <section className="rounded-[1.2rem] border border-border bg-slate-50/70 px-5 py-5">
+              <section className="rounded-[1.2rem] border border-border bg-slate-50/70 px-4 py-4 sm:px-5 sm:py-5">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <h3 className="text-base font-semibold text-slate-900">Add Products</h3>
@@ -1423,7 +1423,7 @@ export const ProductConfigurationPage = () => {
                     </p>
                   </div>
                   <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row">
-                    <div className="min-w-[20rem]">
+                    <div className="w-full md:w-auto md:min-w-[20rem]">
                       <Select
                         value={selectedProductToAdd}
                         onChange={(event) => setSelectedProductToAdd(event.target.value)}
@@ -1436,7 +1436,7 @@ export const ProductConfigurationPage = () => {
                         ))}
                       </Select>
                     </div>
-                    <Button onClick={addProductToConfiguration} type="button">
+                      <Button className="w-full md:w-auto" onClick={addProductToConfiguration} type="button">
                       <Plus className="h-4 w-4" />
                       Add Product
                     </Button>
@@ -1451,7 +1451,7 @@ export const ProductConfigurationPage = () => {
                       className="rounded-[1.2rem] border border-border bg-white"
                       key={product.productId}
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-5 py-4">
+                      <div className="flex flex-col gap-4 border-b border-border px-4 py-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:px-5">
                         <button
                           className="flex min-w-0 flex-1 items-start gap-3 text-left"
                           onClick={() => toggleProductCollapse(product.productId)}
@@ -1478,6 +1478,7 @@ export const ProductConfigurationPage = () => {
                           </div>
                         </button>
                         <Button
+                          className="w-full sm:w-auto"
                           onClick={() => removeProductFromConfiguration(product.productId)}
                           type="button"
                           variant="ghost"
@@ -1488,7 +1489,7 @@ export const ProductConfigurationPage = () => {
                       </div>
 
                       {!collapsedProducts[product.productId] ? (
-                        <div className="space-y-5 px-5 py-5">
+                        <div className="space-y-5 px-4 py-4 sm:px-5 sm:py-5">
                           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                             <label className="space-y-2 text-sm font-medium text-slate-700">
                               Product Name
@@ -1550,6 +1551,7 @@ export const ProductConfigurationPage = () => {
                                 </p>
                               </div>
                               <Button
+                                className="w-full sm:w-auto"
                                 onClick={() => openAddComponentDrawer(productIndex)}
                                 type="button"
                               >
@@ -1664,8 +1666,9 @@ export const ProductConfigurationPage = () => {
                   {message ? <p className="mt-2 text-emerald-600">{message}</p> : null}
                   {error ? <p className="mt-2 text-rose-600">{error}</p> : null}
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                   <Button
+                    className="w-full sm:w-auto"
                     onClick={() => {
                       if (!confirmDiscardUnsavedChanges(isDirty)) {
                         return;
@@ -1680,6 +1683,7 @@ export const ProductConfigurationPage = () => {
                     Back
                   </Button>
                   <Button
+                    className="w-full sm:w-auto"
                     onClick={() => void save("draft")}
                     type="button"
                     variant="outline"
@@ -1687,7 +1691,7 @@ export const ProductConfigurationPage = () => {
                     <Save className="h-4 w-4" />
                     {saveMode === "draft" ? "Saving..." : "Save Draft"}
                   </Button>
-                  <Button onClick={() => void save("continue")} type="button">
+                  <Button className="w-full sm:w-auto" onClick={() => void save("continue")} type="button">
                     <ArrowRight className="h-4 w-4" />
                     {saveMode === "continue" ? "Saving..." : "Save & Continue"}
                   </Button>

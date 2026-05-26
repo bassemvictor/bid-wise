@@ -301,7 +301,7 @@ export const SuppliersPage = () => {
           <label className="space-y-2 text-sm font-medium text-slate-700">Phone<Input value={supplierForm.phone} onChange={(event) => setSupplierForm((c) => ({ ...c, phone: event.target.value }))} /></label>
           <label className="flex items-center gap-3 rounded-2xl border border-border bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700"><input checked={supplierForm.preferred} onChange={(event) => setSupplierForm((c) => ({ ...c, preferred: event.target.checked }))} type="checkbox" />Preferred</label>
           <label className="flex items-center gap-3 rounded-2xl border border-border bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700"><input checked={supplierForm.active} onChange={(event) => setSupplierForm((c) => ({ ...c, active: event.target.checked }))} type="checkbox" />Active</label>
-          <div className="md:col-span-2 flex justify-end gap-3"><Button type="button" variant="outline" onClick={() => setSupplierDialogOpen(false)}>Cancel</Button><Button type="submit">{editing ? "Save Changes" : "Create Supplier"}</Button></div>
+          <div className="md:col-span-2 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button className="w-full sm:w-auto" type="button" variant="outline" onClick={() => setSupplierDialogOpen(false)}>Cancel</Button><Button className="w-full sm:w-auto" type="submit">{editing ? "Save Changes" : "Create Supplier"}</Button></div>
         </form>
       </Dialog>
     </div>

@@ -657,9 +657,9 @@ export const ImportPresetsPage = () => {
             <input checked={form.active} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />
             Active
           </label>
-          <div className="flex justify-end gap-3 md:col-span-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit">{editing ? "Save Changes" : "Create Import Preset"}</Button>
+          <div className="flex flex-col-reverse gap-3 md:col-span-2 sm:flex-row sm:justify-end">
+            <Button className="w-full sm:w-auto" type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button className="w-full sm:w-auto" type="submit">{editing ? "Save Changes" : "Create Import Preset"}</Button>
           </div>
         </form>
       </Dialog>

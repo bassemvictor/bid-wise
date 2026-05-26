@@ -388,8 +388,8 @@ export const TenderIntakePage = () => {
             <form className="grid gap-6" onSubmit={handleSubmit}>
               <div className="grid gap-6">
                 <div className="grid gap-6">
-                  <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
-                    <div className="mb-4 flex items-start justify-between gap-4">
+                  <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-4 sm:p-5">
+                    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                       <div>
                         <h3 className="text-base font-semibold text-slate-900">{sectionCards[0].title}</h3>
                         <p className="mt-1 text-sm text-muted-foreground">{sectionCards[0].description}</p>
@@ -457,8 +457,8 @@ export const TenderIntakePage = () => {
                   </section>
                 </div>
 
-                <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
-                  <div className="mb-4 flex items-start justify-between gap-4">
+                <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-4 sm:p-5">
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                     <div>
                       <h3 className="text-base font-semibold text-slate-900">{sectionCards[1].title}</h3>
                       <p className="mt-1 text-sm text-muted-foreground">{sectionCards[1].description}</p>
@@ -491,8 +491,8 @@ export const TenderIntakePage = () => {
                   </div>
                 </section>
 
-                <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
-                  <div className="mb-4 flex items-start justify-between gap-4">
+                <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-4 sm:p-5">
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                     <div>
                       <h3 className="text-base font-semibold text-slate-900">{sectionCards[2].title}</h3>
                       <p className="mt-1 text-sm text-muted-foreground">{sectionCards[2].description}</p>
@@ -538,8 +538,8 @@ export const TenderIntakePage = () => {
                   </div>
                 </section>
 
-                <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
-                  <div className="mb-4 flex items-start justify-between gap-4">
+                <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-4 sm:p-5">
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                     <div>
                       <h3 className="text-base font-semibold text-slate-900">{sectionCards[4].title}</h3>
                       <p className="mt-1 text-sm text-muted-foreground">{sectionCards[4].description}</p>
@@ -588,8 +588,8 @@ export const TenderIntakePage = () => {
                   </div>
                 </section>
 
-                <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-5">
-                  <div className="mb-4 flex items-start justify-between gap-4">
+                <section className="rounded-[1.25rem] border border-border bg-slate-50/80 p-4 sm:p-5">
+                  <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                     <div>
                       <h3 className="text-base font-semibold text-slate-900">{sectionCards[3].title}</h3>
                       <p className="mt-1 text-sm text-muted-foreground">{sectionCards[3].description}</p>
@@ -610,8 +610,9 @@ export const TenderIntakePage = () => {
                   {message ? <p className="mt-2 text-emerald-600">{message}</p> : null}
                   {error ? <p className="mt-2 text-rose-600">{error}</p> : null}
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                   <Button
+                    className="w-full sm:w-auto"
                     disabled={saveMode !== null}
                     onClick={() => void persistTender("draft")}
                     type="button"
@@ -619,7 +620,7 @@ export const TenderIntakePage = () => {
                   >
                     {saveMode === "draft" ? "Saving Draft..." : "Save Draft"}
                   </Button>
-                  <Button disabled={saveMode !== null} type="submit">
+                  <Button className="w-full sm:w-auto" disabled={saveMode !== null} type="submit">
                     {saveMode === "next" ? "Saving..." : "Save & Next"}
                   </Button>
                 </div>

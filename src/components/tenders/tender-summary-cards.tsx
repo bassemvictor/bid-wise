@@ -1,6 +1,6 @@
 import { CheckCircle2, Clock3, FileStack, LoaderCircle, TriangleAlert } from "lucide-react";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { Card, CardContent, CardDescription, CardTitle } from "../ui/card";
 import type { TenderListSummary } from "../../../shared/types";
 
 const items = [
@@ -12,22 +12,23 @@ const items = [
 ] as const;
 
 export const TenderSummaryCards = ({ summary }: { summary: TenderListSummary }) => (
-  <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+  <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
     {items.map((item) => {
       const Icon = item.icon;
 
       return (
         <Card key={item.key}>
-          <CardHeader className="items-center">
-            <div>
-              <CardDescription>{item.label}</CardDescription>
-              <CardTitle className="mt-2 text-3xl">{summary[item.key]}</CardTitle>
+          <CardContent className="flex items-center justify-between gap-3 p-4">
+            <div className="min-w-0">
+              <CardDescription className="text-xs font-medium uppercase tracking-[0.14em]">
+                {item.label}
+              </CardDescription>
+              <CardTitle className="mt-1 text-2xl sm:text-[1.75rem]">{summary[item.key]}</CardTitle>
             </div>
-            <div className={`rounded-2xl p-3 ${item.tone}`}>
-              <Icon className="h-5 w-5" />
+            <div className={`shrink-0 rounded-2xl p-2.5 ${item.tone}`}>
+              <Icon className="h-4 w-4" />
             </div>
-          </CardHeader>
-          <CardContent />
+          </CardContent>
         </Card>
       );
     })}

@@ -199,8 +199,8 @@ const summaryCards = (summary: Summary) => [
 ];
 
 const tableGridClassName =
-  "grid grid-cols-[minmax(0,2.2fr)_120px_150px_150px_110px_140px_140px] gap-4";
-const tableMinWidthClassName = "min-w-[1120px]";
+  "grid grid-cols-[minmax(220px,2.2fr)_120px_150px_150px_110px_140px_140px] gap-4";
+const tableMinWidthClassName = "min-w-[980px] lg:min-w-[1120px]";
 
 export const NestedTenderGrid = ({
   tender,
@@ -532,7 +532,7 @@ export const NestedTenderGrid = ({
   return (
     <div className="space-y-6">
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_320px]">
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             {[
               { label: "Tender ID", value: tender.tenderId || "\u2014", icon: Layers3 },
@@ -601,7 +601,7 @@ export const NestedTenderGrid = ({
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
-                <div className="relative min-w-[260px] flex-1">
+                <div className="relative min-w-0 flex-1 sm:min-w-[260px]">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     className="pl-9"
@@ -616,7 +616,7 @@ export const NestedTenderGrid = ({
                 </Badge>
               </div>
 
-              <div className="overflow-x-auto rounded-[1.25rem] border border-border">
+              <div className="max-w-full overflow-x-auto rounded-[1.25rem] border border-border">
                 <div className={tableMinWidthClassName}>
                 <div className={`${tableGridClassName} bg-slate-50 px-4 py-3 text-[11px] uppercase tracking-[0.16em] text-muted-foreground`}>
                   <div className="whitespace-nowrap">Hierarchy</div>
@@ -634,18 +634,18 @@ export const NestedTenderGrid = ({
                     onClick={() => setSelectedId("tender")}
                     type="button"
                   >
-                    <div>
-                      <p className="font-semibold text-slate-900">{tender.tenderNumber || tender.tenderId}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">
+                    <div className="min-w-0">
+                      <p className="break-words font-semibold text-slate-900">{tender.tenderNumber || tender.tenderId}</p>
+                      <p className="mt-1 break-words text-sm text-muted-foreground">
                         {tender.customerName || "\u2014"} · {tender.status || "\u2014"}
                       </p>
                     </div>
-                    <div className="text-sm text-slate-700">{formatNumber(productConfiguration?.quantity, 0)}</div>
-                    <div className="text-sm font-medium text-slate-900">{formatCurrency(tenderSummary.totalCost)}</div>
-                    <div className="text-sm text-slate-700">{formatCurrency(tenderSummary.totalPrice)}</div>
-                    <div className="text-sm text-slate-700">{formatPercent(tenderSummary.marginPercent)}</div>
-                    <div className="text-sm text-slate-700">{formatCurrency(tenderSummary.profitAmount)}</div>
-                    <div className="text-sm text-slate-700">{pricingChoice?.label || "\u2014"}</div>
+                    <div className="min-w-0 whitespace-nowrap text-sm text-slate-700">{formatNumber(productConfiguration?.quantity, 0)}</div>
+                    <div className="min-w-0 whitespace-nowrap text-sm font-medium text-slate-900">{formatCurrency(tenderSummary.totalCost)}</div>
+                    <div className="min-w-0 whitespace-nowrap text-sm text-slate-700">{formatCurrency(tenderSummary.totalPrice)}</div>
+                    <div className="min-w-0 whitespace-nowrap text-sm text-slate-700">{formatPercent(tenderSummary.marginPercent)}</div>
+                    <div className="min-w-0 whitespace-nowrap text-sm text-slate-700">{formatCurrency(tenderSummary.profitAmount)}</div>
+                    <div className="min-w-0 break-words text-sm text-slate-700">{pricingChoice?.label || "\u2014"}</div>
                   </button>
 
                   {filteredProducts.map((product) => {
@@ -661,23 +661,23 @@ export const NestedTenderGrid = ({
                           }}
                           type="button"
                         >
-                          <div className="flex items-start gap-2 pl-4">
+                          <div className="flex min-w-0 items-start gap-2 pl-4">
                             {productExpanded ? (
                               <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
                             ) : (
                               <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
                             )}
-                            <div>
-                              <p className="font-semibold text-slate-900">{product.label}</p>
-                              <p className="mt-1 text-sm text-muted-foreground">{product.id}</p>
+                            <div className="min-w-0">
+                              <p className="break-words font-semibold text-slate-900">{product.label}</p>
+                              <p className="mt-1 break-words text-sm text-muted-foreground">{product.id}</p>
                             </div>
                           </div>
-                          <div className="text-sm text-slate-700">{formatNumber(product.quantity, 0)}</div>
-                          <div className="text-sm font-medium text-slate-900">{formatCurrency(product.totalCost)}</div>
-                          <div className="text-sm text-slate-700">{formatCurrency(product.totalPrice)}</div>
-                          <div className="text-sm text-slate-700">{formatPercent(product.summary.marginPercent)}</div>
-                          <div className="text-sm text-slate-700">{formatCurrency(product.summary.profitAmount)}</div>
-                          <div className="text-sm text-slate-700">{product.productType}</div>
+                          <div className="min-w-0 whitespace-nowrap text-sm text-slate-700">{formatNumber(product.quantity, 0)}</div>
+                          <div className="min-w-0 whitespace-nowrap text-sm font-medium text-slate-900">{formatCurrency(product.totalCost)}</div>
+                          <div className="min-w-0 whitespace-nowrap text-sm text-slate-700">{formatCurrency(product.totalPrice)}</div>
+                          <div className="min-w-0 whitespace-nowrap text-sm text-slate-700">{formatPercent(product.summary.marginPercent)}</div>
+                          <div className="min-w-0 whitespace-nowrap text-sm text-slate-700">{formatCurrency(product.summary.profitAmount)}</div>
+                          <div className="min-w-0 break-words text-sm text-slate-700">{product.productType}</div>
                         </button>
 
                         {productExpanded ? (
@@ -776,7 +776,7 @@ export const NestedTenderGrid = ({
           </Card>
         </div>
 
-        <div className="xl:sticky xl:top-6 xl:self-start">
+        <div className="min-w-0 xl:sticky xl:top-6 xl:self-start">
           <Card>
             <CardContent className="space-y-4 p-4">
               <div>

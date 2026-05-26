@@ -94,13 +94,13 @@ export const TenderFilters = ({ customers, filters, onChange }: TenderFiltersPro
               onChange={setField("search")}
             />
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={() => setOpen(true)} type="button" variant="outline">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+            <Button className="w-full sm:w-auto" onClick={() => setOpen(true)} type="button" variant="outline">
               <SlidersHorizontal className="h-4 w-4" />
               {activeFilterCount > 0 ? `${activeFilterCount} selected filters` : "Filters"}
             </Button>
             {activeFilterCount > 0 ? (
-              <Button onClick={clearFilters} type="button" variant="ghost">
+              <Button className="w-full sm:w-auto" onClick={clearFilters} type="button" variant="ghost">
                 Remove all filters
               </Button>
             ) : null}
@@ -112,7 +112,7 @@ export const TenderFilters = ({ customers, filters, onChange }: TenderFiltersPro
         <div className="fixed inset-0 z-[80] flex justify-end bg-slate-950/30">
           <button aria-label="Close filters overlay" className="absolute inset-0" onClick={() => setOpen(false)} type="button" />
           <aside className="relative z-10 flex h-full w-full flex-col border-l border-border bg-white shadow-2xl sm:max-w-[560px]">
-            <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-5">
+            <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5 sm:py-5">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">Filters</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -128,7 +128,7 @@ export const TenderFilters = ({ customers, filters, onChange }: TenderFiltersPro
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-5 py-5">
+            <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
               <div className="space-y-4">
                 <Select value={filters.status} onChange={setField("status")}>
                   <option value="">All statuses</option>
@@ -147,12 +147,12 @@ export const TenderFilters = ({ customers, filters, onChange }: TenderFiltersPro
               </div>
             </div>
 
-            <div className="border-t border-border px-5 py-4">
-              <div className="flex flex-wrap items-center justify-end gap-3">
-                <Button onClick={clearFilters} type="button" variant="ghost">
+            <div className="border-t border-border px-4 py-4 sm:px-5">
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+                <Button className="w-full sm:w-auto" onClick={clearFilters} type="button" variant="ghost">
                   Remove all filters
                 </Button>
-                <Button onClick={() => setOpen(false)} type="button" variant="outline">
+                <Button className="w-full sm:w-auto" onClick={() => setOpen(false)} type="button" variant="outline">
                   Done
                 </Button>
               </div>

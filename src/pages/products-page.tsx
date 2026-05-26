@@ -375,7 +375,7 @@ const ProductComponentDrawer = ({
         type="button"
       />
       <aside className="relative z-10 flex h-full w-full flex-col border-l border-border bg-white shadow-2xl sm:max-w-xl">
-        <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-5">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5 sm:py-5">
           <div>
             <h3 className="text-lg font-semibold text-slate-900">
               {state.mode === "add" ? "Add Component" : "Edit Component"}
@@ -393,7 +393,7 @@ const ProductComponentDrawer = ({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-5">
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="space-y-2 text-sm font-medium text-slate-700 sm:col-span-2">
@@ -622,11 +622,11 @@ const ProductComponentDrawer = ({
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-border px-5 py-4">
-          <Button onClick={onClose} type="button" variant="outline">
+        <div className="flex flex-col-reverse gap-3 border-t border-border px-4 py-4 sm:flex-row sm:justify-end sm:px-5">
+          <Button className="w-full sm:w-auto" onClick={onClose} type="button" variant="outline">
             Cancel
           </Button>
-          <Button disabled={!draft.componentName.trim()} onClick={save} type="button">
+          <Button className="w-full sm:w-auto" disabled={!draft.componentName.trim()} onClick={save} type="button">
             Save Component
           </Button>
         </div>
@@ -1112,8 +1112,9 @@ export const ProductsPage = () => {
 
             {error ? <p className="text-sm text-rose-600">{error}</p> : null}
 
-            <div className="flex justify-end gap-3 border-t border-border pt-4">
+            <div className="flex flex-col-reverse gap-3 border-t border-border pt-4 sm:flex-row sm:justify-end">
               <Button
+                className="w-full sm:w-auto"
                 onClick={() => {
                   setOpen(false);
                   setDrawerState(null);
@@ -1123,7 +1124,7 @@ export const ProductsPage = () => {
               >
                 Cancel
               </Button>
-              <Button type="submit">{editing ? "Save Product" : "Save Product"}</Button>
+              <Button className="w-full sm:w-auto" type="submit">{editing ? "Save Product" : "Save Product"}</Button>
             </div>
           </form>
 

@@ -282,20 +282,20 @@ export const AllTendersPage = () => {
         <p className="max-w-3xl text-sm text-muted-foreground">
           Manage all tender requests, inquiries, budget offers, and direct orders.
         </p>
-        <div className="flex flex-wrap gap-3">
-          <Button onClick={() => navigate("/tenders/intake")} type="button">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          <Button className="w-full sm:w-auto" onClick={() => navigate("/tenders/intake")} type="button">
             <Plus className="h-4 w-4" />
             New Tender
           </Button>
-          <Button onClick={exportCurrent} type="button" variant="outline">
+          <Button className="w-full sm:w-auto" onClick={exportCurrent} type="button" variant="outline">
             <Download className="h-4 w-4" />
             Export CSV
           </Button>
-          <Button onClick={exportExcel} type="button" variant="outline">
+          <Button className="w-full sm:w-auto" onClick={exportExcel} type="button" variant="outline">
             <Download className="h-4 w-4" />
             Export Excel
           </Button>
-          <Button onClick={refresh} type="button" variant="outline">
+          <Button className="w-full sm:w-auto" onClick={refresh} type="button" variant="outline">
             <RefreshCcw className="h-4 w-4" />
             Refresh
           </Button>
@@ -343,15 +343,15 @@ export const AllTendersPage = () => {
                     sortBy={sortBy}
                     sortDirection={sortDirection}
                   />
-                  <div className="mt-5 flex items-center justify-between">
+                  <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-sm text-muted-foreground">
                       Showing {response.items.length} tender{response.items.length === 1 ? "" : "s"}
                     </p>
-                    <div className="flex gap-3">
-                      <Button disabled={tokenHistory.length === 0} onClick={prevPage} type="button" variant="outline">
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                      <Button className="w-full sm:w-auto" disabled={tokenHistory.length === 0} onClick={prevPage} type="button" variant="outline">
                         Previous
                       </Button>
-                      <Button disabled={!response.nextToken} onClick={nextPage} type="button" variant="outline">
+                      <Button className="w-full sm:w-auto" disabled={!response.nextToken} onClick={nextPage} type="button" variant="outline">
                         Next
                       </Button>
                     </div>

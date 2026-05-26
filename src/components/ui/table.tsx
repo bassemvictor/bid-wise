@@ -3,8 +3,8 @@ import type { HTMLAttributes, TableHTMLAttributes, TdHTMLAttributes, ThHTMLAttri
 import { cn } from "../../lib/utils";
 
 export const Table = ({ className, ...props }: TableHTMLAttributes<HTMLTableElement>) => (
-  <div className="overflow-x-auto">
-    <table className={cn("w-full min-w-[640px] border-separate border-spacing-0", className)} {...props} />
+  <div className="-mx-4 overflow-x-auto sm:mx-0">
+    <table className={cn("w-full min-w-[560px] border-separate border-spacing-0 sm:min-w-[640px]", className)} {...props} />
   </div>
 );
 
@@ -22,11 +22,11 @@ export const TableRow = ({ className, ...props }: HTMLAttributes<HTMLTableRowEle
 
 export const TableHead = ({ className, ...props }: ThHTMLAttributes<HTMLTableCellElement>) => (
   <th
-    className={cn("px-4 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground", className)}
+    className={cn("px-3 py-3 text-left text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground sm:px-4", className)}
     {...props}
   />
 );
 
 export const TableCell = ({ className, ...props }: TdHTMLAttributes<HTMLTableCellElement>) => (
-  <td className={cn("px-4 py-4 text-sm text-slate-700", className)} {...props} />
+  <td className={cn("px-3 py-4 align-top text-sm text-slate-700 sm:px-4", className)} {...props} />
 );
