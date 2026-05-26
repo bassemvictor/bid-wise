@@ -3414,11 +3414,7 @@ export const MaterialSourcingPage = () => {
         description="This shows the detailed equations behind the selected component's cost per bag."
         onClose={() => setCostBreakdownComponentIndex(null)}
         open={costBreakdownComponentIndex !== null && Boolean(costBreakdownComponent && costBreakdownMetrics)}
-        title={
-          costBreakdownComponent
-            ? `${costBreakdownComponent.componentName} Cost / Bag`
-            : "Cost / Bag Breakdown"
-        }
+        title="Bag Cost / Bag"
         size="lg"
       >
         <div className="space-y-3">
@@ -3429,7 +3425,26 @@ export const MaterialSourcingPage = () => {
                   <div>
                     <p className="text-sm font-medium text-slate-700">Total Material Cost / Bag</p>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Sum of all selected source contributions to one finished bag.
+                      {bagBodySourceBreakdown.length
+                        ? `(${bagBodySourceBreakdown
+                            .map(
+                              (item, sourceIndex) =>
+                                `source ${sourceIndex + 1} [${formatMetric(
+                                  item.finalSourceBagCostEgp,
+                                  2,
+                                  " EGP/bag",
+                                )}] × allocated [${formatMetric(
+                                  item.allocatedBags,
+                                  0,
+                                  " bags",
+                                )}]`,
+                            )
+                            .join(" + ")}) ÷ requested [${formatMetric(
+                            requestedQuantityForBreakdown,
+                            0,
+                            " bags",
+                          )}] = [${formatMetric(costBreakdownMetrics?.materialCostPerBagEgp ?? null, 2, " EGP")}]`
+                        : "Sum of all selected source contributions to one finished bag."}
                     </p>
                   </div>
                   <p className="text-base font-semibold text-slate-900">
@@ -3469,18 +3484,35 @@ export const MaterialSourcingPage = () => {
                           )})`}
                         </p>
                       </div>
-                      <div className="text-right">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Contribution To Total / Bag</p>
-                        <p className="mt-1 text-base font-semibold text-slate-900">
-                          {formatMetric(item.contributionToTotalPerBagEgp, 2, " EGP")}
-                        </p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {`Source bag cost: ${formatMetric(item.finalSourceBagCostEgp, 2, " EGP/bag")}`}
-                        </p>
-                      </div>
                     </div>
 
                     <div className="mt-4 space-y-3">
+                      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-sm font-medium text-slate-700">Bags / Roll</p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {`bags across = floor(roll width [${formatMillimeters(
+                                rollWidthMm,
+                              )}] ÷ bag width [${formatMillimeters(costBreakdownMetrics?.bagWidthMm ?? null, 1)}]) [${formatMetric(
+                                lineMetrics?.bagsAcrossRollWidth ?? null,
+                                0,
+                                " bags",
+                              )}] × bags along = floor(roll length [${formatMillimeters(
+                                rollLengthMm,
+                                0,
+                              )}] ÷ bag length with allowance [${formatMillimeters(
+                                costBreakdownMetrics?.bagLengthWithAllowanceMm ?? null,
+                                1,
+                              )}]) [${formatMetric(lineMetrics?.bagsAlongRollLength ?? null, 0, " bags")}]`}
+                            </p>
+                          </div>
+                          <p className="text-sm font-semibold text-slate-900">
+                            {formatMetric(lineMetrics?.bagsPerRoll ?? null, 0, " bags/roll")}
+                          </p>
+                        </div>
+                      </div>
+
                       <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
                         <div className="flex items-start justify-between gap-4">
                           <div>
