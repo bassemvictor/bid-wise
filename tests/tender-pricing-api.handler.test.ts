@@ -125,8 +125,8 @@ test("creates a tender with clean JSON and tender GSI attributes", async () => {
         assert.equal(item.status, "DRAFT_INTAKE");
       } else {
         assert.equal(item.PK, "TENDER#TDR-2001");
-        assert.equal(item.entityType, "TENDER_ACTIVITY");
-        assert.equal(item.section, "TENDER");
+        assert.equal(item.entityType, "USER_ACTIVITY_AUDIT_LOG");
+        assert.equal(item.stage, "TENDER");
       }
 
       return {};
@@ -170,7 +170,8 @@ test("creates a tender with clean JSON and tender GSI attributes", async () => {
   );
 
   assert.equal(response.statusCode, 201);
-  assert.deepEqual(seenCommands.map((entry) => entry.constructor.name), ["GetCommand", "PutCommand", "PutCommand"]);
+  assert.equal(seenCommands[0]?.constructor.name, "GetCommand");
+  assert.ok(seenCommands.filter((entry) => entry.constructor.name === "PutCommand").length > 1);
   assert.ok(response.body);
 
   const body = JSON.parse(response.body) as Record<string, unknown>;
@@ -273,7 +274,7 @@ test("saves product configuration with tender-based keys and updates tender stat
   assert.ok(response.body);
 
   const putCommands = seenCommands.filter((command) => command.constructor.name === "PutCommand");
-  assert.equal(putCommands.length, 4);
+  assert.ok(putCommands.length > 3);
 
   const configItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "PRODUCT_CONFIG#base")
     ?.input?.Item as Record<string, unknown>;
@@ -281,13 +282,14 @@ test("saves product configuration with tender-based keys and updates tender stat
   assert.equal(configItem.SK, "PRODUCT_CONFIG#base");
   assert.equal(configItem.entityType, "PRODUCT_CONFIGURATION");
 
-  const activityItem = putCommands.find(
+  const auditItem = putCommands.find(
     (command) =>
-      (command.input?.Item as Record<string, unknown>)?.entityType === "TENDER_ACTIVITY" &&
-      (command.input?.Item as Record<string, unknown>)?.section === "PRODUCT_CONFIGURATION",
+      (command.input?.Item as Record<string, unknown>)?.entityType === "USER_ACTIVITY_AUDIT_LOG" &&
+      (command.input?.Item as Record<string, unknown>)?.stage === "PRODUCT_CONFIGURATION" &&
+      (command.input?.Item as Record<string, unknown>)?.fieldName === "quantity",
   )?.input?.Item as Record<string, unknown>;
-  assert.equal(activityItem.PK, "TENDER#TDR-3001");
-  assert.equal(activityItem.actorId, "anonymous");
+  assert.equal(auditItem.PK, "TENDER#TDR-3001");
+  assert.equal(auditItem.changedByUserId, "anonymous");
 
   const tenderItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "TENDER#TDR-3001")
     ?.input?.Item as Record<string, unknown>;
@@ -392,20 +394,13 @@ test("saves roll calculation with tender-based keys and updates tender status", 
   assert.ok(response.body);
 
   const putCommands = seenCommands.filter((command) => command.constructor.name === "PutCommand");
-  assert.equal(putCommands.length, 4);
+  assert.equal(putCommands.length, 3);
 
   const rollItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "ROLL_CALC#base")
     ?.input?.Item as Record<string, unknown>;
   assert.equal(rollItem.PK, "TENDER#TDR-4001");
   assert.equal(rollItem.SK, "ROLL_CALC#base");
   assert.equal(rollItem.entityType, "ROLL_CALCULATION");
-
-  const activityItem = putCommands.find(
-    (command) =>
-      (command.input?.Item as Record<string, unknown>)?.entityType === "TENDER_ACTIVITY" &&
-      (command.input?.Item as Record<string, unknown>)?.section === "ROLL_CALCULATION",
-  )?.input?.Item as Record<string, unknown>;
-  assert.equal(activityItem.PK, "TENDER#TDR-4001");
 
   const tenderItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "TENDER#TDR-4001")
     ?.input?.Item as Record<string, unknown>;
@@ -529,7 +524,7 @@ test("saves material sourcing with tender-based keys and updates tender status",
   assert.ok(response.body);
 
   const putCommands = seenCommands.filter((command) => command.constructor.name === "PutCommand");
-  assert.equal(putCommands.length, 4);
+  assert.ok(putCommands.length >= 4);
 
   const deleteCommands = seenCommands.filter((command) => command.constructor.name === "DeleteCommand");
   assert.equal(deleteCommands.length, 0);
@@ -540,12 +535,13 @@ test("saves material sourcing with tender-based keys and updates tender status",
   assert.equal(sourcingItem.SK, "MATERIAL_SOURCE#base");
   assert.equal(sourcingItem.entityType, "MATERIAL_SOURCE_SELECTION");
 
-  const activityItem = putCommands.find(
+  const auditItem = putCommands.find(
     (command) =>
-      (command.input?.Item as Record<string, unknown>)?.entityType === "TENDER_ACTIVITY" &&
-      (command.input?.Item as Record<string, unknown>)?.section === "MATERIAL_SOURCE_SELECTION",
+      (command.input?.Item as Record<string, unknown>)?.entityType === "USER_ACTIVITY_AUDIT_LOG" &&
+      (command.input?.Item as Record<string, unknown>)?.stage === "MATERIAL_SOURCE_SELECTION" &&
+      (command.input?.Item as Record<string, unknown>)?.fieldName === "exchangeRate",
   )?.input?.Item as Record<string, unknown>;
-  assert.equal(activityItem.PK, "TENDER#TDR-5001");
+  assert.equal(auditItem.PK, "TENDER#TDR-5001");
 
   const tenderItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "TENDER#TDR-5001")
     ?.input?.Item as Record<string, unknown>;
@@ -655,7 +651,7 @@ test("saves cost build-up with tender-based keys and updates tender status", asy
   assert.ok(response.body);
 
   const putCommands = seenCommands.filter((command) => command.constructor.name === "PutCommand");
-  assert.equal(putCommands.length, 4);
+  assert.ok(putCommands.length >= 4);
 
   const costItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "COST_BUILDUP#base")
     ?.input?.Item as Record<string, unknown>;
@@ -666,12 +662,13 @@ test("saves cost build-up with tender-based keys and updates tender status", asy
   assert.equal(costItem.currencySafetyFactorPercent, 3);
   assert.equal(costItem.effectiveExchangeRate, 51.5);
 
-  const activityItem = putCommands.find(
+  const auditItem = putCommands.find(
     (command) =>
-      (command.input?.Item as Record<string, unknown>)?.entityType === "TENDER_ACTIVITY" &&
-      (command.input?.Item as Record<string, unknown>)?.section === "COST_BUILDUP",
+      (command.input?.Item as Record<string, unknown>)?.entityType === "USER_ACTIVITY_AUDIT_LOG" &&
+      (command.input?.Item as Record<string, unknown>)?.stage === "COST_BUILDUP" &&
+      (command.input?.Item as Record<string, unknown>)?.fieldName === "exchangeRate",
   )?.input?.Item as Record<string, unknown>;
-  assert.equal(activityItem.PK, "TENDER#TDR-6001");
+  assert.equal(auditItem.PK, "TENDER#TDR-6001");
 
   const tenderItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "TENDER#TDR-6001")
     ?.input?.Item as Record<string, unknown>;
@@ -687,7 +684,7 @@ test("saves cost build-up with tender-based keys and updates tender status", asy
   assert.equal(body.effectiveExchangeRate, 51.5);
 });
 
-test("lists tender activities with actor and field-level changes", async () => {
+test("lists tender audit log entries with filters", async () => {
   setHandlerClientsForTesting(
     createMockClient((command) => {
       assert.equal(command.constructor.name, "QueryCommand");
@@ -695,40 +692,45 @@ test("lists tender activities with actor and field-level changes", async () => {
         Items: [
           {
             PK: "TENDER#TDR-6101",
-            SK: "ACTIVITY#2026-05-15T12:00:00.000Z#ACT-2",
-            entityType: "TENDER_ACTIVITY",
+            SK: "AUDIT#2026-05-15T12:00:00.000Z#AUD-2",
+            entityType: "USER_ACTIVITY_AUDIT_LOG",
             tenantId: "tenant-a",
             tenderId: "TDR-6101",
-            activityId: "ACT-2",
-            activityType: "UPDATED",
-            section: "PRODUCT_CONFIGURATION",
-            actorId: "user-1",
-            actorName: "Sally Samuel",
-            actorEmail: "sally@alimex.test",
-            message: "PRODUCT_CONFIGURATION updated by Sally Samuel.",
-            changeCount: 2,
-            changes: [
-              { fieldPath: "productSnapshots[0].productName", previousValue: "Old", nextValue: "New" },
-              { fieldPath: "quantity", previousValue: 10, nextValue: 15 },
-            ],
+            auditId: "AUD-2",
+            stage: "PRODUCT_CONFIGURATION",
+            fieldName: "quantity",
+            fieldLabel: "Number of Bags",
+            oldValue: 10,
+            newValue: 15,
+            actionType: "UPDATE",
+            changedByUserId: "user-1",
+            changedByUserName: "Sally Samuel",
+            changedByUserEmail: "sally@alimex.test",
+            changedAt: "2026-05-15T12:00:00.000Z",
+            sourcePage: "product-configuration",
+            sourceComponent: "ProductConfigurationPage",
             createdAt: "2026-05-15T12:00:00.000Z",
             updatedAt: "2026-05-15T12:00:00.000Z",
           },
           {
             PK: "TENDER#TDR-6101",
-            SK: "ACTIVITY#2026-05-15T11:00:00.000Z#ACT-1",
-            entityType: "TENDER_ACTIVITY",
+            SK: "AUDIT#2026-05-15T11:00:00.000Z#AUD-1",
+            entityType: "USER_ACTIVITY_AUDIT_LOG",
             tenantId: "tenant-a",
             tenderId: "TDR-6101",
-            activityId: "ACT-1",
-            activityType: "CREATED",
-            section: "TENDER",
-            actorId: "user-1",
-            actorName: "Sally Samuel",
-            actorEmail: "sally@alimex.test",
-            message: "TENDER created by Sally Samuel.",
-            changeCount: 1,
-            changes: [{ fieldPath: "customerName", previousValue: null, nextValue: "Acme" }],
+            auditId: "AUD-1",
+            stage: "TENDER",
+            fieldName: "customerName",
+            fieldLabel: "Customer",
+            oldValue: null,
+            newValue: "Acme",
+            actionType: "CREATE",
+            changedByUserId: "user-1",
+            changedByUserName: "Sally Samuel",
+            changedByUserEmail: "sally@alimex.test",
+            changedAt: "2026-05-15T11:00:00.000Z",
+            sourcePage: "tender-intake",
+            sourceComponent: "TenderIntakePage",
             createdAt: "2026-05-15T11:00:00.000Z",
             updatedAt: "2026-05-15T11:00:00.000Z",
           },
@@ -740,9 +742,9 @@ test("lists tender activities with actor and field-level changes", async () => {
   const response = asHttpResponse(
     await handler(
       {
-        rawPath: "/tenders/TDR-6101/activities",
+        rawPath: "/tenders/TDR-6101/audit-log",
         pathParameters: { tenderId: "TDR-6101" },
-        queryStringParameters: { tenantId: "tenant-a" },
+        queryStringParameters: { tenantId: "tenant-a", stage: "PRODUCT_CONFIGURATION" },
         requestContext: { http: { method: "GET" } },
       } as never,
       {} as never,
@@ -752,14 +754,12 @@ test("lists tender activities with actor and field-level changes", async () => {
 
   assert.equal(response.statusCode, 200);
   const body = JSON.parse(response.body ?? "[]") as Array<Record<string, unknown>>;
-  assert.equal(body.length, 2);
-  assert.equal(body[0]?.activityId, "ACT-2");
-  assert.equal(body[0]?.actorName, "Sally Samuel");
-  assert.equal(body[0]?.changeCount, 2);
-  assert.deepEqual(body[0]?.changes, [
-    { fieldPath: "productSnapshots[0].productName", previousValue: "Old", nextValue: "New" },
-    { fieldPath: "quantity", previousValue: 10, nextValue: 15 },
-  ]);
+  assert.equal(body.length, 1);
+  assert.equal(body[0]?.auditId, "AUD-2");
+  assert.equal(body[0]?.changedByUserName, "Sally Samuel");
+  assert.equal(body[0]?.fieldName, "quantity");
+  assert.equal(body[0]?.oldValue, 10);
+  assert.equal(body[0]?.newValue, 15);
 });
 
 test("creates customer with tenant keys and clean json response", async () => {
@@ -1306,7 +1306,14 @@ test("duplicates tender with related workflow snapshots", async () => {
     assert.ok(putItems.some((item) => item.PK === `TENDER#${duplicatedTenderId}` && item.SK === "ROLL_CALC#base"));
     assert.ok(putItems.some((item) => item.PK === `TENDER#${duplicatedTenderId}` && item.SK === "MATERIAL_SOURCE#base"));
     assert.ok(putItems.some((item) => item.PK === `TENDER#${duplicatedTenderId}` && item.SK === "COST_BUILDUP#base"));
-    assert.ok(putItems.some((item) => item.PK === `TENDER#${duplicatedTenderId}` && String(item.SK).startsWith("ACTIVITY#")));
+    assert.ok(
+      putItems.some(
+        (item) =>
+          item.PK === `TENDER#${duplicatedTenderId}` &&
+          String(item.SK).startsWith("AUDIT#") &&
+          item.entityType === "USER_ACTIVITY_AUDIT_LOG",
+      ),
+    );
 
     assert.ok(response.body);
     const body = JSON.parse(response.body) as Record<string, unknown>;

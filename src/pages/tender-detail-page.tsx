@@ -1,11 +1,9 @@
 import {
   ArrowRight,
   Calculator,
-  ChevronDown,
-  ChevronRight,
   CircleDollarSign,
 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { Badge } from "../components/ui/badge";
@@ -22,9 +20,9 @@ import type {
   ProductConfiguration,
   RollCalculation,
   ScenarioAlternative,
-  TenderActivity,
   TenderRequest,
   TenderStatus,
+  UserActivityAuditLog,
 } from "../../shared/types";
 
 type SectionPayloads = {
@@ -43,7 +41,7 @@ type TenderOverviewData = {
   costBuildUp: CostBuildUp | null;
   alternatives: ScenarioAlternative | null;
   pricingApproval: PricingApproval | null;
-  activities: TenderActivity[];
+  auditLog: UserActivityAuditLog[];
 };
 
 const formatNumber = (value: number | null | undefined, digits = 2) =>
@@ -188,7 +186,11 @@ const TenderDetailContent = ({
   const [payload, setPayload] = useState<SectionPayloads[keyof SectionPayloads] | null>(null);
   const [overview, setOverview] = useState<TenderOverviewData | null>(null);
   const [error, setError] = useState("");
-  const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
+  const [auditStageFilter, setAuditStageFilter] = useState("");
+  const [auditUserFilter, setAuditUserFilter] = useState("");
+  const [auditActionTypeFilter, setAuditActionTypeFilter] = useState("");
+  const [auditDateFromFilter, setAuditDateFromFilter] = useState("");
+  const [auditDateToFilter, setAuditDateToFilter] = useState("");
   const title = useMemo(
     () => getPageTitle(section === "overview" ? `/tenders/${tenderId}` : `/tenders/${tenderId}/${section}`),
     [section, tenderId],
@@ -200,6 +202,16 @@ const TenderDetailContent = ({
     status: overview?.tender?.status,
     section,
   });
+
+  const auditQueryString = useMemo(() => {
+    const params = new URLSearchParams({ tenantId: "alimex-demo" });
+    if (auditStageFilter) params.set("stage", auditStageFilter);
+    if (auditUserFilter) params.set("user", auditUserFilter);
+    if (auditActionTypeFilter) params.set("actionType", auditActionTypeFilter);
+    if (auditDateFromFilter) params.set("dateFrom", `${auditDateFromFilter}T00:00:00.000Z`);
+    if (auditDateToFilter) params.set("dateTo", `${auditDateToFilter}T23:59:59.999Z`);
+    return params.toString();
+  }, [auditActionTypeFilter, auditDateFromFilter, auditDateToFilter, auditStageFilter, auditUserFilter]);
 
   useEffect(() => {
     if (!isApiConfigured || !tenderId) {
@@ -229,7 +241,7 @@ const TenderDetailContent = ({
         getOptional<CostBuildUp>(`/tenders/${tenderId}/cost-build-up?tenantId=alimex-demo`),
         getOptional<ScenarioAlternative>(`/tenders/${tenderId}/alternatives?tenantId=alimex-demo`),
         getOptional<PricingApproval>(`/tenders/${tenderId}/pricing-approval?tenantId=alimex-demo`),
-        getOptional<TenderActivity[]>(`/tenders/${tenderId}/activities?tenantId=alimex-demo`),
+        getOptional<UserActivityAuditLog[]>(`/tenders/${tenderId}/audit-log?${auditQueryString}`),
       ])
         .then(
           ([
@@ -240,7 +252,7 @@ const TenderDetailContent = ({
             costBuildUp,
             alternatives,
             pricingApproval,
-            activities,
+            auditLog,
           ]) =>
           setOverview({
             tender,
@@ -250,7 +262,7 @@ const TenderDetailContent = ({
             costBuildUp,
             alternatives,
             pricingApproval,
-            activities: activities ?? [],
+            auditLog: auditLog ?? [],
           }),
         )
         .catch((reason: Error) => setError(reason.message));
@@ -262,7 +274,7 @@ const TenderDetailContent = ({
       .get<SectionPayloads[keyof SectionPayloads]>(basePath)
       .then(setPayload)
       .catch((reason: Error) => setError(reason.message));
-  }, [section, tenderId]);
+  }, [auditQueryString, section, tenderId]);
 
   const summaryCards = useMemo(() => {
     if (!overview?.tender) {
@@ -374,97 +386,101 @@ const TenderDetailContent = ({
           <div>
             <CardTitle>Activity Log</CardTitle>
             <CardDescription>
-              Fine-grained audit trail for tender changes, including actor, section, and field-level diffs.
+              User Activity Audit Log for meaningful business inputs and approval actions only.
             </CardDescription>
           </div>
-          <Badge variant="default">{overview?.activities.length ?? 0} event(s)</Badge>
+          <Badge variant="default">{overview?.auditLog.length ?? 0} record(s)</Badge>
         </CardHeader>
         <CardContent>
+          <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <select
+              className="rounded-xl border border-border bg-white px-3 py-2 text-sm"
+              onChange={(event) => setAuditStageFilter(event.target.value)}
+              value={auditStageFilter}
+            >
+              <option value="">All stages</option>
+              <option value="TENDER">Tender</option>
+              <option value="PRODUCT_CONFIGURATION">Product Configuration</option>
+              <option value="MATERIAL_SOURCE_SELECTION">Material Sourcing</option>
+              <option value="COST_BUILDUP">Cost Build-Up</option>
+              <option value="ALTERNATIVES">Alternatives</option>
+              <option value="PRICING_APPROVAL">Pricing Approval</option>
+              <option value="SYSTEM">System</option>
+            </select>
+            <input
+              className="rounded-xl border border-border bg-white px-3 py-2 text-sm"
+              onChange={(event) => setAuditUserFilter(event.target.value)}
+              placeholder="Filter by user"
+              value={auditUserFilter}
+            />
+            <select
+              className="rounded-xl border border-border bg-white px-3 py-2 text-sm"
+              onChange={(event) => setAuditActionTypeFilter(event.target.value)}
+              value={auditActionTypeFilter}
+            >
+              <option value="">All actions</option>
+              <option value="CREATE">Create</option>
+              <option value="UPDATE">Update</option>
+              <option value="DELETE">Delete</option>
+              <option value="APPROVE">Approve</option>
+              <option value="REJECT">Reject</option>
+            </select>
+            <input
+              className="rounded-xl border border-border bg-white px-3 py-2 text-sm"
+              onChange={(event) => setAuditDateFromFilter(event.target.value)}
+              type="date"
+              value={auditDateFromFilter}
+            />
+            <input
+              className="rounded-xl border border-border bg-white px-3 py-2 text-sm"
+              onChange={(event) => setAuditDateToFilter(event.target.value)}
+              type="date"
+              value={auditDateToFilter}
+            />
+          </div>
           <div className="-mx-4 overflow-x-auto sm:mx-0">
-            <div className="min-w-[720px] rounded-2xl border border-border">
+            <div className="min-w-[980px] rounded-2xl border border-border">
               <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase tracking-[0.16em] text-muted-foreground">
                 <tr>
-                  <th className="px-4 py-3">When</th>
-                  <th className="px-4 py-3">Who</th>
-                  <th className="px-4 py-3">Activity</th>
-                  <th className="px-4 py-3">Section</th>
-                  <th className="px-4 py-3">Summary</th>
-                  <th className="px-4 py-3">Changes</th>
+                  <th className="px-4 py-3">Date/Time</th>
+                  <th className="px-4 py-3">User</th>
+                  <th className="px-4 py-3">Stage</th>
+                  <th className="px-4 py-3">Field Changed</th>
+                  <th className="px-4 py-3">Old Value</th>
+                  <th className="px-4 py-3">New Value</th>
+                  <th className="px-4 py-3">Action</th>
                 </tr>
               </thead>
               <tbody>
-                {overview?.activities.length ? (
-                  overview.activities.map((activity) => {
-                    const isExpanded = expandedActivityId === activity.activityId;
-
-                    return (
-                      <Fragment key={activity.activityId}>
-                        <tr
-                          className="cursor-pointer border-t border-border hover:bg-slate-50"
-                          onClick={() =>
-                            setExpandedActivityId((current) => (current === activity.activityId ? null : activity.activityId))
-                          }
-                        >
-                          <td className="px-4 py-3 text-slate-700">{formatDateTime(activity.createdAt)}</td>
-                          <td className="px-4 py-3">
-                            <div className="font-medium text-slate-900">{activity.actorName || activity.actorId}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {activity.actorEmail || activity.actorId || "Unknown"}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <Badge variant={activity.activityType === "UPDATED" ? "warning" : "success"}>
-                              {activity.activityType}
-                            </Badge>
-                          </td>
-                          <td className="px-4 py-3">{activity.section}</td>
-                          <td className="px-4 py-3 text-slate-700">{activity.message}</td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="default">{activity.changeCount}</Badge>
-                              {isExpanded ? (
-                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                        {isExpanded ? (
-                          <tr className="border-t border-border bg-slate-50/70">
-                            <td className="px-4 py-4" colSpan={6}>
-                              {activity.changes.length ? (
-                                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                                  {activity.changes.map((change, index) => (
-                                    <div className="rounded-2xl border border-border bg-white p-3" key={`${activity.activityId}-${index}`}>
-                                      <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">{change.fieldPath}</p>
-                                      <div className="mt-2 grid gap-2">
-                                        <div className="rounded-xl bg-slate-50 p-2">
-                                          <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Previous</p>
-                                          <p className="mt-1 text-sm text-slate-700">{formatAuditValue(change.previousValue)}</p>
-                                        </div>
-                                        <div className="rounded-xl bg-blue-50 p-2">
-                                          <p className="text-[11px] uppercase tracking-[0.16em] text-blue-700">New</p>
-                                          <p className="mt-1 text-sm font-medium text-slate-900">{formatAuditValue(change.nextValue)}</p>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="text-sm text-muted-foreground">No field-level changes captured for this event.</p>
-                              )}
-                            </td>
-                          </tr>
-                        ) : null}
-                      </Fragment>
-                    );
-                  })
+                {overview?.auditLog.length ? (
+                  overview.auditLog.map((record) => (
+                    <tr className="border-t border-border hover:bg-slate-50" key={record.auditId}>
+                      <td className="px-4 py-3 text-slate-700">{formatDateTime(record.changedAt)}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-900">{record.changedByUserName || record.changedByUserId}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {record.changedByUserEmail || record.changedByUserId || "Unknown"}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">{record.stage}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-900">{record.fieldLabel}</div>
+                        <div className="text-xs text-muted-foreground">{record.fieldName}</div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">{formatAuditValue(record.oldValue)}</td>
+                      <td className="px-4 py-3 text-slate-900">{formatAuditValue(record.newValue)}</td>
+                      <td className="px-4 py-3">
+                        <Badge variant={record.actionType === "APPROVE" ? "success" : record.actionType === "REJECT" ? "warning" : "warning"}>
+                          {record.actionType}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))
                 ) : (
                   <tr>
-                    <td className="px-4 py-8 text-center text-muted-foreground" colSpan={6}>
-                      No activity captured for this tender yet.
+                    <td className="px-4 py-8 text-center text-muted-foreground" colSpan={7}>
+                      No user activity audit records captured for this tender yet.
                     </td>
                   </tr>
                 )}

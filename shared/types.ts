@@ -147,34 +147,39 @@ export type TenderListResponse = {
   summary: TenderListSummary;
 };
 
-export type TenderActivity = EntityEnvelope & {
+export type UserActivityAuditActionType =
+  | "CREATE"
+  | "UPDATE"
+  | "DELETE"
+  | "APPROVE"
+  | "REJECT";
+
+export type UserActivityAuditStage =
+  | "TENDER"
+  | "PRODUCT_CONFIGURATION"
+  | "ROLL_CALCULATION"
+  | "MATERIAL_SOURCE_SELECTION"
+  | "COST_BUILDUP"
+  | "ALTERNATIVES"
+  | "PRICING_APPROVAL"
+  | "SYSTEM";
+
+export type UserActivityAuditLog = EntityEnvelope & {
   tenderId: string;
-  activityId: string;
-  activityType:
-    | "CREATED"
-    | "UPDATED"
-    | "ARCHIVED"
-    | "DUPLICATED"
-    | "DELETED";
-  section:
-    | "TENDER"
-    | "PRODUCT_CONFIGURATION"
-    | "ROLL_CALCULATION"
-    | "MATERIAL_SOURCE_SELECTION"
-    | "COST_BUILDUP"
-    | "ALTERNATIVES"
-    | "PRICING_APPROVAL"
-    | "SYSTEM";
-  actorId: string;
-  actorName: string;
-  actorEmail?: string;
-  message: string;
-  changeCount: number;
-  changes: Array<{
-    fieldPath: string;
-    previousValue: string | number | boolean | null;
-    nextValue: string | number | boolean | null;
-  }>;
+  auditId: string;
+  productId?: string;
+  stage: UserActivityAuditStage;
+  fieldName: string;
+  fieldLabel: string;
+  oldValue: string | number | boolean | null;
+  newValue: string | number | boolean | null;
+  actionType: UserActivityAuditActionType;
+  changedByUserId: string;
+  changedByUserName: string;
+  changedByUserEmail?: string;
+  changedAt: string;
+  sourcePage: string;
+  sourceComponent: string;
 };
 
 export type ProductConfiguration = EntityEnvelope & {
