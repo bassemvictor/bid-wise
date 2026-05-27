@@ -31,6 +31,11 @@ type TenderIntakeForm = Omit<
   | "customerCommissionPercent"
   | "exchangeRate"
   | "currencySafetyFactorPercent"
+  | "overtimePerBag"
+  | "installationPerBag"
+  | "transportationCostPerBag"
+  | "salesPercentage"
+  | "salesFixed"
 > & {
   bagDiameterMm: string;
   bagLengthMm: string;
@@ -39,6 +44,11 @@ type TenderIntakeForm = Omit<
   customerCommissionPercent: string;
   exchangeRate: string;
   currencySafetyFactorPercent: string;
+  overtimePerBag: string;
+  installationPerBag: string;
+  transportationCostPerBag: string;
+  salesPercentage: string;
+  salesFixed: string;
 };
 
 const initialState: TenderIntakeForm = {
@@ -63,6 +73,11 @@ const initialState: TenderIntakeForm = {
   customerCommissionPercent: "",
   exchangeRate: "",
   currencySafetyFactorPercent: "",
+  overtimePerBag: "",
+  installationPerBag: "",
+  transportationCostPerBag: "",
+  salesPercentage: "",
+  salesFixed: "",
   priceNegotiationExpected: false,
   requestedDeliveryTime: "",
   deliveryPlace: "factory",
@@ -216,6 +231,11 @@ export const TenderIntakePage = () => {
           customerCommissionPercent: record.customerCommissionPercent?.toString() ?? "",
           exchangeRate: record.exchangeRate?.toString() ?? "",
           currencySafetyFactorPercent: record.currencySafetyFactorPercent?.toString() ?? "",
+          overtimePerBag: record.overtimePerBag?.toString() ?? "",
+          installationPerBag: record.installationPerBag?.toString() ?? "",
+          transportationCostPerBag: record.transportationCostPerBag?.toString() ?? "",
+          salesPercentage: record.salesPercentage?.toString() ?? "",
+          salesFixed: record.salesFixed?.toString() ?? "",
           priceNegotiationExpected: record.priceNegotiationExpected,
           requestedDeliveryTime: record.requestedDeliveryTime,
           deliveryPlace: record.deliveryPlace,
@@ -290,6 +310,12 @@ export const TenderIntakePage = () => {
     exchangeRate: form.exchangeRate === "" ? null : Number(form.exchangeRate),
     currencySafetyFactorPercent:
       form.currencySafetyFactorPercent === "" ? null : Number(form.currencySafetyFactorPercent),
+    overtimePerBag: form.overtimePerBag === "" ? null : Number(form.overtimePerBag),
+    installationPerBag: form.installationPerBag === "" ? null : Number(form.installationPerBag),
+    transportationCostPerBag:
+      form.transportationCostPerBag === "" ? null : Number(form.transportationCostPerBag),
+    salesPercentage: form.salesPercentage === "" ? null : Number(form.salesPercentage),
+    salesFixed: form.salesFixed === "" ? null : Number(form.salesFixed),
     priceNegotiationExpected: form.priceNegotiationExpected,
     requestedDeliveryTime: form.requestedDeliveryTime.trim(),
     deliveryPlace: form.deliveryPlace,

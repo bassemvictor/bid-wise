@@ -21,6 +21,7 @@ import { Dialog } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { api, ApiError, isApiConfigured } from "../lib/api";
 import { getProductConfigurationSyncStatuses } from "../lib/product-configuration-sync";
+import { getTenderPricingFormState } from "../lib/tender-pricing";
 import {
   confirmDiscardUnsavedChanges,
   useUnsavedChangesWarning,
@@ -222,10 +223,11 @@ const initialForm = (tenderId: string): MaterialSourcingForm => ({
 const applyTenderRateDefaults = (
   form: MaterialSourcingForm,
   tender: TenderRequest | null,
+  fallback?: Pick<MaterialSourceSelection, "exchangeRate" | "currencySafetyFactorPercent"> | null,
 ): MaterialSourcingForm => ({
   ...form,
-  exchangeRate: tender?.exchangeRate?.toString() ?? "",
-  currencySafetyFactorPercent: tender?.currencySafetyFactorPercent?.toString() ?? "",
+  exchangeRate: getTenderPricingFormState(tender, fallback).exchangeRate,
+  currencySafetyFactorPercent: getTenderPricingFormState(tender, fallback).currencySafetyFactorPercent,
 });
 
 const numberOrNull = (value: string) => {
@@ -1698,6 +1700,7 @@ export const MaterialSourcingPage = () => {
               ),
             },
             loadedTender,
+            saved,
           );
           setForm(nextForm);
           setLastSavedSignature(JSON.stringify(nextForm));
@@ -3031,7 +3034,7 @@ export const MaterialSourcingPage = () => {
     }
 
     if (!form.exchangeRate.trim() || !form.currencySafetyFactorPercent.trim()) {
-      setError("Exchange Rate and Currency Safety Factor % are required in Tender Intake before saving material sourcing.");
+      setError("Exchange Rate and Currency Safety Factor % are required at the tender level before saving material sourcing.");
       setSaveMode(null);
       return;
     }

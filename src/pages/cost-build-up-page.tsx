@@ -12,6 +12,11 @@ import { Input } from "../components/ui/input";
 import { api, ApiError, isApiConfigured } from "../lib/api";
 import { getProductConfigurationSyncStatuses } from "../lib/product-configuration-sync";
 import {
+  getEffectiveExchangeRate,
+  getTenderPricingFormState,
+  getTenderPricingSettings,
+} from "../lib/tender-pricing";
+import {
   confirmDiscardUnsavedChanges,
   useUnsavedChangesWarning,
 } from "../lib/use-unsaved-changes";
@@ -380,6 +385,83 @@ const calculateMaterialLineOverrides = ({
   };
 };
 
+const calculateSelectionMaterialCost = ({
+  selection,
+  materials,
+  effectiveExchangeRate,
+  fallbackRequestedQuantity,
+}: {
+  selection: NonNullable<MaterialSourceSelection["componentSelections"]>[number];
+  materials: Material[];
+  effectiveExchangeRate: number | null;
+  fallbackRequestedQuantity?: number | null;
+}) => {
+  const category = resolveMaterialCategoryForSelection(selection, materials);
+  const requestedQuantity = selection.requestedQuantity ?? fallbackRequestedQuantity ?? null;
+
+  if (isFabricMaterialCategory(category) && effectiveExchangeRate !== null) {
+    const recomputedTotal = selection.selectedSources.reduce((total, source) => {
+      const qtyUsedM2 = source.qtyUsedM2 ?? null;
+      const unitCostUsdPerM2 = source.unitCostUsdPerM2 ?? null;
+      const landedCostEgp = source.landedCostEgp ?? null;
+      const customsPercent = source.customsPercent ?? 0;
+      const freightCostPerM2Egp = source.freightCostPerM2Egp ?? 0;
+      const clearanceCostPerM2Egp = source.clearanceCostPerM2Egp ?? 0;
+
+      if (qtyUsedM2 === null) {
+        return total;
+      }
+
+      const convertedCostPerM2Egp =
+        unitCostUsdPerM2 !== null ? unitCostUsdPerM2 * effectiveExchangeRate : null;
+      const customsCostPerM2Egp =
+        source.sourceType === "stock" ? 0 : (convertedCostPerM2Egp ?? 0) * (customsPercent / 100);
+      const landedCostPerM2Egp =
+        source.sourceType === "stock"
+          ? landedCostEgp
+          : convertedCostPerM2Egp !== null
+            ? convertedCostPerM2Egp + customsCostPerM2Egp + freightCostPerM2Egp + clearanceCostPerM2Egp
+            : null;
+
+      if (landedCostPerM2Egp === null) {
+        return total;
+      }
+
+      return total + qtyUsedM2 * landedCostPerM2Egp;
+    }, 0);
+
+    return {
+      category,
+      requestedQuantity,
+      totalCost: selection.selectedSources.length > 0 ? recomputedTotal : selection.totalMaterialCostEgp ?? null,
+      costPerBag:
+        requestedQuantity !== null && requestedQuantity > 0
+          ? recomputedTotal / requestedQuantity
+          : selection.materialCostPerBagEgp ?? null,
+    };
+  }
+
+  const totalCost =
+    selection.totalMaterialCostEgp ??
+    (selection.materialCostPerBagEgp !== null &&
+    selection.materialCostPerBagEgp !== undefined &&
+    requestedQuantity !== null &&
+    requestedQuantity !== undefined
+      ? selection.materialCostPerBagEgp * requestedQuantity
+      : null);
+
+  return {
+    category,
+    requestedQuantity,
+    totalCost,
+    costPerBag:
+      selection.materialCostPerBagEgp ??
+      (totalCost !== null && requestedQuantity !== null && requestedQuantity > 0
+        ? totalCost / requestedQuantity
+        : null),
+  };
+};
+
 const buildProductOverheadLines = (products: ProductConfiguration["productSnapshots"] = []) =>
   products.flatMap((product) =>
     (["F", "G", "G2"] as const).map((baseCode) => ({
@@ -534,14 +616,6 @@ const mergeCostLines = (
   });
 };
 
-const inferSalesInputMode = (savedLines: CostLine[] | undefined): "percent" | "fixed" => {
-  const savedByCode = new Map((savedLines ?? []).map((line) => [line.code, line]));
-  return savedByCode.get("H_FIXED")?.costPerBag !== null &&
-    savedByCode.get("H_FIXED")?.costPerBag !== undefined
-    ? "fixed"
-    : "percent";
-};
-
 const syncProductConfigurationOverheads = (
   configuration: ProductConfiguration,
   costLines: Array<{ code: string; costPerBag: string | number | null }>,
@@ -571,9 +645,24 @@ const syncProductConfigurationOverheads = (
   };
 };
 
+const extractTenderPricingFallbacksFromCostBuildUp = (payload: CostBuildUp | null) => {
+  const readLine = (code: string) => payload?.costLines.find((line) => line.code === code)?.costPerBag ?? null;
+
+  return {
+    exchangeRate: payload?.exchangeRate ?? null,
+    currencySafetyFactorPercent: payload?.currencySafetyFactorPercent ?? null,
+    overtimePerBag: readLine("I_RUSH"),
+    installationPerBag: readLine("K"),
+    transportationCostPerBag: readLine("J"),
+    salesPercentage: readLine("H_PERCENT"),
+    salesFixed: readLine("H_FIXED"),
+  };
+};
+
 const toForm = (
   payload: CostBuildUp,
   materialLineOverrides: MaterialLineOverrides,
+  tender: TenderRequest | null,
   defaults?: CostDefaults,
   products: ProductConfiguration["productSnapshots"] = [],
 ): CostBuildUpForm => ({
@@ -583,14 +672,16 @@ const toForm = (
   alternativeId: payload.alternativeId,
   quantity: payload.quantity?.toString() ?? "",
   currency: payload.currency,
-  exchangeRate: payload.exchangeRate?.toString() ?? "",
-  currencySafetyFactorPercent: payload.currencySafetyFactorPercent?.toString() ?? "",
-  effectiveExchangeRate: payload.effectiveExchangeRate?.toString() ?? "",
-  salesInputMode: inferSalesInputMode(payload.costLines),
-  salesPercent:
-    payload.costLines.find((line) => line.code === "H_PERCENT")?.costPerBag?.toString() ?? "",
-  salesFixedAmount:
-    payload.costLines.find((line) => line.code === "H_FIXED")?.costPerBag?.toString() ?? "",
+  exchangeRate: tender?.exchangeRate?.toString() ?? "",
+  currencySafetyFactorPercent: tender?.currencySafetyFactorPercent?.toString() ?? "",
+  effectiveExchangeRate: getEffectiveExchangeRate({
+    exchangeRate: tender?.exchangeRate ?? null,
+    currencySafetyFactorPercent: tender?.currencySafetyFactorPercent ?? null,
+  })?.toString() ?? "",
+  salesInputMode:
+    tender?.salesFixed !== null && tender?.salesFixed !== undefined ? "fixed" : "percent",
+  salesPercent: tender?.salesPercentage?.toString() ?? "",
+  salesFixedAmount: tender?.salesFixed?.toString() ?? "",
   costLines: mergeCostLines(payload.costLines, materialLineOverrides, defaults, products),
   totalMaterialCostPerBag: payload.totalMaterialCostPerBag?.toString() ?? "",
   totalOperatingCostPerBag: payload.totalOperatingCostPerBag?.toString() ?? "",
@@ -603,6 +694,7 @@ export const CostBuildUpPage = () => {
   const navigate = useNavigate();
   const { tenderId = "" } = useParams();
   const [form, setForm] = useState<CostBuildUpForm>(() => initialForm(tenderId));
+  const [pricingForm, setPricingForm] = useState(() => getTenderPricingFormState(null));
   const [tender, setTender] = useState<TenderRequest | null>(null);
   const [productConfiguration, setProductConfiguration] = useState<ProductConfiguration | null>(null);
   const [rollCalculation, setRollCalculation] = useState<RollCalculation | null>(null);
@@ -663,12 +755,13 @@ export const CostBuildUpPage = () => {
   const [saveMode, setSaveMode] = useState<"draft" | "continue" | null>(null);
   const [collapsedProducts, setCollapsedProducts] = useState<Record<string, boolean>>({});
   const [lastSavedSignature, setLastSavedSignature] = useState(() =>
-    JSON.stringify(initialForm(tenderId)),
+    JSON.stringify({ form: initialForm(tenderId), pricingForm: getTenderPricingFormState(null) }),
   );
 
   useEffect(() => {
     setForm(initialForm(tenderId));
-    setLastSavedSignature(JSON.stringify(initialForm(tenderId)));
+    setPricingForm(getTenderPricingFormState(null));
+    setLastSavedSignature(JSON.stringify({ form: initialForm(tenderId), pricingForm: getTenderPricingFormState(null) }));
   }, [tenderId]);
 
   useEffect(() => {
@@ -742,34 +835,38 @@ export const CostBuildUpPage = () => {
         });
         const costDefaults = deriveCostDefaults(loadedConfiguration);
         if (saved) {
+          const nextPricingForm = getTenderPricingFormState(
+            loadedTender,
+            extractTenderPricingFallbacksFromCostBuildUp(saved),
+          );
           const nextForm = toForm(
             saved,
             materialLineOverrides,
+            loadedTender,
             costDefaults,
             loadedConfiguration.productSnapshots ?? [],
           );
+          setPricingForm(nextPricingForm);
           setForm(nextForm);
-          setLastSavedSignature(JSON.stringify(nextForm));
+          setLastSavedSignature(JSON.stringify({ form: nextForm, pricingForm: nextPricingForm }));
           return;
         }
 
+        const nextPricingForm = getTenderPricingFormState(loadedTender);
         const nextForm = {
           ...initialForm(tenderId),
           tenantId: loadedTender.tenantId,
           productConfigId: loadedConfiguration.productConfigId,
           quantity: loadedConfiguration.quantity?.toString() ?? "",
-          exchangeRate: loadedTender.exchangeRate?.toString() ?? "",
-          currencySafetyFactorPercent: loadedTender.currencySafetyFactorPercent?.toString() ?? "",
-          effectiveExchangeRate:
-            loadedTender.exchangeRate !== null &&
-            loadedTender.exchangeRate !== undefined &&
-            loadedTender.currencySafetyFactorPercent !== null &&
-            loadedTender.currencySafetyFactorPercent !== undefined
-              ? (
-                  loadedTender.exchangeRate *
-                  (1 + loadedTender.currencySafetyFactorPercent / 100)
-                ).toString()
-              : "",
+          exchangeRate: nextPricingForm.exchangeRate,
+          currencySafetyFactorPercent: nextPricingForm.currencySafetyFactorPercent,
+          effectiveExchangeRate: getEffectiveExchangeRate({
+            exchangeRate: loadedTender.exchangeRate ?? null,
+            currencySafetyFactorPercent: loadedTender.currencySafetyFactorPercent ?? null,
+          })?.toString() ?? "",
+          salesInputMode: nextPricingForm.salesInputMode,
+          salesPercent: nextPricingForm.salesPercentage,
+          salesFixedAmount: nextPricingForm.salesFixed,
           costLines: mergeCostLines(
             undefined,
             materialLineOverrides,
@@ -777,8 +874,9 @@ export const CostBuildUpPage = () => {
             loadedConfiguration.productSnapshots ?? [],
           ),
         };
+        setPricingForm(nextPricingForm);
         setForm(nextForm);
-        setLastSavedSignature(JSON.stringify(nextForm));
+        setLastSavedSignature(JSON.stringify({ form: nextForm, pricingForm: nextPricingForm }));
       } catch (reason) {
         if (isMounted) {
           setError(reason instanceof Error ? reason.message : "Unable to load cost build-up.");
@@ -798,12 +896,13 @@ export const CostBuildUpPage = () => {
   }, [tenderId]);
 
   const quantity = numberOrNull(form.quantity);
-  const exchangeRate = numberOrNull(form.exchangeRate);
-  const currencySafetyFactorPercent = numberOrNull(form.currencySafetyFactorPercent);
-  const effectiveExchangeRate =
-    exchangeRate !== null && currencySafetyFactorPercent !== null
-      ? exchangeRate * (1 + currencySafetyFactorPercent / 100)
-      : null;
+  const tenderPricing = useMemo(() => getTenderPricingSettings(pricingForm), [pricingForm]);
+  const exchangeRate = tenderPricing.exchangeRate;
+  const currencySafetyFactorPercent = tenderPricing.currencySafetyFactorPercent;
+  const effectiveExchangeRate = getEffectiveExchangeRate(tenderPricing);
+  const overtimePerBag = tenderPricing.overtimePerBag ?? 0;
+  const installationPerBag = tenderPricing.installationPerBag ?? 0;
+  const transportationCostPerBag = tenderPricing.transportationCostPerBag ?? 0;
   const materialLineOverrides = useMemo(
     () =>
       calculateMaterialLineOverrides({
@@ -907,12 +1006,12 @@ export const CostBuildUpPage = () => {
 
     const readNullable = (code: string) => editableByCode.get(code)?.costPerBag ?? null;
     const read = (code: string) => readNullable(code) ?? 0;
-    const salesPercent = numberOrNull(form.salesPercent) ?? 0;
-    const salesFixedAmount = numberOrNull(form.salesFixedAmount) ?? 0;
+    const salesPercent = tenderPricing.salesPercentage ?? 0;
+    const salesFixedAmount = tenderPricing.salesFixed ?? 0;
     const packagingCostPerBag = read("D");
-    const rushCostPerBag = read("I_RUSH");
-    const transportationCostPerBag = read("J");
-    const installationCostPerBag = read("K");
+    const rushCostPerBag = overtimePerBag;
+    const transportationCostPerBagValue = transportationCostPerBag;
+    const installationCostPerBagValue = installationPerBag;
     const totalBags = orderQuantity !== null && Number.isFinite(orderQuantity) && orderQuantity > 0 ? orderQuantity : 0;
 
     const productSummaries = productCards.map((product) => {
@@ -930,16 +1029,14 @@ export const CostBuildUpPage = () => {
       let threadMaterialTotal = 0;
 
       sourcingLines.forEach((selection) => {
-        const requestedQuantity = selection.requestedQuantity ?? product.requestedQuantity ?? null;
-        const componentTotal =
-          selection.totalMaterialCostEgp ??
-          (selection.materialCostPerBagEgp !== null &&
-          selection.materialCostPerBagEgp !== undefined &&
-          requestedQuantity !== null &&
-          requestedQuantity !== undefined
-            ? selection.materialCostPerBagEgp * requestedQuantity
-            : 0);
-        const category = resolveMaterialCategoryForSelection(selection, materials);
+        const componentMetrics = calculateSelectionMaterialCost({
+          selection,
+          materials,
+          effectiveExchangeRate,
+          fallbackRequestedQuantity: product.requestedQuantity ?? null,
+        });
+        const componentTotal = componentMetrics.totalCost ?? 0;
+        const category = componentMetrics.category;
 
         if (isFabricMaterialCategory(category)) {
           fabricMaterialTotal += componentTotal;
@@ -967,8 +1064,8 @@ export const CostBuildUpPage = () => {
       const manufacturingOverheadTotal = manufacturingOverheadPerBag * requestedQuantityValue;
       const managementOverheadTotal = managementOverheadPerBag * requestedQuantityValue;
       const rushTotal = rushCostPerBag * requestedQuantityValue;
-      const transportationTotal = transportationCostPerBag * requestedQuantityValue;
-      const installationTotal = installationCostPerBag * requestedQuantityValue;
+      const transportationTotal = transportationCostPerBagValue * requestedQuantityValue;
+      const installationTotal = installationCostPerBagValue * requestedQuantityValue;
       const directMaterialTotal = fabricMaterialTotal + ringMaterialTotal + threadMaterialTotal;
       const materialTotal = directMaterialTotal + packagingTotal;
       const additionalTotal = rushTotal + transportationTotal + installationTotal;
@@ -997,11 +1094,11 @@ export const CostBuildUpPage = () => {
 
     const totalSalesBasis = productSummaries.reduce((sum, product) => sum + product.salesBasisTotal, 0);
     const totalSalesAmount =
-      form.salesInputMode === "percent" ? totalSalesBasis * (salesPercent / 100) : salesFixedAmount;
+      pricingForm.salesInputMode === "percent" ? totalSalesBasis * (salesPercent / 100) : salesFixedAmount;
 
     return productSummaries.map((product) => {
       const salesTotal =
-        form.salesInputMode === "percent"
+        pricingForm.salesInputMode === "percent"
           ? totalSalesBasis > 0
             ? totalSalesAmount * (product.salesBasisTotal / totalSalesBasis)
             : 0
@@ -1035,14 +1132,18 @@ export const CostBuildUpPage = () => {
     });
   }, [
     form.costLines,
-    form.salesFixedAmount,
-    form.salesInputMode,
-    form.salesPercent,
+    installationPerBag,
     materials,
+    effectiveExchangeRate,
     orderQuantity,
+    overtimePerBag,
+    pricingForm.salesInputMode,
     productCards,
     productOverheadValues,
     sourcingBreakdown,
+    tenderPricing.salesFixed,
+    tenderPricing.salesPercentage,
+    transportationCostPerBag,
   ]);
 
   const tenderCostSummary = useMemo(() => {
@@ -1126,11 +1227,11 @@ export const CostBuildUpPage = () => {
       } else if (line.code === "H") {
         value = perBag(tenderCostSummary.salesTotal, readNullable("H"));
       } else if (line.code === "I_RUSH") {
-        value = perBag(tenderCostSummary.rushTotal, readNullable("I_RUSH"));
+        value = perBag(tenderCostSummary.rushTotal, tenderPricing.overtimePerBag);
       } else if (line.code === "J") {
-        value = perBag(tenderCostSummary.transportationTotal, readNullable("J"));
+        value = perBag(tenderCostSummary.transportationTotal, tenderPricing.transportationCostPerBag);
       } else if (line.code === "K") {
-        value = perBag(tenderCostSummary.installationTotal, readNullable("K"));
+        value = perBag(tenderCostSummary.installationTotal, tenderPricing.installationPerBag);
       } else if (line.code === "I_TOTAL") {
         value = tenderCostSummary.materialPerBag;
       } else if (line.code === "II_TOTAL") {
@@ -1151,6 +1252,9 @@ export const CostBuildUpPage = () => {
   }, [
     form.costLines,
     materialLineOverrides,
+    tenderPricing.installationPerBag,
+    tenderPricing.overtimePerBag,
+    tenderPricing.transportationCostPerBag,
     tenderCostSummary,
   ]);
 
@@ -1170,13 +1274,10 @@ export const CostBuildUpPage = () => {
     };
   }, [tenderCostSummary]);
 
-  const tenderDefaultEffectiveExchangeRate =
-    tender?.exchangeRate !== null &&
-    tender?.exchangeRate !== undefined &&
-    tender?.currencySafetyFactorPercent !== null &&
-    tender?.currencySafetyFactorPercent !== undefined
-      ? tender.exchangeRate * (1 + tender.currencySafetyFactorPercent / 100)
-      : null;
+  const tenderDefaultEffectiveExchangeRate = getEffectiveExchangeRate({
+    exchangeRate: tender?.exchangeRate ?? null,
+    currencySafetyFactorPercent: tender?.currencySafetyFactorPercent ?? null,
+  });
 
   const chartData = [
     { name: "Material Cost", value: tenderCostSummary.materialTotal ?? 0 },
@@ -1261,8 +1362,18 @@ export const CostBuildUpPage = () => {
   }, [effectiveExchangeRate, materialSourcing, materials, sourcingBreakdown]);
 
   const tenderMaterialTotalCost = useMemo(
-    () => sourcingBreakdown.reduce((total, selection) => total + (selection.totalMaterialCostEgp ?? 0), 0),
-    [sourcingBreakdown],
+    () =>
+      sourcingBreakdown.reduce(
+        (total, selection) =>
+          total +
+          (calculateSelectionMaterialCost({
+            selection,
+            materials,
+            effectiveExchangeRate,
+          }).totalCost ?? 0),
+        0,
+      ),
+    [effectiveExchangeRate, materials, sourcingBreakdown],
   );
 
   const materialBreakdownGrid = useMemo(
@@ -1281,15 +1392,16 @@ export const CostBuildUpPage = () => {
               };
           const accessoryPerBag = component.accessorySnapshot?.totalPricePerBagEgp ?? null;
           const requestedQuantity = product.requestedQuantity ?? sourcedSelection?.requestedQuantity ?? null;
-          const sourcedTotalCost = sourcedSelection?.totalMaterialCostEgp ?? null;
-          const sourcedRequestedQuantity = sourcedSelection?.requestedQuantity ?? null;
-          const sourcedUnitCost =
-            sourcedSelection?.materialCostPerBagEgp ??
-            (sourcedTotalCost !== null &&
-            sourcedRequestedQuantity !== null &&
-            sourcedRequestedQuantity > 0
-              ? sourcedTotalCost / sourcedRequestedQuantity
-              : null);
+          const sourcedCostMetrics = sourcedSelection
+            ? calculateSelectionMaterialCost({
+                selection: sourcedSelection,
+                materials,
+                effectiveExchangeRate,
+                fallbackRequestedQuantity: product.requestedQuantity ?? null,
+              })
+            : null;
+          const sourcedTotalCost = sourcedCostMetrics?.totalCost ?? null;
+          const sourcedUnitCost = sourcedCostMetrics?.costPerBag ?? null;
           const unitCost = sourcedUnitCost ?? accessoryPerBag;
           const totalCost =
             sourcedTotalCost ??
@@ -1353,7 +1465,7 @@ export const CostBuildUpPage = () => {
           totalCost,
         };
       }),
-    [productCards, productCostCards, productSnapshots, sourcingBreakdown],
+    [effectiveExchangeRate, materials, productCards, productCostCards, productSnapshots, sourcingBreakdown],
   );
 
   const tenderGridSummary = useMemo(() => {
@@ -1365,8 +1477,8 @@ export const CostBuildUpPage = () => {
   }, [quantity, tenderCostSummary]);
 
   const salesSummary = useMemo(() => {
-    const fixedSalesAmount = numberOrNull(form.salesFixedAmount) ?? 0;
-    const salesPercent = numberOrNull(form.salesPercent) ?? 0;
+    const fixedSalesAmount = tenderPricing.salesFixed ?? 0;
+    const salesPercent = tenderPricing.salesPercentage ?? 0;
     const totalBeforeSalesOrder = tenderCostSummary.totalCost - tenderCostSummary.salesTotal;
     const totalBeforeSalesPerBag =
       totalBeforeSalesOrder !== null &&
@@ -1397,16 +1509,16 @@ export const CostBuildUpPage = () => {
       totalBeforeSalesPerBag,
       totalBeforeSalesOrder,
     };
-  }, [form.salesFixedAmount, form.salesPercent, tenderCostSummary]);
+  }, [tenderCostSummary, tenderPricing.salesFixed, tenderPricing.salesPercentage]);
 
   const costCompletion = useMemo(() => {
     const trackedValues = [
-      form.exchangeRate,
-      form.currencySafetyFactorPercent,
-      form.costLines.find((line) => line.code === "I_RUSH")?.costPerBag ?? "",
-      form.costLines.find((line) => line.code === "J")?.costPerBag ?? "",
-      form.costLines.find((line) => line.code === "K")?.costPerBag ?? "",
-      form.salesInputMode === "percent" ? form.salesPercent : form.salesFixedAmount,
+      pricingForm.exchangeRate,
+      pricingForm.currencySafetyFactorPercent,
+      pricingForm.overtimePerBag,
+      pricingForm.transportationCostPerBag,
+      pricingForm.installationPerBag,
+      pricingForm.salesInputMode === "percent" ? pricingForm.salesPercentage : pricingForm.salesFixed,
     ];
     const filledLines = trackedValues.filter((value) => value.trim() !== "").length;
     return {
@@ -1414,7 +1526,7 @@ export const CostBuildUpPage = () => {
       totalLines: trackedValues.length,
       percent: trackedValues.length > 0 ? Math.round((filledLines / trackedValues.length) * 100) : 0,
     };
-  }, [form]);
+  }, [pricingForm]);
 
   const updateLineCost = (code: string, value: string) => {
     const nextValue = value.trim() === "" ? "0" : value;
@@ -1429,6 +1541,13 @@ export const CostBuildUpPage = () => {
 
   const updateField = <K extends keyof CostBuildUpForm>(key: K, value: CostBuildUpForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const updatePricingField = <K extends keyof typeof pricingForm>(
+    key: K,
+    value: (typeof pricingForm)[K],
+  ) => {
+    setPricingForm((current) => ({ ...current, [key]: value }));
   };
 
   const toggleProductCollapse = (productId: string) => {
@@ -1452,32 +1571,14 @@ export const CostBuildUpPage = () => {
       exchangeRate,
       currencySafetyFactorPercent,
       effectiveExchangeRate,
-      costLines: [
-        ...calculatedLines.map((line) => ({
-          code: line.code,
-          category: line.category,
-          description: line.description,
-          calculationBasis: line.calculationBasis,
-          costPerBag: line.costPerBag,
-          editable: line.editable,
-        })),
-        {
-          code: "H_PERCENT",
-          category: "Sales Input",
-          description: "Stored sales percentage input for cost build-up.",
-          calculationBasis: "Used when sales mode is percent",
-          costPerBag: form.salesInputMode === "percent" ? numberOrNull(form.salesPercent) : null,
-          editable: true,
-        },
-        {
-          code: "H_FIXED",
-          category: "Sales Input",
-          description: "Stored fixed sales amount input for the full tender cost build-up.",
-          calculationBasis: "Used when sales mode is fixed for the whole tender",
-          costPerBag: form.salesInputMode === "fixed" ? numberOrNull(form.salesFixedAmount) : null,
-          editable: true,
-        },
-      ],
+      costLines: calculatedLines.map((line) => ({
+        code: line.code,
+        category: line.category,
+        description: line.description,
+        calculationBasis: line.calculationBasis,
+        costPerBag: line.costPerBag,
+        editable: line.editable,
+      })),
       totalMaterialCostPerBag: totals.totalMaterialCostPerBag,
       totalOperatingCostPerBag: totals.totalOperatingCostPerBag,
       totalAdditionalCostPerBag: totals.totalAdditionalCostPerBag,
@@ -1497,13 +1598,10 @@ export const CostBuildUpPage = () => {
       currencySafetyFactorPercent,
       effectiveExchangeRate,
       calculatedLines,
-      form.salesFixedAmount,
-      form.salesInputMode,
-      form.salesPercent,
       totals,
     ],
   );
-  const currentSignature = useMemo(() => JSON.stringify(form), [form]);
+  const currentSignature = useMemo(() => JSON.stringify({ form, pricingForm }), [form, pricingForm]);
   const isDirty = currentSignature !== lastSavedSignature;
 
   useUnsavedChangesWarning(isDirty);
@@ -1523,12 +1621,24 @@ export const CostBuildUpPage = () => {
       const syncedConfiguration = productConfiguration
         ? syncProductConfigurationOverheads(productConfiguration, form.costLines)
         : null;
+      const nextTenderPayload =
+        tender === null
+          ? null
+          : {
+              ...tender,
+              ...tenderPricing,
+              createdAt: tender.createdAt,
+              updatedAt: tender.updatedAt,
+            };
       const persistedConfiguration = syncedConfiguration
         ? await api.put<ProductConfiguration>(
             `/tenders/${tenderId}/product-configuration`,
             syncedConfiguration,
           )
         : null;
+      const persistedTender = nextTenderPayload
+        ? await api.put<TenderRequest>(`/tenders/${tenderId}`, nextTenderPayload)
+        : tender;
       const response = await api.put<CostBuildUp>(`/tenders/${tenderId}/cost-build-up`, payload);
       const nextMaterialLineOverrides = calculateMaterialLineOverrides({
         materialSourcing,
@@ -1540,12 +1650,16 @@ export const CostBuildUpPage = () => {
       const nextForm = toForm(
         response,
         nextMaterialLineOverrides,
+        persistedTender,
         deriveCostDefaults(nextConfiguration),
         nextConfiguration?.productSnapshots ?? [],
       );
+      const nextPricingForm = getTenderPricingFormState(persistedTender);
+      setTender(persistedTender);
       setProductConfiguration(nextConfiguration);
+      setPricingForm(nextPricingForm);
       setForm(nextForm);
-      setLastSavedSignature(JSON.stringify(nextForm));
+      setLastSavedSignature(JSON.stringify({ form: nextForm, pricingForm: nextPricingForm }));
       setMessage(
         mode === "draft" ? "Cost build-up saved." : "Cost build-up saved. Continuing to alternatives.",
       );
@@ -1602,8 +1716,8 @@ export const CostBuildUpPage = () => {
                         Exchange Rate
                         <Input
                           inputMode="decimal"
-                          value={form.exchangeRate}
-                          onChange={(event) => updateField("exchangeRate", event.target.value)}
+                          value={pricingForm.exchangeRate}
+                          onChange={(event) => updatePricingField("exchangeRate", event.target.value)}
                         />
                         <p className="text-xs text-muted-foreground">
                           Tender default: {formatMetric(tender?.exchangeRate ?? null, 3)}
@@ -1613,8 +1727,10 @@ export const CostBuildUpPage = () => {
                         Currency Safety Factor %
                         <Input
                           inputMode="decimal"
-                          value={form.currencySafetyFactorPercent}
-                          onChange={(event) => updateField("currencySafetyFactorPercent", event.target.value)}
+                          value={pricingForm.currencySafetyFactorPercent}
+                          onChange={(event) =>
+                            updatePricingField("currencySafetyFactorPercent", event.target.value)
+                          }
                         />
                         <p className="text-xs text-muted-foreground">
                           Tender default: {formatMetric(tender?.currencySafetyFactorPercent ?? null, 2, "%")}
@@ -1631,24 +1747,26 @@ export const CostBuildUpPage = () => {
                         Overtime / Bag
                         <Input
                           inputMode="decimal"
-                          value={form.costLines.find((line) => line.code === "I_RUSH")?.costPerBag ?? "0"}
-                          onChange={(event) => updateLineCost("I_RUSH", event.target.value)}
+                          value={pricingForm.overtimePerBag}
+                          onChange={(event) => updatePricingField("overtimePerBag", event.target.value)}
                         />
                       </label>
                       <label className="space-y-2 text-sm font-medium text-slate-700">
                         Installation / Bag
                         <Input
                           inputMode="decimal"
-                          value={form.costLines.find((line) => line.code === "K")?.costPerBag ?? "0"}
-                          onChange={(event) => updateLineCost("K", event.target.value)}
+                          value={pricingForm.installationPerBag}
+                          onChange={(event) => updatePricingField("installationPerBag", event.target.value)}
                         />
                       </label>
                       <label className="space-y-2 text-sm font-medium text-slate-700">
                         Transportation Cost / Bag
                         <Input
                           inputMode="decimal"
-                          value={form.costLines.find((line) => line.code === "J")?.costPerBag ?? "0"}
-                          onChange={(event) => updateLineCost("J", event.target.value)}
+                          value={pricingForm.transportationCostPerBag}
+                          onChange={(event) =>
+                            updatePricingField("transportationCostPerBag", event.target.value)
+                          }
                         />
                       </label>
                     </div>
@@ -1664,22 +1782,22 @@ export const CostBuildUpPage = () => {
                         <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
                           <button
                             className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                              form.salesInputMode === "percent"
+                              pricingForm.salesInputMode === "percent"
                                 ? "bg-blue-600 text-white"
                                 : "text-slate-600 hover:text-slate-900"
                             }`}
-                            onClick={() => updateField("salesInputMode", "percent")}
+                            onClick={() => updatePricingField("salesInputMode", "percent")}
                             type="button"
                           >
                             Percentage
                           </button>
                           <button
                             className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                              form.salesInputMode === "fixed"
+                              pricingForm.salesInputMode === "fixed"
                                 ? "bg-blue-600 text-white"
                                 : "text-slate-600 hover:text-slate-900"
                             }`}
-                            onClick={() => updateField("salesInputMode", "fixed")}
+                            onClick={() => updatePricingField("salesInputMode", "fixed")}
                             type="button"
                           >
                             Fixed
@@ -1695,14 +1813,18 @@ export const CostBuildUpPage = () => {
                           </p>
                         </div>
                         <label className="space-y-2 text-sm font-medium text-slate-700">
-                          {form.salesInputMode === "percent" ? "Sales Percentage %" : "Sales Fixed"}
+                          {pricingForm.salesInputMode === "percent" ? "Sales Percentage %" : "Sales Fixed"}
                           <Input
                             inputMode="decimal"
-                            value={form.salesInputMode === "percent" ? form.salesPercent : form.salesFixedAmount}
+                            value={
+                              pricingForm.salesInputMode === "percent"
+                                ? pricingForm.salesPercentage
+                                : pricingForm.salesFixed
+                            }
                             onChange={(event) =>
-                              form.salesInputMode === "percent"
-                                ? updateField("salesPercent", event.target.value)
-                                : updateField("salesFixedAmount", event.target.value)
+                              pricingForm.salesInputMode === "percent"
+                                ? updatePricingField("salesPercentage", event.target.value)
+                                : updatePricingField("salesFixed", event.target.value)
                             }
                           />
                         </label>

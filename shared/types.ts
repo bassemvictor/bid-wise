@@ -101,6 +101,11 @@ export type TenderRequest = EntityEnvelope & {
   customerCommissionPercent: number | null;
   exchangeRate: number | null;
   currencySafetyFactorPercent: number | null;
+  overtimePerBag: number | null;
+  installationPerBag: number | null;
+  transportationCostPerBag: number | null;
+  salesPercentage: number | null;
+  salesFixed: number | null;
   priceNegotiationExpected: boolean;
   requestedDeliveryTime: string;
   deliveryPlace: DeliveryPlace;

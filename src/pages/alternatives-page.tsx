@@ -116,9 +116,18 @@ const defaultSalesCommissionDefaults: SalesCommissionDefaults = {
   salesPersonCommissionFixedAmount: "",
 };
 
-const inferSalesCommissionDefaults = (costBuildUp: CostBuildUp | null): SalesCommissionDefaults => {
-  const percentValue = costBuildUp?.costLines.find((line) => line.code === "H_PERCENT")?.costPerBag;
-  const fixedValue = costBuildUp?.costLines.find((line) => line.code === "H_FIXED")?.costPerBag;
+const inferSalesCommissionDefaults = (
+  tender: TenderRequest | null,
+  costBuildUp: CostBuildUp | null,
+): SalesCommissionDefaults => {
+  const percentValue =
+    tender?.salesPercentage ??
+    costBuildUp?.costLines.find((line) => line.code === "H_PERCENT")?.costPerBag ??
+    null;
+  const fixedValue =
+    tender?.salesFixed ??
+    costBuildUp?.costLines.find((line) => line.code === "H_FIXED")?.costPerBag ??
+    null;
 
   return {
     salesPersonCommissionMode:
@@ -466,7 +475,7 @@ export const AlternativesPage = () => {
           return;
         }
 
-        const salesDefaults = inferSalesCommissionDefaults(loadedCostBuildUp);
+        const salesDefaults = inferSalesCommissionDefaults(loadedTender, loadedCostBuildUp);
         const nextForm = syncFormWithCostBuildUp({
           ...initialForm(tenderId, salesDefaults),
           tenantId: loadedTender.tenantId,
@@ -498,8 +507,8 @@ export const AlternativesPage = () => {
   const effectiveQuantity = costBuildUp?.quantity ?? quantity;
   const effectiveBaseCostPerBag = costBuildUp?.totalCostPricePerBag ?? baseCostPerBag;
   const salesCommissionDefaults = useMemo(
-    () => inferSalesCommissionDefaults(costBuildUp),
-    [costBuildUp],
+    () => inferSalesCommissionDefaults(tender, costBuildUp),
+    [costBuildUp, tender],
   );
   const includedSalesCostPerBag = readCostLineValue("H");
   const productSnapshots = productConfiguration?.productSnapshots ?? [];

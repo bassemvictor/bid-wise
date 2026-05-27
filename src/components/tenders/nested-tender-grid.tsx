@@ -560,7 +560,10 @@ export const NestedTenderGrid = ({
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             {[
-              { label: "Exchange Rate", value: formatNumber(materialSourcing?.exchangeRate ?? costBuildUp?.exchangeRate, 3) },
+              {
+                label: "Exchange Rate",
+                value: formatNumber(tender.exchangeRate ?? materialSourcing?.exchangeRate ?? costBuildUp?.exchangeRate, 3),
+              },
               { label: "Total Cost", value: formatCurrency(tenderSummary.totalCost) },
               { label: "Total Price", value: formatCurrency(tenderSummary.totalPrice) },
               { label: "Margin %", value: formatPercent(tenderSummary.marginPercent) },

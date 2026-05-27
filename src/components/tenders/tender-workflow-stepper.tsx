@@ -120,7 +120,7 @@ export const TenderWorkflowStepper = ({
                 {index < steps.length - 1 ? (
                   <div
                     className={cn(
-                      "mt-[1.25rem] h-px w-8 shrink-0 self-start -mx-1 sm:mt-0 sm:mx-1 sm:min-w-8 sm:flex-1 lg:mx-2 lg:min-w-10",
+                      "mt-[1.25rem] h-px w-8 shrink-0 self-start -mx-1 sm:mt-0 sm:mx-1 sm:min-w-8 sm:flex-1 sm:self-center lg:mx-2 lg:min-w-10",
                       isComplete ? "bg-primary/70" : "bg-slate-200",
                     )}
                   />
