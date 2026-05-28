@@ -1,9 +1,11 @@
 import {
   ArrowRight,
   Calculator,
+  ChevronDown,
+  ChevronRight,
   CircleDollarSign,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { Badge } from "../components/ui/badge";
@@ -82,6 +84,26 @@ const formatAuditValue = (value: string | number | boolean | null) => {
   }
 
   return String(value);
+};
+
+const formatStageLabel = (value: string) =>
+  value
+    .toLowerCase()
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+const getAuditActionVariant = (actionType: string) => {
+  switch (actionType) {
+    case "APPROVE":
+      return "success" as const;
+    case "REJECT":
+      return "warning" as const;
+    case "CREATE":
+      return "default" as const;
+    default:
+      return "neutral" as const;
+  }
 };
 
 const convertMetersToMillimeters = (value: unknown) => {
@@ -186,6 +208,7 @@ const TenderDetailContent = ({
   const [payload, setPayload] = useState<SectionPayloads[keyof SectionPayloads] | null>(null);
   const [overview, setOverview] = useState<TenderOverviewData | null>(null);
   const [error, setError] = useState("");
+  const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
   const [auditStageFilter, setAuditStageFilter] = useState("");
   const [auditUserFilter, setAuditUserFilter] = useState("");
   const [auditActionTypeFilter, setAuditActionTypeFilter] = useState("");
@@ -389,7 +412,7 @@ const TenderDetailContent = ({
               User Activity Audit Log for meaningful business inputs and approval actions only.
             </CardDescription>
           </div>
-          <Badge variant="default">{overview?.auditLog.length ?? 0} record(s)</Badge>
+          <Badge variant="default">{overview?.auditLog.length ?? 0} save action(s)</Badge>
         </CardHeader>
         <CardContent>
           <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -446,40 +469,95 @@ const TenderDetailContent = ({
                   <th className="px-4 py-3">Date/Time</th>
                   <th className="px-4 py-3">User</th>
                   <th className="px-4 py-3">Stage</th>
-                  <th className="px-4 py-3">Field Changed</th>
-                  <th className="px-4 py-3">Old Value</th>
-                  <th className="px-4 py-3">New Value</th>
+                  <th className="px-4 py-3">Changes</th>
                   <th className="px-4 py-3">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {overview?.auditLog.length ? (
-                  overview.auditLog.map((record) => (
-                    <tr className="border-t border-border hover:bg-slate-50" key={record.auditId}>
-                      <td className="px-4 py-3 text-slate-700">{formatDateTime(record.changedAt)}</td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-slate-900">{record.changedByUserName || record.changedByUserId}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {record.changedByUserEmail || record.changedByUserId || "Unknown"}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">{record.stage}</td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-slate-900">{record.fieldLabel}</div>
-                        <div className="text-xs text-muted-foreground">{record.fieldName}</div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">{formatAuditValue(record.oldValue)}</td>
-                      <td className="px-4 py-3 text-slate-900">{formatAuditValue(record.newValue)}</td>
-                      <td className="px-4 py-3">
-                        <Badge variant={record.actionType === "APPROVE" ? "success" : record.actionType === "REJECT" ? "warning" : "warning"}>
-                          {record.actionType}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))
+                  overview.auditLog.map((record) => {
+                    const isExpanded = expandedAuditId === record.auditId;
+
+                    return (
+                      <Fragment key={record.auditId}>
+                        <tr
+                          className="cursor-pointer border-t border-border align-top transition-colors hover:bg-slate-50"
+                          onClick={() => setExpandedAuditId((current) => (current === record.auditId ? null : record.auditId))}
+                        >
+                          <td className="px-4 py-3.5 text-slate-700">{formatDateTime(record.changedAt)}</td>
+                          <td className="px-4 py-3.5">
+                            <div className="font-medium text-slate-900">{record.changedByUserName || record.changedByUserId}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {record.changedByUserEmail || record.changedByUserId || "Unknown"}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className="text-sm text-slate-700">{formatStageLabel(record.stage)}</span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-2">
+                              <Badge className="min-w-7 justify-center rounded-full px-2 py-1" variant="default">
+                                {record.changeCount}
+                              </Badge>
+                              <span className="text-slate-700">
+                                {record.changeCount === 1 ? "1 field updated" : `${record.changeCount} fields updated`}
+                              </span>
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <Badge variant={getAuditActionVariant(record.actionType)}>
+                              {record.actionType}
+                            </Badge>
+                          </td>
+                        </tr>
+                        {isExpanded ? (
+                          <tr className="border-t border-border bg-slate-50/70">
+                            <td className="px-4 py-3" colSpan={5}>
+                              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                                {record.changes.map((change, index) => (
+                                  <div
+                                    className="grid gap-2 px-4 py-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center md:gap-4"
+                                    key={`${record.auditId}-${change.fieldName}-${index}`}
+                                  >
+                                    <div className={index > 0 ? "md:border-t-0" : ""}>
+                                      <div className="text-base font-medium text-slate-950">{change.fieldLabel}</div>
+                                      <div className="text-xs text-muted-foreground">{change.fieldName}</div>
+                                    </div>
+                                    <div className="text-left md:text-center">
+                                      <span className="text-base font-semibold text-rose-600 line-through decoration-1 decoration-rose-400/80">
+                                        {formatAuditValue(change.oldValue)}
+                                      </span>
+                                    </div>
+                                    <div className="text-slate-400 md:text-center">
+                                      <ArrowRight className="h-4 w-4" />
+                                    </div>
+                                    <div className="text-left md:text-right">
+                                      <span className="text-base font-semibold text-emerald-600">
+                                        {formatAuditValue(change.newValue)}
+                                      </span>
+                                    </div>
+                                    {index < record.changes.length - 1 ? (
+                                      <div className="md:col-span-4">
+                                        <div className="border-t border-slate-100" />
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })
                 ) : (
                   <tr>
-                    <td className="px-4 py-8 text-center text-muted-foreground" colSpan={7}>
+                    <td className="px-4 py-8 text-center text-muted-foreground" colSpan={5}>
                       No user activity audit records captured for this tender yet.
                     </td>
                   </tr>

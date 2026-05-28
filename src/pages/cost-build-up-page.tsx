@@ -274,6 +274,79 @@ const resolveMaterialCategoryForSelection = (
   return "Fabric Material" as const;
 };
 
+const calculateFabricSelectionTotals = ({
+  selection,
+  effectiveExchangeRate,
+}: {
+  selection: NonNullable<MaterialSourceSelection["componentSelections"]>[number];
+  effectiveExchangeRate: number | null;
+}) => {
+  if (!selection.selectedSources.length) {
+    return {
+      totalCost: selection.totalMaterialCostEgp ?? null,
+      costPerBag: selection.materialCostPerBagEgp ?? null,
+      usedFallback: true,
+    };
+  }
+
+  let recomputedTotal = 0;
+  let hasComputedSourceCost = false;
+
+  selection.selectedSources.forEach((source) => {
+    const qtyUsedM2 = source.qtyUsedM2 ?? null;
+    const unitCostUsdPerM2 = source.unitCostUsdPerM2 ?? null;
+    const landedCostEgp = source.landedCostEgp ?? null;
+    const customsPercent = source.customsPercent ?? 0;
+    const freightCostPerM2Egp = source.freightCostPerM2Egp ?? 0;
+    const clearanceCostPerM2Egp = source.clearanceCostPerM2Egp ?? 0;
+
+    if (qtyUsedM2 === null) {
+      return;
+    }
+
+    const convertedCostPerM2Egp =
+      unitCostUsdPerM2 !== null && effectiveExchangeRate !== null
+        ? unitCostUsdPerM2 * effectiveExchangeRate
+        : null;
+    const customsCostPerM2Egp =
+      source.sourceType === "stock" ? 0 : (convertedCostPerM2Egp ?? 0) * (customsPercent / 100);
+    const landedCostPerM2Egp =
+      source.sourceType === "stock"
+        ? landedCostEgp
+        : convertedCostPerM2Egp !== null
+          ? convertedCostPerM2Egp +
+            customsCostPerM2Egp +
+            freightCostPerM2Egp +
+            clearanceCostPerM2Egp
+          : null;
+
+    if (landedCostPerM2Egp === null) {
+      return;
+    }
+
+    hasComputedSourceCost = true;
+    recomputedTotal += qtyUsedM2 * landedCostPerM2Egp;
+  });
+
+  if (!hasComputedSourceCost) {
+    return {
+      totalCost: selection.totalMaterialCostEgp ?? null,
+      costPerBag: selection.materialCostPerBagEgp ?? null,
+      usedFallback: true,
+    };
+  }
+
+  const requestedQuantity = selection.requestedQuantity ?? null;
+  return {
+    totalCost: recomputedTotal,
+    costPerBag:
+      requestedQuantity !== null && requestedQuantity > 0
+        ? recomputedTotal / requestedQuantity
+        : selection.materialCostPerBagEgp ?? null,
+    usedFallback: false,
+  };
+};
+
 const calculateMaterialLineOverrides = ({
   materialSourcing,
   exchangeRate,
@@ -306,42 +379,14 @@ const calculateMaterialLineOverrides = ({
     const requestedQuantity = selection.requestedQuantity ?? 0;
     let componentTotalCost: number | null = null;
 
-    if (isFabricMaterialCategory(category) && effectiveExchangeRate !== null && requestedQuantity > 0) {
-      const recomputedTotal = selection.selectedSources.reduce((total, source) => {
-        const qtyUsedM2 = source.qtyUsedM2 ?? null;
-        const unitCostUsdPerM2 = source.unitCostUsdPerM2 ?? null;
-        const landedCostEgp = source.landedCostEgp ?? null;
-        const customsPercent = source.customsPercent ?? 0;
-        const freightCostPerM2Egp = source.freightCostPerM2Egp ?? 0;
-        const clearanceCostPerM2Egp = source.clearanceCostPerM2Egp ?? 0;
+    if (isFabricMaterialCategory(category)) {
+      const fabricTotals = calculateFabricSelectionTotals({
+        selection,
+        effectiveExchangeRate,
+      });
 
-        if (qtyUsedM2 === null) {
-          return total;
-        }
-
-        const convertedCostPerM2Egp =
-          unitCostUsdPerM2 !== null ? unitCostUsdPerM2 * effectiveExchangeRate : null;
-        const customsCostPerM2Egp =
-          source.sourceType === "stock" ? 0 : (convertedCostPerM2Egp ?? 0) * (customsPercent / 100);
-        const landedCostPerM2Egp =
-          source.sourceType === "stock"
-            ? landedCostEgp
-            : convertedCostPerM2Egp !== null
-              ? convertedCostPerM2Egp +
-                customsCostPerM2Egp +
-                freightCostPerM2Egp +
-                clearanceCostPerM2Egp
-              : null;
-
-        if (landedCostPerM2Egp === null) {
-          return total;
-        }
-
-        return total + qtyUsedM2 * landedCostPerM2Egp;
-      }, 0);
-
-      componentTotalCost = recomputedTotal;
-      componentCostPerBag = recomputedTotal / requestedQuantity;
+      componentTotalCost = fabricTotals.totalCost;
+      componentCostPerBag = fabricTotals.costPerBag;
     }
 
     if (componentCostPerBag === null) {
@@ -399,45 +444,21 @@ const calculateSelectionMaterialCost = ({
   const category = resolveMaterialCategoryForSelection(selection, materials);
   const requestedQuantity = selection.requestedQuantity ?? fallbackRequestedQuantity ?? null;
 
-  if (isFabricMaterialCategory(category) && effectiveExchangeRate !== null) {
-    const recomputedTotal = selection.selectedSources.reduce((total, source) => {
-      const qtyUsedM2 = source.qtyUsedM2 ?? null;
-      const unitCostUsdPerM2 = source.unitCostUsdPerM2 ?? null;
-      const landedCostEgp = source.landedCostEgp ?? null;
-      const customsPercent = source.customsPercent ?? 0;
-      const freightCostPerM2Egp = source.freightCostPerM2Egp ?? 0;
-      const clearanceCostPerM2Egp = source.clearanceCostPerM2Egp ?? 0;
-
-      if (qtyUsedM2 === null) {
-        return total;
-      }
-
-      const convertedCostPerM2Egp =
-        unitCostUsdPerM2 !== null ? unitCostUsdPerM2 * effectiveExchangeRate : null;
-      const customsCostPerM2Egp =
-        source.sourceType === "stock" ? 0 : (convertedCostPerM2Egp ?? 0) * (customsPercent / 100);
-      const landedCostPerM2Egp =
-        source.sourceType === "stock"
-          ? landedCostEgp
-          : convertedCostPerM2Egp !== null
-            ? convertedCostPerM2Egp + customsCostPerM2Egp + freightCostPerM2Egp + clearanceCostPerM2Egp
-            : null;
-
-      if (landedCostPerM2Egp === null) {
-        return total;
-      }
-
-      return total + qtyUsedM2 * landedCostPerM2Egp;
-    }, 0);
+  if (isFabricMaterialCategory(category)) {
+    const fabricTotals = calculateFabricSelectionTotals({
+      selection,
+      effectiveExchangeRate,
+    });
 
     return {
       category,
       requestedQuantity,
-      totalCost: selection.selectedSources.length > 0 ? recomputedTotal : selection.totalMaterialCostEgp ?? null,
+      totalCost: fabricTotals.totalCost,
       costPerBag:
-        requestedQuantity !== null && requestedQuantity > 0
-          ? recomputedTotal / requestedQuantity
-          : selection.materialCostPerBagEgp ?? null,
+        fabricTotals.costPerBag ??
+        (requestedQuantity !== null && requestedQuantity > 0 && fabricTotals.totalCost !== null
+          ? fabricTotals.totalCost / requestedQuantity
+          : selection.materialCostPerBagEgp ?? null),
     };
   }
 
@@ -1335,17 +1356,19 @@ export const CostBuildUpPage = () => {
 
         const recomputedTotal = sources.reduce((sum, source) => sum + (source.totalCostEgp ?? 0), 0);
         const requestedQuantity = selection.requestedQuantity ?? null;
+        const fabricTotals = calculateFabricSelectionTotals({
+          selection,
+          effectiveExchangeRate,
+        });
 
         return {
           componentId: selection.componentId,
           componentName: selection.componentName,
           requestedQuantity,
           actualAreaPerBagM2: selection.actualAreaPerBagM2 ?? null,
-          costPerBag:
-            requestedQuantity !== null && requestedQuantity > 0
-              ? recomputedTotal / requestedQuantity
-              : selection.materialCostPerBagEgp ?? null,
-          recomputedTotal: sources.length ? recomputedTotal : null,
+          costPerBag: fabricTotals.costPerBag,
+          recomputedTotal:
+            sources.some((source) => source.totalCostEgp !== null) ? recomputedTotal : fabricTotals.totalCost,
           sources,
         };
       });

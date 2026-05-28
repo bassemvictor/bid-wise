@@ -31,6 +31,8 @@ export const numberOrNull = (value: string) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const numberOrZero = (value: string) => numberOrNull(value) ?? 0;
+
 export const toInputValue = (value: number | null | undefined) =>
   value === null || value === undefined ? "" : value.toString();
 
@@ -60,13 +62,13 @@ export const getTenderPricingFormState = (
 export const getTenderPricingSettings = (
   form: TenderPricingFormState,
 ): TenderPricingSettings => ({
-  exchangeRate: numberOrNull(form.exchangeRate),
-  currencySafetyFactorPercent: numberOrNull(form.currencySafetyFactorPercent),
-  overtimePerBag: numberOrNull(form.overtimePerBag),
-  installationPerBag: numberOrNull(form.installationPerBag),
-  transportationCostPerBag: numberOrNull(form.transportationCostPerBag),
-  salesPercentage: form.salesInputMode === "percent" ? numberOrNull(form.salesPercentage) : null,
-  salesFixed: form.salesInputMode === "fixed" ? numberOrNull(form.salesFixed) : null,
+  exchangeRate: numberOrZero(form.exchangeRate),
+  currencySafetyFactorPercent: numberOrZero(form.currencySafetyFactorPercent),
+  overtimePerBag: numberOrZero(form.overtimePerBag),
+  installationPerBag: numberOrZero(form.installationPerBag),
+  transportationCostPerBag: numberOrZero(form.transportationCostPerBag),
+  salesPercentage: form.salesInputMode === "percent" ? numberOrZero(form.salesPercentage) : null,
+  salesFixed: form.salesInputMode === "fixed" ? numberOrZero(form.salesFixed) : null,
 });
 
 export const getEffectiveExchangeRate = (

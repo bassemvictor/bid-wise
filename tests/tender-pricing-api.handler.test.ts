@@ -285,11 +285,16 @@ test("saves product configuration with tender-based keys and updates tender stat
   const auditItem = putCommands.find(
     (command) =>
       (command.input?.Item as Record<string, unknown>)?.entityType === "USER_ACTIVITY_AUDIT_LOG" &&
-      (command.input?.Item as Record<string, unknown>)?.stage === "PRODUCT_CONFIGURATION" &&
-      (command.input?.Item as Record<string, unknown>)?.fieldName === "quantity",
+      (command.input?.Item as Record<string, unknown>)?.stage === "PRODUCT_CONFIGURATION",
   )?.input?.Item as Record<string, unknown>;
   assert.equal(auditItem.PK, "TENDER#TDR-3001");
   assert.equal(auditItem.changedByUserId, "anonymous");
+  assert.equal(auditItem.changeCount, 18);
+  assert.ok(
+    ((auditItem.changes as Array<Record<string, unknown>>) ?? []).some(
+      (change) => change.fieldName === "quantity" && change.newValue === 100,
+    ),
+  );
 
   const tenderItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "TENDER#TDR-3001")
     ?.input?.Item as Record<string, unknown>;
@@ -538,10 +543,14 @@ test("saves material sourcing with tender-based keys and updates tender status",
   const auditItem = putCommands.find(
     (command) =>
       (command.input?.Item as Record<string, unknown>)?.entityType === "USER_ACTIVITY_AUDIT_LOG" &&
-      (command.input?.Item as Record<string, unknown>)?.stage === "MATERIAL_SOURCE_SELECTION" &&
-      (command.input?.Item as Record<string, unknown>)?.fieldName === "exchangeRate",
+      (command.input?.Item as Record<string, unknown>)?.stage === "MATERIAL_SOURCE_SELECTION",
   )?.input?.Item as Record<string, unknown>;
   assert.equal(auditItem.PK, "TENDER#TDR-5001");
+  assert.ok(
+    ((auditItem.changes as Array<Record<string, unknown>>) ?? []).some(
+      (change) => change.fieldName === "exchangeRate" && change.newValue === 49.5,
+    ),
+  );
 
   const tenderItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "TENDER#TDR-5001")
     ?.input?.Item as Record<string, unknown>;
@@ -665,10 +674,14 @@ test("saves cost build-up with tender-based keys and updates tender status", asy
   const auditItem = putCommands.find(
     (command) =>
       (command.input?.Item as Record<string, unknown>)?.entityType === "USER_ACTIVITY_AUDIT_LOG" &&
-      (command.input?.Item as Record<string, unknown>)?.stage === "COST_BUILDUP" &&
-      (command.input?.Item as Record<string, unknown>)?.fieldName === "exchangeRate",
+      (command.input?.Item as Record<string, unknown>)?.stage === "COST_BUILDUP",
   )?.input?.Item as Record<string, unknown>;
   assert.equal(auditItem.PK, "TENDER#TDR-6001");
+  assert.ok(
+    ((auditItem.changes as Array<Record<string, unknown>>) ?? []).some(
+      (change) => change.fieldName === "exchangeRate" && change.newValue === 50,
+    ),
+  );
 
   const tenderItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "TENDER#TDR-6001")
     ?.input?.Item as Record<string, unknown>;
@@ -698,11 +711,24 @@ test("lists tender audit log entries with filters", async () => {
             tenderId: "TDR-6101",
             auditId: "AUD-2",
             stage: "PRODUCT_CONFIGURATION",
-            fieldName: "quantity",
-            fieldLabel: "Number of Bags",
-            oldValue: 10,
-            newValue: 15,
             actionType: "UPDATE",
+            changeCount: 2,
+            changes: [
+              {
+                fieldName: "quantity",
+                fieldLabel: "Number of Bags",
+                oldValue: 10,
+                newValue: 15,
+                actionType: "UPDATE",
+              },
+              {
+                fieldName: "bagLengthMm",
+                fieldLabel: "Bag Length (mm)",
+                oldValue: 700,
+                newValue: 725,
+                actionType: "UPDATE",
+              },
+            ],
             changedByUserId: "user-1",
             changedByUserName: "Sally Samuel",
             changedByUserEmail: "sally@alimex.test",
@@ -720,11 +746,17 @@ test("lists tender audit log entries with filters", async () => {
             tenderId: "TDR-6101",
             auditId: "AUD-1",
             stage: "TENDER",
-            fieldName: "customerName",
-            fieldLabel: "Customer",
-            oldValue: null,
-            newValue: "Acme",
             actionType: "CREATE",
+            changeCount: 1,
+            changes: [
+              {
+                fieldName: "customerName",
+                fieldLabel: "Customer",
+                oldValue: null,
+                newValue: "Acme",
+                actionType: "CREATE",
+              },
+            ],
             changedByUserId: "user-1",
             changedByUserName: "Sally Samuel",
             changedByUserEmail: "sally@alimex.test",
@@ -757,9 +789,23 @@ test("lists tender audit log entries with filters", async () => {
   assert.equal(body.length, 1);
   assert.equal(body[0]?.auditId, "AUD-2");
   assert.equal(body[0]?.changedByUserName, "Sally Samuel");
-  assert.equal(body[0]?.fieldName, "quantity");
-  assert.equal(body[0]?.oldValue, 10);
-  assert.equal(body[0]?.newValue, 15);
+  assert.equal(body[0]?.changeCount, 2);
+  assert.deepEqual(body[0]?.changes, [
+    {
+      fieldName: "quantity",
+      fieldLabel: "Number of Bags",
+      oldValue: 10,
+      newValue: 15,
+      actionType: "UPDATE",
+    },
+    {
+      fieldName: "bagLengthMm",
+      fieldLabel: "Bag Length (mm)",
+      oldValue: 700,
+      newValue: 725,
+      actionType: "UPDATE",
+    },
+  ]);
 });
 
 test("creates customer with tenant keys and clean json response", async () => {

@@ -95,9 +95,9 @@ type RequestContext = {
   resolvedActorGroups?: AppCognitoGroup[];
 };
 
-type TenderAuditFieldValue = UserActivityAuditLog["oldValue"];
+type TenderAuditFieldValue = UserActivityAuditLog["changes"][number]["oldValue"];
 type TenderAuditStage = UserActivityAuditStage;
-type AuditRecordDraft = {
+type AuditChangeDraft = {
   productId?: string;
   stage: TenderAuditStage;
   fieldName: string;
@@ -656,11 +656,20 @@ const sanitizeTenderAuditLog = (item: StoredEntity | null): UserActivityAuditLog
     auditId: String(item.auditId ?? ""),
     productId: item.productId ? String(item.productId) : undefined,
     stage: String(item.stage ?? "SYSTEM") as UserActivityAuditLog["stage"],
-    fieldName: String(item.fieldName ?? ""),
-    fieldLabel: String(item.fieldLabel ?? ""),
-    oldValue: toAuditValue(item.oldValue),
-    newValue: toAuditValue(item.newValue),
     actionType: String(item.actionType ?? "UPDATE") as UserActivityAuditLog["actionType"],
+    changeCount: toNullableNumber(item.changeCount) ?? 0,
+    changes: Array.isArray(item.changes)
+      ? item.changes.map((change) => {
+          const record = (change ?? {}) as Record<string, unknown>;
+          return {
+            fieldName: String(record.fieldName ?? ""),
+            fieldLabel: String(record.fieldLabel ?? ""),
+            oldValue: toAuditValue(record.oldValue),
+            newValue: toAuditValue(record.newValue),
+            actionType: String(record.actionType ?? "UPDATE") as UserActivityAuditLog["changes"][number]["actionType"],
+          };
+        })
+      : [],
     changedByUserId: String(item.changedByUserId ?? "anonymous"),
     changedByUserName: String(item.changedByUserName ?? item.changedByUserId ?? "anonymous"),
     changedByUserEmail: item.changedByUserEmail ? String(item.changedByUserEmail) : "",
@@ -1277,7 +1286,7 @@ const stageSourceMap: Record<TenderAuditStage, { sourcePage: string; sourceCompo
   SYSTEM: { sourcePage: "system", sourceComponent: "TenderWorkflowApi" },
 };
 
-const createAuditRecordDraft = (
+const createAuditChangeDraft = (
   stage: TenderAuditStage,
   fieldName: string,
   fieldLabel: string,
@@ -1285,7 +1294,7 @@ const createAuditRecordDraft = (
   newValue: unknown,
   actionType?: UserActivityAuditActionType,
   productId?: string,
-): AuditRecordDraft | null => {
+): AuditChangeDraft | null => {
   if (auditValuesEqual(oldValue, newValue)) {
     return null;
   }
@@ -1359,38 +1368,38 @@ const buildTenderAuditRecords = (
   next: Record<string, unknown>,
 ) => {
   const records = [
-    createAuditRecordDraft("TENDER", "customerName", "Customer", previous?.customerName, next.customerName),
-    createAuditRecordDraft("TENDER", "tenderNumber", "Tender Number", previous?.tenderNumber, next.tenderNumber),
-    createAuditRecordDraft("TENDER", "internalInquiryNumber", "Internal Inquiry Number", previous?.internalInquiryNumber, next.internalInquiryNumber),
-    createAuditRecordDraft("TENDER", "tenderDueDate", "Tender Due Date", previous?.tenderDueDate, next.tenderDueDate),
-    createAuditRecordDraft("TENDER", "requestType", "Request Type", previous?.requestType, next.requestType),
-    createAuditRecordDraft("TENDER", "requestedMaterial", "Requested Material", previous?.requestedMaterial, next.requestedMaterial),
-    createAuditRecordDraft("TENDER", "bagDiameterMm", "Bag Diameter (mm)", previous?.bagDiameterMm, next.bagDiameterMm),
-    createAuditRecordDraft("TENDER", "bagLengthMm", "Bag Length (mm)", previous?.bagLengthMm, next.bagLengthMm),
-    createAuditRecordDraft("TENDER", "topDesign", "Top Design", previous?.topDesign, next.topDesign),
-    createAuditRecordDraft("TENDER", "bottomDesign", "Bottom Design", previous?.bottomDesign, next.bottomDesign),
-    createAuditRecordDraft("TENDER", "accessoriesMaterial", "Accessories", previous?.accessoriesMaterial, next.accessoriesMaterial),
-    createAuditRecordDraft("TENDER", "requestedMaterialNotes", "Requested Material Notes", previous?.requestedMaterialNotes, next.requestedMaterialNotes),
-    createAuditRecordDraft("TENDER", "knownRequiredPrice", "Known Required Price", previous?.knownRequiredPrice, next.knownRequiredPrice),
-    createAuditRecordDraft("TENDER", "knownCompetitorPrice", "Known Competitor Price", previous?.knownCompetitorPrice, next.knownCompetitorPrice),
-    createAuditRecordDraft("TENDER", "customerCommissionPercent", "Customer Commission %", previous?.customerCommissionPercent, next.customerCommissionPercent),
-    createAuditRecordDraft("TENDER", "exchangeRate", "Exchange Rate", previous?.exchangeRate, next.exchangeRate),
-    createAuditRecordDraft("TENDER", "currencySafetyFactorPercent", "Currency Safety Factor %", previous?.currencySafetyFactorPercent, next.currencySafetyFactorPercent),
-    createAuditRecordDraft("TENDER", "overtimePerBag", "Overtime / Bag", previous?.overtimePerBag, next.overtimePerBag),
-    createAuditRecordDraft("TENDER", "installationPerBag", "Installation / Bag", previous?.installationPerBag, next.installationPerBag),
-    createAuditRecordDraft("TENDER", "transportationCostPerBag", "Transportation Cost / Bag", previous?.transportationCostPerBag, next.transportationCostPerBag),
-    createAuditRecordDraft("TENDER", "salesPercentage", "Sales Percentage %", previous?.salesPercentage, next.salesPercentage),
-    createAuditRecordDraft("TENDER", "salesFixed", "Sales Fixed", previous?.salesFixed, next.salesFixed),
-    createAuditRecordDraft("TENDER", "priceNegotiationExpected", "Price Negotiation Expected", previous?.priceNegotiationExpected, next.priceNegotiationExpected),
-    createAuditRecordDraft("TENDER", "requestedDeliveryTime", "Requested Delivery Time", previous?.requestedDeliveryTime, next.requestedDeliveryTime),
-    createAuditRecordDraft("TENDER", "deliveryPlace", "Delivery Place", previous?.deliveryPlace, next.deliveryPlace),
-    createAuditRecordDraft("TENDER", "assignedTo", "Assigned To", previous?.assignedTo, next.assignedTo),
-    createAuditRecordDraft("TENDER", "transportationRequired", "Transportation Required", previous?.transportationRequired, next.transportationRequired),
-    createAuditRecordDraft("TENDER", "installationRequired", "Installation Required", previous?.installationRequired, next.installationRequired),
-    createAuditRecordDraft("TENDER", "notes", "Tender Notes", previous?.notes, next.notes),
+    createAuditChangeDraft("TENDER", "customerName", "Customer", previous?.customerName, next.customerName),
+    createAuditChangeDraft("TENDER", "tenderNumber", "Tender Number", previous?.tenderNumber, next.tenderNumber),
+    createAuditChangeDraft("TENDER", "internalInquiryNumber", "Internal Inquiry Number", previous?.internalInquiryNumber, next.internalInquiryNumber),
+    createAuditChangeDraft("TENDER", "tenderDueDate", "Tender Due Date", previous?.tenderDueDate, next.tenderDueDate),
+    createAuditChangeDraft("TENDER", "requestType", "Request Type", previous?.requestType, next.requestType),
+    createAuditChangeDraft("TENDER", "requestedMaterial", "Requested Material", previous?.requestedMaterial, next.requestedMaterial),
+    createAuditChangeDraft("TENDER", "bagDiameterMm", "Bag Diameter (mm)", previous?.bagDiameterMm, next.bagDiameterMm),
+    createAuditChangeDraft("TENDER", "bagLengthMm", "Bag Length (mm)", previous?.bagLengthMm, next.bagLengthMm),
+    createAuditChangeDraft("TENDER", "topDesign", "Top Design", previous?.topDesign, next.topDesign),
+    createAuditChangeDraft("TENDER", "bottomDesign", "Bottom Design", previous?.bottomDesign, next.bottomDesign),
+    createAuditChangeDraft("TENDER", "accessoriesMaterial", "Accessories", previous?.accessoriesMaterial, next.accessoriesMaterial),
+    createAuditChangeDraft("TENDER", "requestedMaterialNotes", "Requested Material Notes", previous?.requestedMaterialNotes, next.requestedMaterialNotes),
+    createAuditChangeDraft("TENDER", "knownRequiredPrice", "Known Required Price", previous?.knownRequiredPrice, next.knownRequiredPrice),
+    createAuditChangeDraft("TENDER", "knownCompetitorPrice", "Known Competitor Price", previous?.knownCompetitorPrice, next.knownCompetitorPrice),
+    createAuditChangeDraft("TENDER", "customerCommissionPercent", "Customer Commission %", previous?.customerCommissionPercent, next.customerCommissionPercent),
+    createAuditChangeDraft("TENDER", "exchangeRate", "Exchange Rate", previous?.exchangeRate, next.exchangeRate),
+    createAuditChangeDraft("TENDER", "currencySafetyFactorPercent", "Currency Safety Factor %", previous?.currencySafetyFactorPercent, next.currencySafetyFactorPercent),
+    createAuditChangeDraft("TENDER", "overtimePerBag", "Overtime / Bag", previous?.overtimePerBag, next.overtimePerBag),
+    createAuditChangeDraft("TENDER", "installationPerBag", "Installation / Bag", previous?.installationPerBag, next.installationPerBag),
+    createAuditChangeDraft("TENDER", "transportationCostPerBag", "Transportation Cost / Bag", previous?.transportationCostPerBag, next.transportationCostPerBag),
+    createAuditChangeDraft("TENDER", "salesPercentage", "Sales Percentage %", previous?.salesPercentage, next.salesPercentage),
+    createAuditChangeDraft("TENDER", "salesFixed", "Sales Fixed", previous?.salesFixed, next.salesFixed),
+    createAuditChangeDraft("TENDER", "priceNegotiationExpected", "Price Negotiation Expected", previous?.priceNegotiationExpected, next.priceNegotiationExpected),
+    createAuditChangeDraft("TENDER", "requestedDeliveryTime", "Requested Delivery Time", previous?.requestedDeliveryTime, next.requestedDeliveryTime),
+    createAuditChangeDraft("TENDER", "deliveryPlace", "Delivery Place", previous?.deliveryPlace, next.deliveryPlace),
+    createAuditChangeDraft("TENDER", "assignedTo", "Assigned To", previous?.assignedTo, next.assignedTo),
+    createAuditChangeDraft("TENDER", "transportationRequired", "Transportation Required", previous?.transportationRequired, next.transportationRequired),
+    createAuditChangeDraft("TENDER", "installationRequired", "Installation Required", previous?.installationRequired, next.installationRequired),
+    createAuditChangeDraft("TENDER", "notes", "Tender Notes", previous?.notes, next.notes),
   ];
 
-  return records.filter((record): record is AuditRecordDraft => Boolean(record));
+  return records.filter((record): record is AuditChangeDraft => Boolean(record));
 };
 
 const buildProductConfigurationAuditRecords = (
@@ -1398,27 +1407,27 @@ const buildProductConfigurationAuditRecords = (
   next: Record<string, unknown>,
 ) => {
   const records = [
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "selectedProductIds", "Selected Products", previous?.selectedProductIds, next.selectedProductIds),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "productType", "Product Type", previous?.productType, next.productType),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "quantity", "Number of Bags", previous?.quantity, next.quantity),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "bagDiameterMm", "Bag Diameter (mm)", previous?.bagDiameterMm, next.bagDiameterMm),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "bagLengthMm", "Bag Length (mm)", previous?.bagLengthMm, next.bagLengthMm),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "seamAllowanceMm", "Seam Allowance (mm)", previous?.seamAllowanceMm, next.seamAllowanceMm),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "topBottomAllowanceMm", "Top/Bottom Allowance (mm)", previous?.topBottomAllowanceMm, next.topBottomAllowanceMm),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "topDesign", "Top Design", previous?.topDesign, next.topDesign),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "bottomDesign", "Bottom Design", previous?.bottomDesign, next.bottomDesign),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "seamType", "Seam Type", previous?.seamType, next.seamType),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "includeWearStrip", "Include Wear Strip", previous?.includeWearStrip, next.includeWearStrip),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "wearStripHeightMm", "Wear Strip Height (mm)", previous?.wearStripHeightMm, next.wearStripHeightMm),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "mainFabricMaterialId", "Main Fabric Material", previous?.mainFabricMaterialId, next.mainFabricMaterialId),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "accessoriesMaterialId", "Accessories Material", previous?.accessoriesMaterialId, next.accessoriesMaterialId),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "threadMaterialId", "Thread Material", previous?.threadMaterialId, next.threadMaterialId),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "packagingType", "Packaging Type", previous?.packagingType, next.packagingType),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "bagsPerCarton", "Bags Per Carton", previous?.bagsPerCarton, next.bagsPerCarton),
-    createAuditRecordDraft("PRODUCT_CONFIGURATION", "packagingNotes", "Packaging Notes", previous?.packagingNotes, next.packagingNotes),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "selectedProductIds", "Selected Products", previous?.selectedProductIds, next.selectedProductIds),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "productType", "Product Type", previous?.productType, next.productType),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "quantity", "Number of Bags", previous?.quantity, next.quantity),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "bagDiameterMm", "Bag Diameter (mm)", previous?.bagDiameterMm, next.bagDiameterMm),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "bagLengthMm", "Bag Length (mm)", previous?.bagLengthMm, next.bagLengthMm),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "seamAllowanceMm", "Seam Allowance (mm)", previous?.seamAllowanceMm, next.seamAllowanceMm),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "topBottomAllowanceMm", "Top/Bottom Allowance (mm)", previous?.topBottomAllowanceMm, next.topBottomAllowanceMm),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "topDesign", "Top Design", previous?.topDesign, next.topDesign),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "bottomDesign", "Bottom Design", previous?.bottomDesign, next.bottomDesign),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "seamType", "Seam Type", previous?.seamType, next.seamType),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "includeWearStrip", "Include Wear Strip", previous?.includeWearStrip, next.includeWearStrip),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "wearStripHeightMm", "Wear Strip Height (mm)", previous?.wearStripHeightMm, next.wearStripHeightMm),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "mainFabricMaterialId", "Main Fabric Material", previous?.mainFabricMaterialId, next.mainFabricMaterialId),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "accessoriesMaterialId", "Accessories Material", previous?.accessoriesMaterialId, next.accessoriesMaterialId),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "threadMaterialId", "Thread Material", previous?.threadMaterialId, next.threadMaterialId),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "packagingType", "Packaging Type", previous?.packagingType, next.packagingType),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "bagsPerCarton", "Bags Per Carton", previous?.bagsPerCarton, next.bagsPerCarton),
+    createAuditChangeDraft("PRODUCT_CONFIGURATION", "packagingNotes", "Packaging Notes", previous?.packagingNotes, next.packagingNotes),
   ];
 
-  return records.filter((record): record is AuditRecordDraft => Boolean(record));
+  return records.filter((record): record is AuditChangeDraft => Boolean(record));
 };
 
 const buildMaterialSourcingAuditRecords = (
@@ -1426,18 +1435,18 @@ const buildMaterialSourcingAuditRecords = (
   next: Record<string, unknown>,
 ) => {
   const records = [
-    createAuditRecordDraft("MATERIAL_SOURCE_SELECTION", "materialId", "Material", previous?.materialId, next.materialId),
-    createAuditRecordDraft("MATERIAL_SOURCE_SELECTION", "sourcingStrategy", "Sourcing Strategy", previous?.sourcingStrategy, next.sourcingStrategy),
-    createAuditRecordDraft("MATERIAL_SOURCE_SELECTION", "selectedSources", "Selected Suppliers / Materials", summarizeSelectedSources(previous?.selectedSources), summarizeSelectedSources(next.selectedSources)),
-    createAuditRecordDraft("MATERIAL_SOURCE_SELECTION", "componentSelections", "Selected Component Sources", summarizeComponentSelections(previous?.componentSelections), summarizeComponentSelections(next.componentSelections)),
-    createAuditRecordDraft("MATERIAL_SOURCE_SELECTION", "exchangeRate", "Exchange Rate", previous?.exchangeRate, next.exchangeRate),
-    createAuditRecordDraft("MATERIAL_SOURCE_SELECTION", "currencySafetyFactorPercent", "Currency Safety Factor %", previous?.currencySafetyFactorPercent, next.currencySafetyFactorPercent),
-    createAuditRecordDraft("MATERIAL_SOURCE_SELECTION", "freightCostPerM2Egp", "Freight Cost / m2", previous?.freightCostPerM2Egp, next.freightCostPerM2Egp),
-    createAuditRecordDraft("MATERIAL_SOURCE_SELECTION", "customsCostPerM2Egp", "Customs Cost / m2", previous?.customsCostPerM2Egp, next.customsCostPerM2Egp),
-    createAuditRecordDraft("MATERIAL_SOURCE_SELECTION", "otherChargesPerM2Egp", "Other Charges / m2", previous?.otherChargesPerM2Egp, next.otherChargesPerM2Egp),
+    createAuditChangeDraft("MATERIAL_SOURCE_SELECTION", "materialId", "Material", previous?.materialId, next.materialId),
+    createAuditChangeDraft("MATERIAL_SOURCE_SELECTION", "sourcingStrategy", "Sourcing Strategy", previous?.sourcingStrategy, next.sourcingStrategy),
+    createAuditChangeDraft("MATERIAL_SOURCE_SELECTION", "selectedSources", "Selected Suppliers / Materials", summarizeSelectedSources(previous?.selectedSources), summarizeSelectedSources(next.selectedSources)),
+    createAuditChangeDraft("MATERIAL_SOURCE_SELECTION", "componentSelections", "Selected Component Sources", summarizeComponentSelections(previous?.componentSelections), summarizeComponentSelections(next.componentSelections)),
+    createAuditChangeDraft("MATERIAL_SOURCE_SELECTION", "exchangeRate", "Exchange Rate", previous?.exchangeRate, next.exchangeRate),
+    createAuditChangeDraft("MATERIAL_SOURCE_SELECTION", "currencySafetyFactorPercent", "Currency Safety Factor %", previous?.currencySafetyFactorPercent, next.currencySafetyFactorPercent),
+    createAuditChangeDraft("MATERIAL_SOURCE_SELECTION", "freightCostPerM2Egp", "Freight Cost / m2", previous?.freightCostPerM2Egp, next.freightCostPerM2Egp),
+    createAuditChangeDraft("MATERIAL_SOURCE_SELECTION", "customsCostPerM2Egp", "Customs Cost / m2", previous?.customsCostPerM2Egp, next.customsCostPerM2Egp),
+    createAuditChangeDraft("MATERIAL_SOURCE_SELECTION", "otherChargesPerM2Egp", "Other Charges / m2", previous?.otherChargesPerM2Egp, next.otherChargesPerM2Egp),
   ];
 
-  return records.filter((record): record is AuditRecordDraft => Boolean(record));
+  return records.filter((record): record is AuditChangeDraft => Boolean(record));
 };
 
 const getEditableCostLines = (lines: unknown) => {
@@ -1460,15 +1469,15 @@ const buildCostBuildUpAuditRecords = (
   previous: Record<string, unknown> | null,
   next: Record<string, unknown>,
 ) => {
-  const records: AuditRecordDraft[] = [];
+  const records: AuditChangeDraft[] = [];
   const seedRecords = [
-    createAuditRecordDraft("COST_BUILDUP", "quantity", "Number of Bags", previous?.quantity, next.quantity),
-    createAuditRecordDraft("COST_BUILDUP", "currency", "Currency", previous?.currency, next.currency),
-    createAuditRecordDraft("COST_BUILDUP", "exchangeRate", "Exchange Rate", previous?.exchangeRate, next.exchangeRate),
-    createAuditRecordDraft("COST_BUILDUP", "currencySafetyFactorPercent", "Currency Safety Factor %", previous?.currencySafetyFactorPercent, next.currencySafetyFactorPercent),
+    createAuditChangeDraft("COST_BUILDUP", "quantity", "Number of Bags", previous?.quantity, next.quantity),
+    createAuditChangeDraft("COST_BUILDUP", "currency", "Currency", previous?.currency, next.currency),
+    createAuditChangeDraft("COST_BUILDUP", "exchangeRate", "Exchange Rate", previous?.exchangeRate, next.exchangeRate),
+    createAuditChangeDraft("COST_BUILDUP", "currencySafetyFactorPercent", "Currency Safety Factor %", previous?.currencySafetyFactorPercent, next.currencySafetyFactorPercent),
   ];
 
-  records.push(...seedRecords.filter((record): record is AuditRecordDraft => Boolean(record)));
+  records.push(...seedRecords.filter((record): record is AuditChangeDraft => Boolean(record)));
 
   const previousEditableLines = new Map(getEditableCostLines(previous?.costLines).map((line) => [line.code, line]));
   const nextEditableLines = new Map(getEditableCostLines(next.costLines).map((line) => [line.code, line]));
@@ -1477,7 +1486,7 @@ const buildCostBuildUpAuditRecords = (
   lineCodes.forEach((code) => {
     const previousLine = previousEditableLines.get(code) ?? null;
     const nextLine = nextEditableLines.get(code) ?? null;
-    const record = createAuditRecordDraft(
+    const record = createAuditChangeDraft(
       "COST_BUILDUP",
       `costLine.${code}`,
       nextLine?.category || previousLine?.category || nextLine?.description || previousLine?.description || code,
@@ -1517,7 +1526,7 @@ const buildAlternativesAuditRecords = (
   previous: Record<string, unknown> | null,
   next: Record<string, unknown>,
 ) => {
-  const records: AuditRecordDraft[] = [];
+  const records: AuditChangeDraft[] = [];
   const previousScenarios = new Map(getAlternativeScenarios(previous?.scenarios).map((scenario) => [scenario.scenarioId, scenario]));
   const nextScenarios = new Map(getAlternativeScenarios(next.scenarios).map((scenario) => [scenario.scenarioId, scenario]));
   const scenarioIds = Array.from(new Set([...previousScenarios.keys(), ...nextScenarios.keys()])).sort();
@@ -1527,19 +1536,19 @@ const buildAlternativesAuditRecords = (
     const nextScenario = nextScenarios.get(scenarioId) ?? null;
     const prefix = nextScenario?.label || previousScenario?.label || scenarioId;
     const scenarioRecords = [
-      createAuditRecordDraft("ALTERNATIVES", `scenario.${scenarioId}.label`, `${prefix} Label`, previousScenario?.label, nextScenario?.label),
-      createAuditRecordDraft("ALTERNATIVES", `scenario.${scenarioId}.profitPercent`, `${prefix} Profit %`, previousScenario?.profitPercent, nextScenario?.profitPercent),
-      createAuditRecordDraft("ALTERNATIVES", `scenario.${scenarioId}.customerCommissionPercent`, `${prefix} Customer Commission %`, previousScenario?.customerCommissionPercent, nextScenario?.customerCommissionPercent),
-      createAuditRecordDraft("ALTERNATIVES", `scenario.${scenarioId}.salesPersonCommissionMode`, `${prefix} Sales Mode`, previousScenario?.salesPersonCommissionMode, nextScenario?.salesPersonCommissionMode),
-      createAuditRecordDraft("ALTERNATIVES", `scenario.${scenarioId}.salesPersonCommissionPercent`, `${prefix} Sales Percentage %`, previousScenario?.salesPersonCommissionPercent, nextScenario?.salesPersonCommissionPercent),
-      createAuditRecordDraft("ALTERNATIVES", `scenario.${scenarioId}.salesPersonCommissionFixedAmount`, `${prefix} Sales Fixed`, previousScenario?.salesPersonCommissionFixedAmount, nextScenario?.salesPersonCommissionFixedAmount),
-      createAuditRecordDraft("ALTERNATIVES", `scenario.${scenarioId}.notes`, `${prefix} Notes`, previousScenario?.notes, nextScenario?.notes),
+      createAuditChangeDraft("ALTERNATIVES", `scenario.${scenarioId}.label`, `${prefix} Label`, previousScenario?.label, nextScenario?.label),
+      createAuditChangeDraft("ALTERNATIVES", `scenario.${scenarioId}.profitPercent`, `${prefix} Profit %`, previousScenario?.profitPercent, nextScenario?.profitPercent),
+      createAuditChangeDraft("ALTERNATIVES", `scenario.${scenarioId}.customerCommissionPercent`, `${prefix} Customer Commission %`, previousScenario?.customerCommissionPercent, nextScenario?.customerCommissionPercent),
+      createAuditChangeDraft("ALTERNATIVES", `scenario.${scenarioId}.salesPersonCommissionMode`, `${prefix} Sales Mode`, previousScenario?.salesPersonCommissionMode, nextScenario?.salesPersonCommissionMode),
+      createAuditChangeDraft("ALTERNATIVES", `scenario.${scenarioId}.salesPersonCommissionPercent`, `${prefix} Sales Percentage %`, previousScenario?.salesPersonCommissionPercent, nextScenario?.salesPersonCommissionPercent),
+      createAuditChangeDraft("ALTERNATIVES", `scenario.${scenarioId}.salesPersonCommissionFixedAmount`, `${prefix} Sales Fixed`, previousScenario?.salesPersonCommissionFixedAmount, nextScenario?.salesPersonCommissionFixedAmount),
+      createAuditChangeDraft("ALTERNATIVES", `scenario.${scenarioId}.notes`, `${prefix} Notes`, previousScenario?.notes, nextScenario?.notes),
     ];
 
-    records.push(...scenarioRecords.filter((record): record is AuditRecordDraft => Boolean(record)));
+    records.push(...scenarioRecords.filter((record): record is AuditChangeDraft => Boolean(record)));
   });
 
-  const notesRecord = createAuditRecordDraft("ALTERNATIVES", "notes", "Alternative Notes", previous?.notes, next.notes);
+  const notesRecord = createAuditChangeDraft("ALTERNATIVES", "notes", "Alternative Notes", previous?.notes, next.notes);
   if (notesRecord) {
     records.push(notesRecord);
   }
@@ -1567,7 +1576,7 @@ const buildPricingApprovalAuditRecords = (
   previous: Record<string, unknown> | null,
   next: Record<string, unknown>,
 ) => {
-  const records: AuditRecordDraft[] = [];
+  const records: AuditChangeDraft[] = [];
   const previousDecisions = new Map(getApprovalDecisions(previous?.decisions).map((decision) => [decision.scenarioId, decision]));
   const nextDecisions = new Map(getApprovalDecisions(next.decisions).map((decision) => [decision.scenarioId, decision]));
   const decisionIds = Array.from(new Set([...previousDecisions.keys(), ...nextDecisions.keys()])).sort();
@@ -1582,7 +1591,7 @@ const buildPricingApprovalAuditRecords = (
         : nextDecision?.status === "denied"
           ? "REJECT"
           : undefined;
-    const statusRecord = createAuditRecordDraft(
+    const statusRecord = createAuditChangeDraft(
       "PRICING_APPROVAL",
       `decision.${decisionId}.status`,
       `${label} Decision`,
@@ -1590,7 +1599,7 @@ const buildPricingApprovalAuditRecords = (
       nextDecision?.status ?? null,
       statusActionType,
     );
-    const notesRecord = createAuditRecordDraft(
+    const notesRecord = createAuditChangeDraft(
       "PRICING_APPROVAL",
       `decision.${decisionId}.notes`,
       `${label} Notes`,
@@ -1607,7 +1616,7 @@ const buildPricingApprovalAuditRecords = (
     }
   });
 
-  const notesRecord = createAuditRecordDraft("PRICING_APPROVAL", "notes", "Approval Notes", previous?.notes, next.notes);
+  const notesRecord = createAuditChangeDraft("PRICING_APPROVAL", "notes", "Approval Notes", previous?.notes, next.notes);
   if (notesRecord) {
     records.push(notesRecord);
   }
@@ -2283,8 +2292,19 @@ const updateTenderStatus = async (
 const createTenderAuditLogEntry = async (
   context: RequestContext,
   tenderId: string,
-  draft: AuditRecordDraft,
+  payload: {
+    productId?: string;
+    stage: TenderAuditStage;
+    actionType: UserActivityAuditActionType;
+    changes: AuditChangeDraft[];
+    sourcePage: string;
+    sourceComponent: string;
+  },
 ) => {
+  if (payload.changes.length === 0) {
+    return;
+  }
+
   const changedAt = isoNow();
   const auditId = crypto.randomUUID();
   const item = {
@@ -2295,19 +2315,23 @@ const createTenderAuditLogEntry = async (
         tenantId: context.tenantId,
         tenderId,
         auditId,
-        productId: draft.productId,
-        stage: draft.stage,
-        fieldName: draft.fieldName,
-        fieldLabel: draft.fieldLabel,
-        oldValue: draft.oldValue,
-        newValue: draft.newValue,
-        actionType: draft.actionType,
+        productId: payload.productId,
+        stage: payload.stage,
+        actionType: payload.actionType,
+        changeCount: payload.changes.length,
+        changes: payload.changes.map((change) => ({
+          fieldName: change.fieldName,
+          fieldLabel: change.fieldLabel,
+          oldValue: change.oldValue,
+          newValue: change.newValue,
+          actionType: change.actionType,
+        })),
         changedByUserId: context.actorId,
         changedByUserName: context.actorName,
         changedByUserEmail: context.actorEmail ?? "",
         changedAt,
-        sourcePage: draft.sourcePage,
-        sourceComponent: draft.sourceComponent,
+        sourcePage: payload.sourcePage,
+        sourceComponent: payload.sourceComponent,
       },
       "USER_ACTIVITY_AUDIT_LOG",
       changedAt,
@@ -2315,6 +2339,24 @@ const createTenderAuditLogEntry = async (
   } satisfies StoredEntity;
 
   await putRecord(context.tableName, item);
+};
+
+const resolveAuditActionType = (changes: AuditChangeDraft[]): UserActivityAuditActionType => {
+  const actionTypes = new Set(changes.map((change) => change.actionType));
+
+  if (actionTypes.size === 1) {
+    return changes[0]?.actionType ?? "UPDATE";
+  }
+
+  if (actionTypes.has("APPROVE") && !actionTypes.has("REJECT")) {
+    return "APPROVE";
+  }
+
+  if (actionTypes.has("REJECT") && !actionTypes.has("APPROVE")) {
+    return "REJECT";
+  }
+
+  return "UPDATE";
 };
 
 const createAuditEntriesForStage = async (
@@ -2339,7 +2381,18 @@ const createAuditEntriesForStage = async (
                 ? buildPricingApprovalAuditRecords(previous, next)
                 : [];
 
-  await Promise.all(drafts.map((draft) => createTenderAuditLogEntry(context, tenderId, draft)));
+  if (drafts.length === 0) {
+    return;
+  }
+
+  await createTenderAuditLogEntry(context, tenderId, {
+    productId: drafts.find((draft) => draft.productId)?.productId,
+    stage,
+    actionType: resolveAuditActionType(drafts),
+    changes: drafts,
+    sourcePage: stageSourceMap[stage].sourcePage,
+    sourceComponent: stageSourceMap[stage].sourceComponent,
+  });
 };
 
 const listTenderAuditLog = async (
@@ -2389,12 +2442,20 @@ const archiveTender = async (context: RequestContext, tenderId: string) => {
   });
 
   await createTenderAuditLogEntry(context, tenderId, {
-    stage: "SYSTEM",
-    fieldName: "archived",
-    fieldLabel: "Archived Tender",
-    oldValue: false,
-    newValue: true,
     actionType: "UPDATE",
+    stage: "SYSTEM",
+    changes: [
+      {
+        stage: "SYSTEM",
+        fieldName: "archived",
+        fieldLabel: "Archived Tender",
+        oldValue: false,
+        newValue: true,
+        actionType: "UPDATE",
+        sourcePage: "tender-detail",
+        sourceComponent: "TenderDetailPage",
+      },
+    ],
     sourcePage: "tender-detail",
     sourceComponent: "TenderDetailPage",
   });
@@ -2519,12 +2580,20 @@ const duplicateTender = async (context: RequestContext, tenderId: string) => {
   }
 
   await createTenderAuditLogEntry(context, duplicated.tenderId, {
-    stage: "SYSTEM",
-    fieldName: "duplicatedFromTenderId",
-    fieldLabel: "Duplicated From Tender",
-    oldValue: null,
-    newValue: existing.tenderNumber || tenderId,
     actionType: "CREATE",
+    stage: "SYSTEM",
+    changes: [
+      {
+        stage: "SYSTEM",
+        fieldName: "duplicatedFromTenderId",
+        fieldLabel: "Duplicated From Tender",
+        oldValue: null,
+        newValue: existing.tenderNumber || tenderId,
+        actionType: "CREATE",
+        sourcePage: "tender-detail",
+        sourceComponent: "TenderDetailPage",
+      },
+    ],
     sourcePage: "tender-detail",
     sourceComponent: "TenderDetailPage",
   });

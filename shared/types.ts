@@ -169,11 +169,15 @@ export type UserActivityAuditLog = EntityEnvelope & {
   auditId: string;
   productId?: string;
   stage: UserActivityAuditStage;
-  fieldName: string;
-  fieldLabel: string;
-  oldValue: string | number | boolean | null;
-  newValue: string | number | boolean | null;
   actionType: UserActivityAuditActionType;
+  changeCount: number;
+  changes: Array<{
+    fieldName: string;
+    fieldLabel: string;
+    oldValue: string | number | boolean | null;
+    newValue: string | number | boolean | null;
+    actionType: UserActivityAuditActionType;
+  }>;
   changedByUserId: string;
   changedByUserName: string;
   changedByUserEmail?: string;
