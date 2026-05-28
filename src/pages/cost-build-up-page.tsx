@@ -430,6 +430,31 @@ const calculateMaterialLineOverrides = ({
   };
 };
 
+const isAccessoryComponent = (componentName: string, componentType?: string | null) =>
+  componentType?.trim().toLowerCase() === "accessories" ||
+  componentName.trim().toLowerCase() === "accessories";
+
+const isComponentFullySourced = (
+  selection: NonNullable<MaterialSourceSelection["componentSelections"]>[number],
+  accessoryComponentIds: Set<string>,
+) => {
+  if (accessoryComponentIds.has(selection.componentId)) {
+    return selection.materialCostPerBagEgp !== null && selection.materialCostPerBagEgp !== undefined;
+  }
+
+  const requested = selection.requestedQuantity ?? 0;
+  const allocated = selection.selectedSources.reduce(
+    (total, source) => total + (source.allocatedBags ?? 0),
+    0,
+  );
+
+  if (!selection.selectedSources.length || allocated <= 0) {
+    return false;
+  }
+
+  return requested > 0 && allocated >= requested;
+};
+
 const calculateSelectionMaterialCost = ({
   selection,
   materials,
@@ -971,6 +996,19 @@ export const CostBuildUpPage = () => {
       }),
     [form.costLines, productSnapshots],
   );
+  const accessoryComponentIds = useMemo(
+    () =>
+      new Set(
+        productSnapshots.flatMap((product) =>
+          product.components
+            .filter((component) =>
+              isAccessoryComponent(component.componentName, component.componentType),
+            )
+            .map((component) => component.componentId),
+        ),
+      ),
+    [productSnapshots],
+  );
 
   const productSyncStatuses = useMemo(
     () =>
@@ -996,6 +1034,23 @@ export const CostBuildUpPage = () => {
   );
 
   const sourcingBreakdown = materialSourcing?.componentSelections ?? [];
+  const sourcingCompletionSummary = useMemo(() => {
+    const totalConfiguredComponents = productSnapshots.reduce(
+      (sum, product) => sum + product.components.length,
+      0,
+    );
+    const fullySourcedComponents = sourcingBreakdown.reduce(
+      (sum, selection) => sum + (isComponentFullySourced(selection, accessoryComponentIds) ? 1 : 0),
+      0,
+    );
+
+    return {
+      totalConfiguredComponents,
+      fullySourcedComponents,
+      hasIncompleteComponents:
+        totalConfiguredComponents > 0 && fullySourcedComponents < totalConfiguredComponents,
+    };
+  }, [accessoryComponentIds, productSnapshots, sourcingBreakdown]);
 
   const productCards = useMemo(
     () =>
@@ -1721,6 +1776,30 @@ export const CostBuildUpPage = () => {
                 <Badge variant="default">COST_BUILDUP</Badge>
               </CardHeader>
               <CardContent className="space-y-6 pt-6">
+                  {sourcingCompletionSummary.hasIncompleteComponents ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="font-semibold text-amber-950">
+                            Material Sourcing & Costing is still incomplete for this tender.
+                          </p>
+                          <p className="mt-1">
+                            {sourcingCompletionSummary.fullySourcedComponents} of {sourcingCompletionSummary.totalConfiguredComponents} components are fully sourced. Complete sourcing for all products before finalizing cost build-up.
+                          </p>
+                        </div>
+                        <Button
+                          className="w-full sm:w-auto"
+                          type="button"
+                          variant="outline"
+                          onClick={() => navigate(`/tenders/${tenderId}/material-sourcing`)}
+                        >
+                          <ArrowLeft className="h-4 w-4" />
+                          Open Material Sourcing
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <section className="rounded-[1.25rem] border border-blue-100 bg-gradient-to-br from-sky-50 via-white to-blue-50 p-4 sm:p-5">
                     <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                       <div>

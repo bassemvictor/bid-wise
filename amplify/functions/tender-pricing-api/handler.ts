@@ -2641,6 +2641,13 @@ const getProductConfigurationRecord = async (
 const getProductConfiguration = async (context: RequestContext, tenderId: string) =>
   sanitizeProductConfiguration(await getProductConfigurationRecord(context.tableName, tenderId));
 
+const hasConfiguredProducts = (configuration: ProductConfiguration | null) =>
+  Boolean(
+    configuration &&
+      ((Array.isArray(configuration.selectedProductIds) && configuration.selectedProductIds.length > 0) ||
+        (Array.isArray(configuration.productSnapshots) && configuration.productSnapshots.length > 0)),
+  );
+
 const clearTenderWorkflowStage = async (
   tableName: string,
   tenderId: string,
@@ -2705,7 +2712,10 @@ const saveRollCalculation = async (
   payload: Partial<RollCalculation>,
 ) => {
   const normalized = normalizeRollCalculationPayload(payload, context.tenantId, tenderId);
-  const existing = await getRollCalculationRecord(context.tableName, tenderId);
+  const [existing, configuration] = await Promise.all([
+    getRollCalculationRecord(context.tableName, tenderId),
+    getProductConfiguration(context, tenderId),
+  ]);
   const timestamps = baseEnvelope(
     normalized,
     "ROLL_CALCULATION",
@@ -2719,7 +2729,9 @@ const saveRollCalculation = async (
   } satisfies StoredEntity;
 
   await putRecord(context.tableName, item);
-  await updateTenderStatus(context, tenderId, "MATERIAL_ROLL_CALCULATION");
+  if (hasConfiguredProducts(configuration)) {
+    await updateTenderStatus(context, tenderId, "MATERIAL_ROLL_CALCULATION");
+  }
   return sanitizeRollCalculation(item)!;
 };
 
@@ -2872,7 +2884,10 @@ const saveMaterialSourcing = async (
   payload: Partial<MaterialSourceSelection>,
 ) => {
   const normalized = normalizeMaterialSourceSelectionPayload(payload, context.tenantId, tenderId);
-  const existing = await getMaterialSourcingRecord(context.tableName, tenderId);
+  const [existing, configuration] = await Promise.all([
+    getMaterialSourcingRecord(context.tableName, tenderId),
+    getProductConfiguration(context, tenderId),
+  ]);
   const timestamps = baseEnvelope(
     normalized,
     "MATERIAL_SOURCE_SELECTION",
@@ -2888,7 +2903,9 @@ const saveMaterialSourcing = async (
   await syncTenderStockReservations(context, tenderId, normalized);
   await putRecord(context.tableName, item);
   await createAuditEntriesForStage(context, tenderId, "MATERIAL_SOURCE_SELECTION", existing, item);
-  await updateTenderStatus(context, tenderId, "MATERIAL_SOURCING");
+  if (hasConfiguredProducts(configuration)) {
+    await updateTenderStatus(context, tenderId, "MATERIAL_SOURCING");
+  }
   return sanitizeMaterialSourceSelection(item)!;
 };
 

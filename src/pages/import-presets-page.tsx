@@ -504,72 +504,78 @@ export const ImportPresetsPage = () => {
               description="Add an import preset to preload supplier cost and lead-time defaults during sourcing."
             />
           ) : (
-            <Table>
+            <Table className="min-w-[1320px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Import Preset</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead>Material</TableHead>
-                  <TableHead>Roll Width (mm)</TableHead>
-                  <TableHead>Roll Length (mm)</TableHead>
-                  <TableHead>Lead Time</TableHead>
-                  <TableHead>Cost</TableHead>
-                  <TableHead>Freight / m²</TableHead>
-                  <TableHead>Clearance / m²</TableHead>
-                  <TableHead>Customes %</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead className="text-right">Roll Width (mm)</TableHead>
+                  <TableHead className="text-right">Roll Length (mm)</TableHead>
+                  <TableHead className="text-right">Lead Time</TableHead>
+                  <TableHead className="text-right">Cost</TableHead>
+                  <TableHead className="text-right">Freight / m²</TableHead>
+                  <TableHead className="text-right">Clearance / m²</TableHead>
+                  <TableHead className="text-right">Customes %</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((record) => (
-                  <TableRow key={record.importPresetId}>
-                    <TableCell>
-                      <p className="font-medium text-slate-900">{record.importPresetId}</p>
+                  <TableRow key={record.importPresetId} className="[&>td]:align-middle">
+                    <TableCell className="w-[280px]">
+                      <p className="break-all font-medium leading-6 text-slate-900">{record.importPresetId}</p>
                       <p className="text-xs text-muted-foreground">Import material preset</p>
                     </TableCell>
-                    <TableCell>{supplierMap[record.supplierId] ?? record.supplierId ?? "-"}</TableCell>
-                    <TableCell>{materialMap[record.materialId] ?? record.materialId ?? "-"}</TableCell>
-                    <TableCell>{toMillimeterInputValue(record.rollWidthM) || "-"}</TableCell>
-                    <TableCell>{toMillimeterInputValue(record.rollLengthM) || "-"}</TableCell>
-                    <TableCell>{record.leadTimeDays !== null ? `${record.leadTimeDays} days` : "-"}</TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap font-medium text-slate-800">{supplierMap[record.supplierId] ?? record.supplierId ?? "-"}</TableCell>
+                    <TableCell className="whitespace-nowrap font-medium text-slate-800">{materialMap[record.materialId] ?? record.materialId ?? "-"}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right font-medium tabular-nums text-slate-800">{toMillimeterInputValue(record.rollWidthM) || "-"}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right font-medium tabular-nums text-slate-800">{toMillimeterInputValue(record.rollLengthM) || "-"}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">{record.leadTimeDays !== null ? `${record.leadTimeDays} days` : "-"}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">
                       {record.unitCostUsdPerM2 !== null
                         ? `${record.unitCostUsdPerM2.toFixed(3)} USD/m²`
                         : "-"}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">
                       {record.customsEstimate !== null
                         ? (record.freightCostPerM2Egp ?? 0).toFixed(2)
                         : "-"}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">
                       {record.customsEstimate !== null
                         ? (record.clearanceCostPerM2Egp ?? 0).toFixed(2)
                         : "-"}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">
                       {record.customsPercent !== null
                         ? `${record.customsPercent.toFixed(2)}%`
                         : "-"}
                     </TableCell>
-                    <TableCell><StatusBadge active={record.active} /></TableCell>
-                    <TableCell className="space-x-2">
-                      <Button
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                        onClick={() => {
-                          setEditing(record);
-                          setForm(toForm(record));
-                          setOpen(true);
-                        }}
-                      >
-                        Edit
-                      </Button>
-                      <Button size="sm" type="button" variant="outline" onClick={() => void archive(record)}>
-                        {record.active ? "Archive" : "Delete"}
-                      </Button>
+                    <TableCell className="text-center">
+                      <div className="flex justify-center">
+                        <StatusBadge active={record.active} />
+                      </div>
+                    </TableCell>
+                    <TableCell className="w-[180px]">
+                      <div className="flex justify-end gap-2 whitespace-nowrap">
+                        <Button
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                          onClick={() => {
+                            setEditing(record);
+                            setForm(toForm(record));
+                            setOpen(true);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button size="sm" type="button" variant="outline" onClick={() => void archive(record)}>
+                          {record.active ? "Archive" : "Delete"}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

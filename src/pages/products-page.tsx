@@ -824,14 +824,14 @@ export const ProductsPage = () => {
           {filtered.length === 0 ? (
             <EmptyState title="No products found" description="Create reusable products and attach their components." />
           ) : (
-            <Table>
+            <Table className="min-w-[980px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Product</TableHead>
                   <TableHead>Type</TableHead>
-                  <TableHead>Components</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead className="text-right">Components</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -841,12 +841,12 @@ export const ProductsPage = () => {
                   return (
                     <Fragment key={record.productId}>
                       <TableRow
-                        className="cursor-pointer hover:bg-slate-50"
+                        className="cursor-pointer hover:bg-slate-50 [&>td]:align-middle"
                         onClick={() =>
                           setExpandedProductId((current) => (current === record.productId ? null : record.productId))
                         }
                       >
-                        <TableCell>
+                        <TableCell className="w-[320px]">
                           <div className="flex items-center gap-2">
                             {expanded ? (
                               <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -859,27 +859,31 @@ export const ProductsPage = () => {
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell>{record.productType}</TableCell>
-                        <TableCell>{record.components.length}</TableCell>
-                        <TableCell>
-                          <StatusBadge active={record.active} />
+                        <TableCell className="whitespace-nowrap font-medium text-slate-800">{record.productType}</TableCell>
+                        <TableCell className="text-right font-medium tabular-nums text-slate-800">{record.components.length}</TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex justify-center">
+                            <StatusBadge active={record.active} />
+                          </div>
                         </TableCell>
-                        <TableCell className="space-x-2" onClick={(event) => event.stopPropagation()}>
-                          <Button
-                            onClick={() => {
-                              setEditing(record);
-                              resetForm(toForm(record));
-                              setOpen(true);
-                            }}
-                            size="sm"
-                            type="button"
-                            variant="ghost"
-                          >
-                            Edit
-                          </Button>
-                          <Button onClick={() => void archive(record)} size="sm" type="button" variant="outline">
-                            {record.active ? "Archive" : "Delete"}
-                          </Button>
+                        <TableCell className="w-[180px]" onClick={(event) => event.stopPropagation()}>
+                          <div className="flex justify-end gap-2 whitespace-nowrap">
+                            <Button
+                              onClick={() => {
+                                setEditing(record);
+                                resetForm(toForm(record));
+                                setOpen(true);
+                              }}
+                              size="sm"
+                              type="button"
+                              variant="ghost"
+                            >
+                              Edit
+                            </Button>
+                            <Button onClick={() => void archive(record)} size="sm" type="button" variant="outline">
+                              {record.active ? "Archive" : "Delete"}
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                       {expanded ? (

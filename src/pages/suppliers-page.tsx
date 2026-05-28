@@ -260,26 +260,28 @@ export const SuppliersPage = () => {
           {filtered.length === 0 ? (
             <EmptyState title="No suppliers found" description="Create a supplier record to start managing your supplier master data." />
           ) : (
-            <Table>
+            <Table className="min-w-[980px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Supplier</TableHead>
                   <TableHead>Country</TableHead>
                   <TableHead>Contact</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((record) => (
-                  <TableRow key={record.supplierId}>
-                    <TableCell><p className="font-medium text-slate-900">{record.supplierName}</p><p className="text-xs text-muted-foreground">{record.supplierId}</p></TableCell>
-                    <TableCell>{record.country}</TableCell>
-                    <TableCell><p>{record.contactName}</p><p className="text-xs text-muted-foreground">{record.email}</p></TableCell>
-                    <TableCell><StatusBadge active={record.active} preferred={record.preferred} /></TableCell>
-                    <TableCell className="space-x-2">
-                      <Button size="sm" variant="ghost" type="button" onClick={() => { setEditing(record); setSupplierForm(toSupplierForm(record)); setSupplierDialogOpen(true); }}>Edit</Button>
-                      <Button size="sm" variant="outline" type="button" onClick={() => void archiveSupplier(record)}>{record.active ? "Archive" : "Delete"}</Button>
+                  <TableRow key={record.supplierId} className="[&>td]:align-middle">
+                    <TableCell className="w-[280px]"><p className="font-medium text-slate-900">{record.supplierName}</p><p className="text-xs text-muted-foreground">{record.supplierId}</p></TableCell>
+                    <TableCell className="whitespace-nowrap font-medium text-slate-800">{record.country || "-"}</TableCell>
+                    <TableCell><p>{record.contactName || "-"}</p><p className="text-xs text-muted-foreground">{record.email || "-"}</p></TableCell>
+                    <TableCell className="text-center"><div className="flex justify-center"><StatusBadge active={record.active} preferred={record.preferred} /></div></TableCell>
+                    <TableCell className="w-[180px]">
+                      <div className="flex justify-end gap-2 whitespace-nowrap">
+                        <Button size="sm" variant="ghost" type="button" onClick={() => { setEditing(record); setSupplierForm(toSupplierForm(record)); setSupplierDialogOpen(true); }}>Edit</Button>
+                        <Button size="sm" variant="outline" type="button" onClick={() => void archiveSupplier(record)}>{record.active ? "Archive" : "Delete"}</Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

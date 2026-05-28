@@ -521,15 +521,14 @@ const TenderDetailContent = ({
                               <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
                                 {record.changes.map((change, index) => (
                                   <div
-                                    className="grid gap-2 px-4 py-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center md:gap-4"
+                                    className="grid gap-2 px-4 py-2.5 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center md:gap-3"
                                     key={`${record.auditId}-${change.fieldName}-${index}`}
                                   >
-                                    <div className={index > 0 ? "md:border-t-0" : ""}>
-                                      <div className="text-base font-medium text-slate-950">{change.fieldLabel}</div>
-                                      <div className="text-xs text-muted-foreground">{change.fieldName}</div>
+                                    <div className="min-w-0">
+                                      <div className="truncate text-sm font-medium text-slate-950">{change.fieldLabel}</div>
                                     </div>
                                     <div className="text-left md:text-center">
-                                      <span className="text-base font-semibold text-rose-600 line-through decoration-1 decoration-rose-400/80">
+                                      <span className="inline-flex max-w-full items-center rounded-md bg-rose-50 px-2.5 py-1 text-sm font-semibold text-rose-700 line-through decoration-1 decoration-rose-500/80">
                                         {formatAuditValue(change.oldValue)}
                                       </span>
                                     </div>
@@ -537,7 +536,7 @@ const TenderDetailContent = ({
                                       <ArrowRight className="h-4 w-4" />
                                     </div>
                                     <div className="text-left md:text-right">
-                                      <span className="text-base font-semibold text-emerald-600">
+                                      <span className="inline-flex max-w-full items-center rounded-md bg-emerald-50 px-2.5 py-1 text-sm font-semibold text-emerald-700">
                                         {formatAuditValue(change.newValue)}
                                       </span>
                                     </div>

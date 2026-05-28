@@ -248,6 +248,436 @@ const formatMetric = (value: number | null, digits = 2, suffix = "") =>
 
 const squareMillimetersToSquareMeters = (value: number) => value / 1_000_000;
 
+const buildComponentMetrics = (
+  form: MaterialSourcingForm,
+  materials: Material[],
+  effectiveExchangeRate: number | null,
+): ComponentMetrics[] => {
+  const stockUsageBySource = new Map<string, number>();
+
+  return form.componentSelections.map((component) => {
+    const isAccessory = isAccessoryComponent(component);
+    const isFabricMaterial = isFabricMaterialCategory(getMaterialCategoryById(component.materialId, materials));
+    const bagDiameterMm = numberOrNull(component.bagDiameterMm);
+    const bagLengthMm = numberOrNull(component.bagLengthMm);
+    const seamAllowanceMm = numberOrNull(component.seamAllowanceMm);
+    const topBottomAllowanceMm = numberOrNull(component.topBottomAllowanceMm);
+    const requestedQuantity = numberOrNull(component.requestedQuantity);
+    const bagWidthMm =
+      bagDiameterMm !== null && seamAllowanceMm !== null
+        ? bagDiameterMm * Math.PI + seamAllowanceMm
+        : null;
+    const bagLengthWithAllowanceMm =
+      bagLengthMm !== null && topBottomAllowanceMm !== null
+        ? bagLengthMm + 2 * topBottomAllowanceMm
+        : null;
+
+    let totalAllocatedQtyM2 = 0;
+    let totalCostEgp = 0;
+    let weightedUnitCostArea = 0;
+    let totalAllocatedBags = 0;
+    let totalLeadTimeDays = 0;
+
+    if (isAccessory) {
+      const accessoryTotalPricePerBagEgp = numberOrNull(component.accessoryTotalPricePerBagEgp);
+      const totalMaterialCostEgp =
+        accessoryTotalPricePerBagEgp !== null && requestedQuantity !== null
+          ? accessoryTotalPricePerBagEgp * requestedQuantity
+          : null;
+
+      return {
+        bagWidthMm,
+        bagLengthWithAllowanceMm,
+        requestedQuantity,
+        actualAreaPerBagM2: null,
+        materialCostPerBagEgp: accessoryTotalPricePerBagEgp,
+        totalMaterialCostEgp,
+        totalAllocatedQtyM2: null,
+        weightedAverageUnitCostUsdPerM2: null,
+        leadTimeDays: null,
+        sourceMetrics: [],
+      };
+    }
+
+    const sourceMetrics = component.selectedSources.map((source) => {
+      const rollWidthMm = numberOrNull(source.rollWidthM);
+      const rollLengthMm = numberOrNull(source.rollLengthM);
+      const unitCostUsdPerM2 = numberOrNull(source.unitCostUsdPerM2);
+      const landedCostEgp = numberOrNull(source.landedCostEgp);
+      const leadTimeDays = numberOrNull(source.leadTimeDays);
+      const freightCostPerM2EgpForSource = numberOrNull(source.freightCostPerM2Egp) ?? 0;
+      const clearanceCostPerM2EgpForSource = numberOrNull(source.clearanceCostPerM2Egp) ?? 0;
+      const customsPercentForSource = numberOrNull(source.customsPercent) ?? 0;
+      const rollCount =
+        source.sourceType === "stock"
+          ? 1
+          : Math.max(1, Math.floor(numberOrNull(source.rollCount) ?? 1));
+
+      const bagsAcrossRollWidth =
+        isFabricMaterial && rollWidthMm !== null && bagWidthMm !== null && bagWidthMm > 0
+          ? Math.floor(rollWidthMm / bagWidthMm)
+          : null;
+      const bagsAlongRollLength =
+        isFabricMaterial &&
+        rollLengthMm !== null &&
+        bagLengthWithAllowanceMm !== null &&
+        bagLengthWithAllowanceMm > 0
+          ? Math.floor(rollLengthMm / bagLengthWithAllowanceMm)
+          : null;
+      const bagsPerRoll =
+        bagsAcrossRollWidth !== null &&
+        bagsAlongRollLength !== null &&
+        bagsAcrossRollWidth > 0 &&
+        bagsAlongRollLength > 0
+          ? bagsAcrossRollWidth * bagsAlongRollLength
+          : null;
+      const actualAreaPerBagM2 =
+        isFabricMaterial && rollWidthMm !== null && rollLengthMm !== null && bagsPerRoll !== null && bagsPerRoll > 0
+          ? squareMillimetersToSquareMeters(rollWidthMm * rollLengthMm) / bagsPerRoll
+          : null;
+      const capacityBags = isFabricMaterial
+        ? bagsPerRoll !== null
+          ? bagsPerRoll * rollCount
+          : null
+        : requestedQuantity;
+      const requestedAllocatedBags =
+        form.sourcingStrategy === "combine-sources"
+          ? (numberOrNull(source.allocatedBags) ?? 0)
+          : requestedQuantity;
+      const alreadyUsedFromStock =
+        source.sourceType === "stock" ? stockUsageBySource.get(source.sourceId) ?? 0 : 0;
+      const remainingCapacityForThisLine =
+        capacityBags !== null
+          ? Math.max(capacityBags - alreadyUsedFromStock, 0)
+          : null;
+      const allocatedBags =
+        remainingCapacityForThisLine !== null
+          ? Math.min(requestedAllocatedBags ?? 0, remainingCapacityForThisLine)
+          : requestedAllocatedBags ?? 0;
+      const qtyUsedM2 =
+        isFabricMaterial && actualAreaPerBagM2 !== null && allocatedBags !== null
+          ? actualAreaPerBagM2 * allocatedBags
+          : null;
+      const totalCostUsdForLine =
+        isFabricMaterial && qtyUsedM2 !== null && unitCostUsdPerM2 !== null
+          ? qtyUsedM2 * unitCostUsdPerM2
+          : null;
+      const convertedCostPerM2Egp =
+        isFabricMaterial && unitCostUsdPerM2 !== null && effectiveExchangeRate !== null
+          ? unitCostUsdPerM2 * effectiveExchangeRate
+          : null;
+      const customsCostPerM2EgpForSource =
+        source.sourceType === "stock"
+          ? 0
+          : convertedCostPerM2Egp !== null
+            ? convertedCostPerM2Egp * (customsPercentForSource / 100)
+            : null;
+      const landedCostPerM2Egp =
+        source.sourceType === "stock"
+          ? landedCostEgp
+          : convertedCostPerM2Egp !== null
+            ? convertedCostPerM2Egp +
+              (customsCostPerM2EgpForSource ?? 0) +
+              freightCostPerM2EgpForSource +
+              clearanceCostPerM2EgpForSource
+            : null;
+      const totalCostEgpForLine =
+        isFabricMaterial
+          ? qtyUsedM2 !== null && landedCostPerM2Egp !== null
+            ? qtyUsedM2 * landedCostPerM2Egp
+            : null
+          : allocatedBags !== null && unitCostUsdPerM2 !== null
+            ? allocatedBags * unitCostUsdPerM2
+            : null;
+      const costPerBagEgp =
+        isFabricMaterial
+          ? actualAreaPerBagM2 !== null && landedCostPerM2Egp !== null
+            ? actualAreaPerBagM2 * landedCostPerM2Egp
+            : null
+          : unitCostUsdPerM2;
+
+      if (qtyUsedM2 !== null) {
+        totalAllocatedQtyM2 += qtyUsedM2;
+      }
+
+      if (totalCostEgpForLine !== null) {
+        totalCostEgp += totalCostEgpForLine;
+      }
+
+      if (isFabricMaterial && qtyUsedM2 !== null && unitCostUsdPerM2 !== null) {
+        weightedUnitCostArea += qtyUsedM2 * unitCostUsdPerM2;
+      }
+
+      if (allocatedBags !== null) {
+        totalAllocatedBags += allocatedBags;
+      }
+
+      if (source.sourceType === "stock" && allocatedBags !== null) {
+        stockUsageBySource.set(source.sourceId, alreadyUsedFromStock + allocatedBags);
+      }
+
+      if (leadTimeDays !== null) {
+        totalLeadTimeDays = Math.max(totalLeadTimeDays, leadTimeDays);
+      }
+
+      const usedRows =
+        allocatedBags !== null &&
+        bagsAcrossRollWidth !== null &&
+        bagsAcrossRollWidth > 0
+          ? Math.ceil(allocatedBags / bagsAcrossRollWidth)
+          : null;
+      const totalRows =
+        bagsAlongRollLength !== null ? bagsAlongRollLength * rollCount : null;
+      const remainingRows =
+        totalRows !== null && usedRows !== null ? Math.max(totalRows - usedRows, 0) : null;
+      const remainingRollLengthMm =
+        isFabricMaterial && remainingRows !== null && bagLengthWithAllowanceMm !== null
+          ? remainingRows * bagLengthWithAllowanceMm
+          : null;
+
+      return {
+        bagsAcrossRollWidth,
+        bagsAlongRollLength,
+        bagsPerRoll,
+        actualAreaPerBagM2,
+        allocatedBags,
+        requestedAllocatedBags,
+        qtyUsedM2,
+        totalCostUsd: totalCostUsdForLine,
+        totalCostEgp: totalCostEgpForLine,
+        costPerBagEgp,
+        freightCostPerM2Egp: freightCostPerM2EgpForSource,
+        clearanceCostPerM2Egp: clearanceCostPerM2EgpForSource,
+        customsPercent: customsPercentForSource,
+        customsCostPerM2Egp: customsCostPerM2EgpForSource,
+        landedCostPerM2Egp,
+        capacityBags,
+        remainingCapacityBags:
+          remainingCapacityForThisLine !== null && allocatedBags !== null
+            ? Math.max(remainingCapacityForThisLine - allocatedBags, 0)
+            : remainingCapacityForThisLine,
+        remainingRollLengthMm,
+      } satisfies SourceLineMetrics;
+    });
+
+    return {
+      bagWidthMm,
+      bagLengthWithAllowanceMm,
+      requestedQuantity,
+      actualAreaPerBagM2:
+        totalAllocatedBags > 0 ? totalAllocatedQtyM2 / totalAllocatedBags : null,
+      materialCostPerBagEgp:
+        requestedQuantity !== null && requestedQuantity > 0 ? totalCostEgp / requestedQuantity : null,
+      totalMaterialCostEgp:
+        requestedQuantity !== null && requestedQuantity > 0 ? totalCostEgp : null,
+      totalAllocatedQtyM2: totalAllocatedQtyM2 || null,
+      weightedAverageUnitCostUsdPerM2:
+        totalAllocatedQtyM2 > 0 ? weightedUnitCostArea / totalAllocatedQtyM2 : null,
+      leadTimeDays: totalLeadTimeDays || null,
+      sourceMetrics,
+    };
+  });
+};
+
+const buildAggregateMetrics = (componentMetrics: ComponentMetrics[]) => {
+  const totalRequiredBags = componentMetrics.reduce(
+    (total, metrics) => total + (metrics.requestedQuantity ?? 0),
+    0,
+  );
+  const totalAllocatedQtyM2 = componentMetrics.reduce(
+    (total, metrics) => total + (metrics.totalAllocatedQtyM2 ?? 0),
+    0,
+  );
+  const totalMaterialCostEgp = componentMetrics.reduce(
+    (total, metrics) => total + (metrics.totalMaterialCostEgp ?? 0),
+    0,
+  );
+  const weightedUnitCostArea = componentMetrics.reduce((total, metrics) => {
+    if (
+      metrics.weightedAverageUnitCostUsdPerM2 !== null &&
+      metrics.totalAllocatedQtyM2 !== null
+    ) {
+      return total + metrics.weightedAverageUnitCostUsdPerM2 * metrics.totalAllocatedQtyM2;
+    }
+
+    return total;
+  }, 0);
+  const totalLeadTimeDays = componentMetrics.reduce(
+    (max, metrics) => Math.max(max, metrics.leadTimeDays ?? 0),
+    0,
+  );
+
+  return {
+    totalRequiredBags: totalRequiredBags || null,
+    actualAreaPerBagM2:
+      totalRequiredBags > 0 ? totalAllocatedQtyM2 / totalRequiredBags : null,
+    totalAllocatedQtyM2: totalAllocatedQtyM2 || null,
+    materialCostPerBagEgp:
+      totalRequiredBags > 0 ? totalMaterialCostEgp / totalRequiredBags : null,
+    totalMaterialCostEgp: totalMaterialCostEgp || null,
+    weightedAverageUnitCostUsdPerM2:
+      totalAllocatedQtyM2 > 0 ? weightedUnitCostArea / totalAllocatedQtyM2 : null,
+    landedCostEgpPerM2:
+      totalAllocatedQtyM2 > 0 ? totalMaterialCostEgp / totalAllocatedQtyM2 : null,
+    totalLeadTimeDays: totalLeadTimeDays || null,
+  };
+};
+
+const buildMaterialSourcingPayload = ({
+  form,
+  tenderId,
+  componentMetrics,
+  aggregate,
+  exchangeRate,
+  currencySafetyFactorPercent,
+  effectiveExchangeRate,
+  freightCostPerM2Egp,
+  otherChargesPerM2Egp,
+}: {
+  form: MaterialSourcingForm;
+  tenderId: string;
+  componentMetrics: ComponentMetrics[];
+  aggregate: ReturnType<typeof buildAggregateMetrics>;
+  exchangeRate: number | null;
+  currencySafetyFactorPercent: number | null;
+  effectiveExchangeRate: number | null;
+  freightCostPerM2Egp: number | null;
+  otherChargesPerM2Egp: number | null;
+}): MaterialSourceSelection => {
+  const componentSelections: BagBodySourcingSelection[] = form.componentSelections.map(
+    (component, componentIndex) => {
+      const metrics = componentMetrics[componentIndex];
+      const selectedSources: SelectedMaterialSource[] = component.selectedSources.map((source, sourceIndex) => {
+        const lineMetrics = metrics?.sourceMetrics[sourceIndex];
+
+        return {
+          sourceId: source.sourceId,
+          sourceName: source.sourceName,
+          sourceType: source.sourceType,
+          componentId: component.componentId,
+          componentName: component.componentName,
+          productId: component.productId,
+          productName: component.productName,
+          supplierId: source.supplierId,
+          materialId: source.materialId,
+          rollWidthM: numberOrNullMillimeterInput(source.rollWidthM),
+          rollLengthM: numberOrNullMillimeterInput(source.rollLengthM),
+          rollCount: source.sourceType === "stock" ? 1 : Math.max(1, Math.floor(numberOrNull(source.rollCount) ?? 1)),
+          landedCostEgp: numberOrNull(source.landedCostEgp),
+          customsEstimate: lineMetrics?.customsCostPerM2Egp ?? null,
+          customsPercent: numberOrNull(source.customsPercent),
+          freightCostPerM2Egp: numberOrNull(source.freightCostPerM2Egp),
+          clearanceCostPerM2Egp: numberOrNull(source.clearanceCostPerM2Egp),
+          bagsAcrossRollWidth: lineMetrics?.bagsAcrossRollWidth ?? null,
+          bagsAlongRollLength: lineMetrics?.bagsAlongRollLength ?? null,
+          bagsPerRoll: lineMetrics?.bagsPerRoll ?? null,
+          allocatedBags: lineMetrics?.allocatedBags ?? null,
+          actualAreaPerBagM2: lineMetrics?.actualAreaPerBagM2 ?? null,
+          qtyUsedM2: lineMetrics?.qtyUsedM2 ?? null,
+          unitCostUsdPerM2: numberOrNull(source.unitCostUsdPerM2),
+          totalCostUsd: lineMetrics?.totalCostUsd ?? null,
+          leadTimeDays: numberOrNull(source.leadTimeDays),
+        };
+      });
+
+      return {
+        componentId: component.componentId,
+        componentName: component.componentName,
+        productId: component.productId,
+        productName: component.productName,
+        materialId: component.materialId,
+        requestedQuantity: numberOrNull(component.requestedQuantity),
+        bagDiameterMm: numberOrNull(component.bagDiameterMm),
+        bagLengthMm: numberOrNull(component.bagLengthMm),
+        seamAllowanceMm: numberOrNull(component.seamAllowanceMm),
+        topBottomAllowanceMm: numberOrNull(component.topBottomAllowanceMm),
+        bagWidthMm: metrics?.bagWidthMm ?? null,
+        bagLengthWithAllowanceMm: metrics?.bagLengthWithAllowanceMm ?? null,
+        actualAreaPerBagM2: metrics?.actualAreaPerBagM2 ?? null,
+        materialCostPerBagEgp: metrics?.materialCostPerBagEgp ?? null,
+        totalMaterialCostEgp: metrics?.totalMaterialCostEgp ?? null,
+        selectedSources,
+      };
+    },
+  );
+
+  const flatSources = componentSelections.flatMap((selection) => selection.selectedSources);
+
+  return {
+    entityType: "MATERIAL_SOURCE_SELECTION",
+    tenantId: form.tenantId,
+    tenderId,
+    productConfigId: form.productConfigId,
+    materialId: componentSelections[0]?.materialId ?? "",
+    sourcingStrategy: form.sourcingStrategy,
+    selectedSources: flatSources,
+    componentSelections,
+    actualAreaPerBagM2: aggregate.actualAreaPerBagM2,
+    totalRequiredBags: aggregate.totalRequiredBags,
+    totalAllocatedQtyM2: aggregate.totalAllocatedQtyM2,
+    weightedAverageUnitCostUsdPerM2: aggregate.weightedAverageUnitCostUsdPerM2,
+    exchangeRate,
+    currencySafetyFactorPercent,
+    effectiveExchangeRate,
+    freightCostPerM2Egp,
+    customsCostPerM2Egp: null,
+    otherChargesPerM2Egp,
+    landedCostEgpPerM2: aggregate.landedCostEgpPerM2,
+    materialCostPerBagEgp: aggregate.materialCostPerBagEgp,
+    totalMaterialCostEgp: aggregate.totalMaterialCostEgp,
+    totalLeadTimeDays: aggregate.totalLeadTimeDays,
+    createdAt: "",
+    updatedAt: "",
+  };
+};
+
+const buildRollCalculationPayload = ({
+  form,
+  tenderId,
+  componentMetrics,
+  aggregate,
+}: {
+  form: MaterialSourcingForm;
+  tenderId: string;
+  componentMetrics: ComponentMetrics[];
+  aggregate: ReturnType<typeof buildAggregateMetrics>;
+}): RollCalculation => {
+  const preferredComponentIndex = form.componentSelections.findIndex(
+    (component) =>
+      component.bagDiameterMm.trim() ||
+      component.bagLengthMm.trim() ||
+      component.seamAllowanceMm.trim() ||
+      component.topBottomAllowanceMm.trim(),
+  );
+  const resolvedIndex = preferredComponentIndex >= 0 ? preferredComponentIndex : 0;
+  const firstComponent = form.componentSelections[resolvedIndex];
+  const firstMetrics = componentMetrics[resolvedIndex];
+
+  return {
+    entityType: "ROLL_CALCULATION",
+    tenantId: form.tenantId,
+    tenderId,
+    productConfigId: form.productConfigId,
+    bagDiameterMm: firstComponent ? numberOrNull(firstComponent.bagDiameterMm) : null,
+    bagLengthMm: firstComponent ? numberOrNull(firstComponent.bagLengthMm) : null,
+    seamAllowanceMm: firstComponent ? numberOrNull(firstComponent.seamAllowanceMm) : null,
+    topBottomAllowanceMm: firstComponent ? numberOrNull(firstComponent.topBottomAllowanceMm) : null,
+    bagWidthMm: firstMetrics?.bagWidthMm ?? null,
+    bagCuttingAreaM2: null,
+    rollWidthM: null,
+    rollLengthM: null,
+    rollAreaM2: null,
+    wastePercent: null,
+    usableRollAreaM2: null,
+    theoreticalBagsPerRoll: null,
+    actualBagsPerRoll: null,
+    actualAreaPerBagM2: aggregate.actualAreaPerBagM2,
+    totalFabricRequiredM2: aggregate.totalAllocatedQtyM2,
+    createdAt: "",
+    updatedAt: "",
+  };
+};
+
 const toMillimeterInputValue = (value: number | string | null | undefined) => {
   if (value === null || value === undefined || value === "") {
     return "";
@@ -389,6 +819,16 @@ const getRequestedAndAppliedTotals = (
     metrics?.sourceMetrics.reduce((total, line) => total + (line.allocatedBags ?? 0), 0) ?? 0;
 
   return { requested, applied };
+};
+
+const hasConfiguredProducts = (configuration: ProductConfiguration | null) => {
+  if (!configuration?.productSnapshots?.length) {
+    return false;
+  }
+
+  return configuration.productSnapshots.every(
+    (product) => product.requestedQuantity !== null && product.requestedQuantity !== undefined,
+  );
 };
 
 const SourceSelectionDrawer = ({
@@ -1771,235 +2211,10 @@ export const MaterialSourcingPage = () => {
     exchangeRate !== null && currencySafetyFactorPercent !== null
       ? exchangeRate * (1 + currencySafetyFactorPercent / 100)
       : null;
-  const componentMetrics = useMemo<ComponentMetrics[]>(() => {
-    const stockUsageBySource = new Map<string, number>();
-
-    return form.componentSelections.map((component) => {
-      const isAccessory = isAccessoryComponent(component);
-      const isFabricMaterial = isFabricMaterialCategory(getMaterialCategoryById(component.materialId, materials));
-      const bagDiameterMm = numberOrNull(component.bagDiameterMm);
-      const bagLengthMm = numberOrNull(component.bagLengthMm);
-      const seamAllowanceMm = numberOrNull(component.seamAllowanceMm);
-      const topBottomAllowanceMm = numberOrNull(component.topBottomAllowanceMm);
-      const requestedQuantity = numberOrNull(component.requestedQuantity);
-      const bagWidthMm =
-        bagDiameterMm !== null && seamAllowanceMm !== null
-          ? bagDiameterMm * Math.PI + seamAllowanceMm
-          : null;
-      const bagLengthWithAllowanceMm =
-        bagLengthMm !== null && topBottomAllowanceMm !== null
-          ? bagLengthMm + 2 * topBottomAllowanceMm
-          : null;
-
-      let totalAllocatedQtyM2 = 0;
-      let totalCostEgp = 0;
-      let weightedUnitCostArea = 0;
-      let totalAllocatedBags = 0;
-      let totalLeadTimeDays = 0;
-
-      if (isAccessory) {
-        const accessoryTotalPricePerBagEgp = numberOrNull(component.accessoryTotalPricePerBagEgp);
-        const totalMaterialCostEgp =
-          accessoryTotalPricePerBagEgp !== null && requestedQuantity !== null
-            ? accessoryTotalPricePerBagEgp * requestedQuantity
-            : null;
-
-        return {
-          bagWidthMm,
-          bagLengthWithAllowanceMm,
-          requestedQuantity,
-          actualAreaPerBagM2: null,
-          materialCostPerBagEgp: accessoryTotalPricePerBagEgp,
-          totalMaterialCostEgp,
-          totalAllocatedQtyM2: null,
-          weightedAverageUnitCostUsdPerM2: null,
-          leadTimeDays: null,
-          sourceMetrics: [],
-        };
-      }
-
-      const sourceMetrics = component.selectedSources.map((source) => {
-        const rollWidthMm = numberOrNull(source.rollWidthM);
-        const rollLengthMm = numberOrNull(source.rollLengthM);
-        const unitCostUsdPerM2 = numberOrNull(source.unitCostUsdPerM2);
-        const landedCostEgp = numberOrNull(source.landedCostEgp);
-        const leadTimeDays = numberOrNull(source.leadTimeDays);
-        const freightCostPerM2EgpForSource = numberOrNull(source.freightCostPerM2Egp) ?? 0;
-        const clearanceCostPerM2EgpForSource = numberOrNull(source.clearanceCostPerM2Egp) ?? 0;
-        const customsPercentForSource = numberOrNull(source.customsPercent) ?? 0;
-        const rollCount =
-          source.sourceType === "stock"
-            ? 1
-            : Math.max(1, Math.floor(numberOrNull(source.rollCount) ?? 1));
-
-        const bagsAcrossRollWidth =
-          isFabricMaterial && rollWidthMm !== null && bagWidthMm !== null && bagWidthMm > 0
-            ? Math.floor(rollWidthMm / bagWidthMm)
-            : null;
-        const bagsAlongRollLength =
-          isFabricMaterial && rollLengthMm !== null && bagLengthWithAllowanceMm !== null && bagLengthWithAllowanceMm > 0
-            ? Math.floor(rollLengthMm / bagLengthWithAllowanceMm)
-            : null;
-        const bagsPerRoll =
-          bagsAcrossRollWidth !== null &&
-          bagsAlongRollLength !== null &&
-          bagsAcrossRollWidth > 0 &&
-          bagsAlongRollLength > 0
-            ? bagsAcrossRollWidth * bagsAlongRollLength
-            : null;
-        const actualAreaPerBagM2 =
-          isFabricMaterial && rollWidthMm !== null && rollLengthMm !== null && bagsPerRoll !== null && bagsPerRoll > 0
-            ? squareMillimetersToSquareMeters(rollWidthMm * rollLengthMm) / bagsPerRoll
-            : null;
-        const capacityBags = isFabricMaterial
-          ? bagsPerRoll !== null
-            ? bagsPerRoll * rollCount
-            : null
-          : requestedQuantity;
-        const requestedAllocatedBags =
-          form.sourcingStrategy === "combine-sources"
-            ? (numberOrNull(source.allocatedBags) ?? 0)
-            : requestedQuantity;
-        const alreadyUsedFromStock =
-          source.sourceType === "stock" ? stockUsageBySource.get(source.sourceId) ?? 0 : 0;
-        const remainingCapacityForThisLine =
-          capacityBags !== null
-            ? Math.max(capacityBags - alreadyUsedFromStock, 0)
-            : null;
-        const allocatedBags =
-          remainingCapacityForThisLine !== null
-            ? Math.min(requestedAllocatedBags ?? 0, remainingCapacityForThisLine)
-            : requestedAllocatedBags ?? 0;
-        const qtyUsedM2 =
-          isFabricMaterial && actualAreaPerBagM2 !== null && allocatedBags !== null
-            ? actualAreaPerBagM2 * allocatedBags
-            : null;
-        const totalCostUsdForLine =
-          isFabricMaterial && qtyUsedM2 !== null && unitCostUsdPerM2 !== null
-            ? qtyUsedM2 * unitCostUsdPerM2
-            : null;
-        const convertedCostPerM2Egp =
-          isFabricMaterial && unitCostUsdPerM2 !== null && effectiveExchangeRate !== null
-            ? unitCostUsdPerM2 * effectiveExchangeRate
-            : null;
-        const customsCostPerM2EgpForSource =
-          source.sourceType === "stock"
-            ? 0
-            : convertedCostPerM2Egp !== null
-              ? convertedCostPerM2Egp * (customsPercentForSource / 100)
-              : null;
-        const landedCostPerM2Egp =
-          source.sourceType === "stock"
-            ? landedCostEgp
-            : convertedCostPerM2Egp !== null
-              ? convertedCostPerM2Egp +
-                (customsCostPerM2EgpForSource ?? 0) +
-                freightCostPerM2EgpForSource +
-                clearanceCostPerM2EgpForSource
-              : null;
-        const totalCostEgpForLine =
-          isFabricMaterial
-            ? qtyUsedM2 !== null && landedCostPerM2Egp !== null
-              ? qtyUsedM2 * landedCostPerM2Egp
-              : null
-            : allocatedBags !== null && unitCostUsdPerM2 !== null
-              ? allocatedBags * unitCostUsdPerM2
-              : null;
-        const costPerBagEgp =
-          isFabricMaterial
-            ? actualAreaPerBagM2 !== null && landedCostPerM2Egp !== null
-              ? actualAreaPerBagM2 * landedCostPerM2Egp
-              : null
-            : unitCostUsdPerM2;
-
-        if (qtyUsedM2 !== null) {
-          totalAllocatedQtyM2 += qtyUsedM2;
-        }
-
-        if (totalCostEgpForLine !== null) {
-          totalCostEgp += totalCostEgpForLine;
-        }
-
-        if (isFabricMaterial && qtyUsedM2 !== null && unitCostUsdPerM2 !== null) {
-          weightedUnitCostArea += qtyUsedM2 * unitCostUsdPerM2;
-        }
-
-        if (allocatedBags !== null) {
-          totalAllocatedBags += allocatedBags;
-        }
-
-        if (source.sourceType === "stock" && allocatedBags !== null) {
-          stockUsageBySource.set(source.sourceId, alreadyUsedFromStock + allocatedBags);
-        }
-
-        if (leadTimeDays !== null) {
-          totalLeadTimeDays = Math.max(totalLeadTimeDays, leadTimeDays);
-        }
-
-        const usedRows =
-          allocatedBags !== null &&
-          bagsAcrossRollWidth !== null &&
-          bagsAcrossRollWidth > 0
-            ? Math.ceil(allocatedBags / bagsAcrossRollWidth)
-            : null;
-        const totalRows =
-          bagsAlongRollLength !== null ? bagsAlongRollLength * rollCount : null;
-        const remainingRows =
-          totalRows !== null && usedRows !== null ? Math.max(totalRows - usedRows, 0) : null;
-        const remainingRollLengthMm =
-          isFabricMaterial && remainingRows !== null && bagLengthWithAllowanceMm !== null
-            ? remainingRows * bagLengthWithAllowanceMm
-            : null;
-
-        return {
-          bagsAcrossRollWidth,
-          bagsAlongRollLength,
-          bagsPerRoll,
-          actualAreaPerBagM2,
-          allocatedBags,
-          requestedAllocatedBags,
-          qtyUsedM2,
-          totalCostUsd: totalCostUsdForLine,
-          totalCostEgp: totalCostEgpForLine,
-          costPerBagEgp,
-          freightCostPerM2Egp: freightCostPerM2EgpForSource,
-          clearanceCostPerM2Egp: clearanceCostPerM2EgpForSource,
-          customsPercent: customsPercentForSource,
-          customsCostPerM2Egp: customsCostPerM2EgpForSource,
-          landedCostPerM2Egp,
-          capacityBags,
-          remainingCapacityBags: remainingCapacityForThisLine !== null && allocatedBags !== null
-            ? Math.max(remainingCapacityForThisLine - allocatedBags, 0)
-            : remainingCapacityForThisLine,
-          remainingRollLengthMm,
-        } satisfies SourceLineMetrics;
-      });
-
-      return {
-        bagWidthMm,
-        bagLengthWithAllowanceMm,
-        requestedQuantity,
-        actualAreaPerBagM2:
-          totalAllocatedBags > 0 ? totalAllocatedQtyM2 / totalAllocatedBags : null,
-        materialCostPerBagEgp:
-          requestedQuantity !== null && requestedQuantity > 0 ? totalCostEgp / requestedQuantity : null,
-        totalMaterialCostEgp:
-          requestedQuantity !== null && requestedQuantity > 0 ? totalCostEgp : null,
-        totalAllocatedQtyM2: totalAllocatedQtyM2 || null,
-        weightedAverageUnitCostUsdPerM2:
-          totalAllocatedQtyM2 > 0 ? weightedUnitCostArea / totalAllocatedQtyM2 : null,
-        leadTimeDays: totalLeadTimeDays || null,
-        sourceMetrics,
-      };
-    });
-  }, [
-    effectiveExchangeRate,
-    form.componentSelections,
-    form.sourcingStrategy,
-    freightCostPerM2Egp,
-    materials,
-    otherChargesPerM2Egp,
-  ]);
+  const componentMetrics = useMemo<ComponentMetrics[]>(
+    () => buildComponentMetrics(form, materials, effectiveExchangeRate),
+    [effectiveExchangeRate, form, materials],
+  );
 
   const stockUsageSummary = useMemo(() => {
     const summary = new Map<string, StockUsageSummary>();
@@ -2126,49 +2341,7 @@ export const MaterialSourcingPage = () => {
     [form.componentSelections, materials, productConfiguration],
   );
 
-  const aggregate = useMemo(() => {
-    const totalRequiredBags = componentMetrics.reduce(
-      (total, metrics) => total + (metrics.requestedQuantity ?? 0),
-      0,
-    );
-    const totalAllocatedQtyM2 = componentMetrics.reduce(
-      (total, metrics) => total + (metrics.totalAllocatedQtyM2 ?? 0),
-      0,
-    );
-    const totalMaterialCostEgp = componentMetrics.reduce(
-      (total, metrics) => total + (metrics.totalMaterialCostEgp ?? 0),
-      0,
-    );
-    const weightedUnitCostArea = componentMetrics.reduce((total, metrics) => {
-      if (
-        metrics.weightedAverageUnitCostUsdPerM2 !== null &&
-        metrics.totalAllocatedQtyM2 !== null
-      ) {
-        return total + metrics.weightedAverageUnitCostUsdPerM2 * metrics.totalAllocatedQtyM2;
-      }
-
-      return total;
-    }, 0);
-    const totalLeadTimeDays = componentMetrics.reduce(
-      (max, metrics) => Math.max(max, metrics.leadTimeDays ?? 0),
-      0,
-    );
-
-    return {
-      totalRequiredBags: totalRequiredBags || null,
-      actualAreaPerBagM2:
-        totalRequiredBags > 0 ? totalAllocatedQtyM2 / totalRequiredBags : null,
-      totalAllocatedQtyM2: totalAllocatedQtyM2 || null,
-      materialCostPerBagEgp:
-        totalRequiredBags > 0 ? totalMaterialCostEgp / totalRequiredBags : null,
-      totalMaterialCostEgp: totalMaterialCostEgp || null,
-      weightedAverageUnitCostUsdPerM2:
-        totalAllocatedQtyM2 > 0 ? weightedUnitCostArea / totalAllocatedQtyM2 : null,
-      landedCostEgpPerM2:
-        totalAllocatedQtyM2 > 0 ? totalMaterialCostEgp / totalAllocatedQtyM2 : null,
-      totalLeadTimeDays: totalLeadTimeDays || null,
-    };
-  }, [componentMetrics]);
+  const aggregate = useMemo(() => buildAggregateMetrics(componentMetrics), [componentMetrics]);
 
   const satisfiedComponentsCount = useMemo(
     () =>
@@ -2177,6 +2350,10 @@ export const MaterialSourcingPage = () => {
         return total + (status.label === "Sourced" ? 1 : 0);
       }, 0),
     [componentMetrics, form.componentSelections],
+  );
+  const showMissingProductConfigurationBanner = useMemo(
+    () => !hasConfiguredProducts(productConfiguration),
+    [productConfiguration],
   );
 
   const costBreakdownComponent =
@@ -2519,22 +2696,22 @@ export const MaterialSourcingPage = () => {
       const sourcedComponents = productSnapshot?.components.filter(isSourcedComponent) ?? [];
 
       if (!productSnapshot || !sourcedComponents.length) {
-        setForm((current) =>
-          applyTenderRateDefaults(
-            {
-              ...current,
-              productConfigId: latestConfiguration.productConfigId,
-              componentSelections: current.componentSelections.filter(
-                (component) => component.productId !== productId,
-              ),
-            },
-            latestTender,
-          ),
+        const nextForm = applyTenderRateDefaults(
+          {
+            ...form,
+            productConfigId: latestConfiguration.productConfigId,
+            componentSelections: form.componentSelections.filter(
+              (component) => component.productId !== productId,
+            ),
+          },
+          latestTender,
         );
-        setMessage(
-          `${currentProductComponents[0]?.productName ?? "This product"} no longer exists upstream, so its sourcing snapshot was removed.`,
+        await persistSyncedForm(
+          nextForm,
+          latestConfiguration,
+          latestTender,
+          `${currentProductComponents[0]?.productName ?? "This product"} no longer exists upstream, so its sourcing snapshot was removed and any reserved stock was released.`,
         );
-        setError("");
         return;
       }
 
@@ -2547,23 +2724,23 @@ export const MaterialSourcingPage = () => {
         ),
       );
 
-      setForm((current) =>
-        applyTenderRateDefaults(
-          {
-            ...current,
-            productConfigId: latestConfiguration.productConfigId,
-            componentSelections: [
-              ...current.componentSelections.filter((component) => component.productId !== productId),
-              ...syncedComponents,
-            ],
-          },
-          latestTender,
-        ),
+      const nextForm = applyTenderRateDefaults(
+        {
+          ...form,
+          productConfigId: latestConfiguration.productConfigId,
+          componentSelections: [
+            ...form.componentSelections.filter((component) => component.productId !== productId),
+            ...syncedComponents,
+          ],
+        },
+        latestTender,
       );
-      setMessage(
-        `${productSnapshot.productName} reloaded from Product Configuration. Existing sourcing rows for this product were reset.`,
+      await persistSyncedForm(
+        nextForm,
+        latestConfiguration,
+        latestTender,
+        `${productSnapshot.productName} reloaded from Product Configuration. Existing sourcing rows for this product were reset and any stock reservations tied to those rows were released.`,
       );
-      setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to sync product from Product Configuration.");
     }
@@ -2882,164 +3059,150 @@ export const MaterialSourcingPage = () => {
       setSourcePickerState(null);
       setCostBreakdownComponentIndex(null);
 
-      setForm((current) =>
-        applyTenderRateDefaults(
-          {
-            ...current,
-            productConfigId: latestConfiguration.productConfigId,
-            componentSelections: buildComponentSelectionsFromProducts(latestConfiguration, materials),
-          },
-          latestTender,
-        ),
+      const nextForm = applyTenderRateDefaults(
+        {
+          ...form,
+          productConfigId: latestConfiguration.productConfigId,
+          componentSelections: buildComponentSelectionsFromProducts(latestConfiguration, materials),
+        },
+        latestTender,
       );
-
-      setMessage(
-        "Material sourcing was refreshed from the latest Product Configuration. Product rows were reset to match upstream changes.",
+      await persistSyncedForm(
+        nextForm,
+        latestConfiguration,
+        latestTender,
+        "Material sourcing was refreshed from the latest Product Configuration. Product rows were reset to match upstream changes and any released stock reservations were cleared.",
       );
-      setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to sync products from Product Configuration.");
     }
   };
 
-  const payload = useMemo<MaterialSourceSelection>(() => {
-    const componentSelections: BagBodySourcingSelection[] = form.componentSelections.map(
-      (component, componentIndex) => {
-        const metrics = componentMetrics[componentIndex];
-        const selectedSources: SelectedMaterialSource[] = component.selectedSources.map((source, sourceIndex) => {
-          const lineMetrics = metrics?.sourceMetrics[sourceIndex];
-
-          return {
-            sourceId: source.sourceId,
-            sourceName: source.sourceName,
-            sourceType: source.sourceType,
-            componentId: component.componentId,
-            componentName: component.componentName,
-            productId: component.productId,
-            productName: component.productName,
-            supplierId: source.supplierId,
-            materialId: source.materialId,
-            rollWidthM: numberOrNullMillimeterInput(source.rollWidthM),
-            rollLengthM: numberOrNullMillimeterInput(source.rollLengthM),
-            rollCount: source.sourceType === "stock" ? 1 : Math.max(1, Math.floor(numberOrNull(source.rollCount) ?? 1)),
-            landedCostEgp: numberOrNull(source.landedCostEgp),
-            customsEstimate: lineMetrics?.customsCostPerM2Egp ?? null,
-            customsPercent: numberOrNull(source.customsPercent),
-            freightCostPerM2Egp: numberOrNull(source.freightCostPerM2Egp),
-            clearanceCostPerM2Egp: numberOrNull(source.clearanceCostPerM2Egp),
-            bagsAcrossRollWidth: lineMetrics?.bagsAcrossRollWidth ?? null,
-            bagsAlongRollLength: lineMetrics?.bagsAlongRollLength ?? null,
-            bagsPerRoll: lineMetrics?.bagsPerRoll ?? null,
-            allocatedBags: lineMetrics?.allocatedBags ?? null,
-            actualAreaPerBagM2: lineMetrics?.actualAreaPerBagM2 ?? null,
-            qtyUsedM2: lineMetrics?.qtyUsedM2 ?? null,
-            unitCostUsdPerM2: numberOrNull(source.unitCostUsdPerM2),
-            totalCostUsd: lineMetrics?.totalCostUsd ?? null,
-            leadTimeDays: numberOrNull(source.leadTimeDays),
-          };
-        });
-
-        return {
-          componentId: component.componentId,
-          componentName: component.componentName,
-          productId: component.productId,
-          productName: component.productName,
-          materialId: component.materialId,
-          requestedQuantity: numberOrNull(component.requestedQuantity),
-          bagDiameterMm: numberOrNull(component.bagDiameterMm),
-          bagLengthMm: numberOrNull(component.bagLengthMm),
-          seamAllowanceMm: numberOrNull(component.seamAllowanceMm),
-          topBottomAllowanceMm: numberOrNull(component.topBottomAllowanceMm),
-          bagWidthMm: metrics?.bagWidthMm ?? null,
-          bagLengthWithAllowanceMm: metrics?.bagLengthWithAllowanceMm ?? null,
-          actualAreaPerBagM2: metrics?.actualAreaPerBagM2 ?? null,
-          materialCostPerBagEgp: metrics?.materialCostPerBagEgp ?? null,
-          totalMaterialCostEgp: metrics?.totalMaterialCostEgp ?? null,
-          selectedSources,
-        };
-      },
-    );
-
-    const flatSources = componentSelections.flatMap((selection) => selection.selectedSources);
-
-    return {
-      entityType: "MATERIAL_SOURCE_SELECTION",
-      tenantId: form.tenantId,
-      tenderId,
-      productConfigId: form.productConfigId,
-      materialId: componentSelections[0]?.materialId ?? "",
-      sourcingStrategy: form.sourcingStrategy,
-      selectedSources: flatSources,
-      componentSelections,
-      actualAreaPerBagM2: aggregate.actualAreaPerBagM2,
-      totalRequiredBags: aggregate.totalRequiredBags,
-      totalAllocatedQtyM2: aggregate.totalAllocatedQtyM2,
-      weightedAverageUnitCostUsdPerM2: aggregate.weightedAverageUnitCostUsdPerM2,
-      exchangeRate,
+  const payload = useMemo<MaterialSourceSelection>(
+    () =>
+      buildMaterialSourcingPayload({
+        form,
+        tenderId,
+        componentMetrics,
+        aggregate,
+        exchangeRate,
+        currencySafetyFactorPercent,
+        effectiveExchangeRate,
+        freightCostPerM2Egp,
+        otherChargesPerM2Egp,
+      }),
+    [
+      aggregate,
+      componentMetrics,
       currencySafetyFactorPercent,
       effectiveExchangeRate,
+      exchangeRate,
+      form,
       freightCostPerM2Egp,
-      customsCostPerM2Egp: null,
       otherChargesPerM2Egp,
-      landedCostEgpPerM2: aggregate.landedCostEgpPerM2,
-      materialCostPerBagEgp: aggregate.materialCostPerBagEgp,
-      totalMaterialCostEgp: aggregate.totalMaterialCostEgp,
-      totalLeadTimeDays: aggregate.totalLeadTimeDays,
-      createdAt: "",
-      updatedAt: "",
-    };
-  }, [
-    aggregate,
-    componentMetrics,
-    currencySafetyFactorPercent,
-    effectiveExchangeRate,
-    exchangeRate,
-    form,
-    freightCostPerM2Egp,
-    otherChargesPerM2Egp,
-    tenderId,
-  ]);
+      tenderId,
+    ],
+  );
   const currentSignature = useMemo(() => JSON.stringify(form), [form]);
   const isDirty = currentSignature !== lastSavedSignature;
 
   useUnsavedChangesWarning(isDirty);
 
-  const rollPayload = useMemo<RollCalculation>(() => {
-    const preferredComponentIndex = form.componentSelections.findIndex(
-      (component) =>
-        component.bagDiameterMm.trim() ||
-        component.bagLengthMm.trim() ||
-        component.seamAllowanceMm.trim() ||
-        component.topBottomAllowanceMm.trim(),
-    );
-    const resolvedIndex = preferredComponentIndex >= 0 ? preferredComponentIndex : 0;
-    const firstComponent = form.componentSelections[resolvedIndex];
-    const firstMetrics = componentMetrics[resolvedIndex];
+  const rollPayload = useMemo<RollCalculation>(
+    () =>
+      buildRollCalculationPayload({
+        form,
+        tenderId,
+        componentMetrics,
+        aggregate,
+      }),
+    [aggregate, componentMetrics, form, tenderId],
+  );
 
-    return {
-      entityType: "ROLL_CALCULATION",
-      tenantId: form.tenantId,
+  const refreshStockItems = async () => {
+    const loadedStock = await api.get<StockItem[]>(`/stock?tenantId=alimex-demo`);
+    const activeStockItems = loadedStock.filter((item) => item.active);
+    setStockItems(activeStockItems);
+    return activeStockItems;
+  };
+
+  const persistSyncedForm = async (
+    nextForm: MaterialSourcingForm,
+    latestConfiguration: ProductConfiguration,
+    latestTender: TenderRequest,
+    successMessage: string,
+  ) => {
+    const nextExchangeRate = numberOrNull(nextForm.exchangeRate);
+    const nextCurrencySafetyFactorPercent = numberOrNull(nextForm.currencySafetyFactorPercent);
+    const nextFreightCostPerM2Egp = numberOrNull(nextForm.freightCostPerM2Egp);
+    const nextOtherChargesPerM2Egp = numberOrNull(nextForm.otherChargesPerM2Egp);
+    const nextEffectiveExchangeRate =
+      nextExchangeRate !== null && nextCurrencySafetyFactorPercent !== null
+        ? nextExchangeRate * (1 + nextCurrencySafetyFactorPercent / 100)
+        : null;
+    const nextComponentMetrics = buildComponentMetrics(
+      nextForm,
+      materials,
+      nextEffectiveExchangeRate,
+    );
+    const nextAggregate = buildAggregateMetrics(nextComponentMetrics);
+    const nextPayload = buildMaterialSourcingPayload({
+      form: nextForm,
       tenderId,
-      productConfigId: form.productConfigId,
-      bagDiameterMm: firstComponent ? numberOrNull(firstComponent.bagDiameterMm) : null,
-      bagLengthMm: firstComponent ? numberOrNull(firstComponent.bagLengthMm) : null,
-      seamAllowanceMm: firstComponent ? numberOrNull(firstComponent.seamAllowanceMm) : null,
-      topBottomAllowanceMm: firstComponent ? numberOrNull(firstComponent.topBottomAllowanceMm) : null,
-      bagWidthMm: firstMetrics?.bagWidthMm ?? null,
-      bagCuttingAreaM2: null,
-      rollWidthM: null,
-      rollLengthM: null,
-      rollAreaM2: null,
-      wastePercent: null,
-      usableRollAreaM2: null,
-      theoreticalBagsPerRoll: null,
-      actualBagsPerRoll: null,
-      actualAreaPerBagM2: aggregate.actualAreaPerBagM2,
-      totalFabricRequiredM2: aggregate.totalAllocatedQtyM2,
-      createdAt: "",
-      updatedAt: "",
-    };
-  }, [aggregate.actualAreaPerBagM2, aggregate.totalAllocatedQtyM2, componentMetrics, form, tenderId]);
+      componentMetrics: nextComponentMetrics,
+      aggregate: nextAggregate,
+      exchangeRate: nextExchangeRate,
+      currencySafetyFactorPercent: nextCurrencySafetyFactorPercent,
+      effectiveExchangeRate: nextEffectiveExchangeRate,
+      freightCostPerM2Egp: nextFreightCostPerM2Egp,
+      otherChargesPerM2Egp: nextOtherChargesPerM2Egp,
+    });
+
+    if (nextForm.componentSelections.length) {
+      await api.put<RollCalculation>(
+        `/tenders/${tenderId}/roll-calculation`,
+        buildRollCalculationPayload({
+          form: nextForm,
+          tenderId,
+          componentMetrics: nextComponentMetrics,
+          aggregate: nextAggregate,
+        }),
+      );
+    }
+
+    const [response, activeStockItems] = await Promise.all([
+      api.put<MaterialSourceSelection>(`/tenders/${tenderId}/material-sourcing`, nextPayload),
+      refreshStockItems(),
+    ]);
+
+    const responseForm = enrichComponentSelectionsFromConfiguration(
+      toForm(response),
+      latestConfiguration,
+      materials,
+    );
+    const persistedForm = applyTenderRateDefaults(
+      {
+        ...responseForm,
+        componentSelections: responseForm.componentSelections.map((component) =>
+          hydrateComponentSourcesFromOptions(
+            component,
+            activeStockItems,
+            importPresets,
+            suppliers,
+            materials,
+            component.materialId || latestConfiguration.mainFabricMaterialId || "",
+          ),
+        ),
+      },
+      latestTender,
+      response,
+    );
+
+    setForm(persistedForm);
+    setLastSavedSignature(JSON.stringify(persistedForm));
+    setMessage(successMessage);
+    setError("");
+  };
 
   const save = async (mode: "draft" | "continue") => {
     setError("");
@@ -3052,7 +3215,7 @@ export const MaterialSourcingPage = () => {
       return;
     }
 
-    if (!form.componentSelections.length) {
+    if (mode === "continue" && !form.componentSelections.length) {
       setError("Add at least one component in product configuration first.");
       setSaveMode(null);
       return;
@@ -3107,7 +3270,9 @@ export const MaterialSourcingPage = () => {
     }
 
     try {
-      await api.put<RollCalculation>(`/tenders/${tenderId}/roll-calculation`, rollPayload);
+      if (form.componentSelections.length) {
+        await api.put<RollCalculation>(`/tenders/${tenderId}/roll-calculation`, rollPayload);
+      }
       const response = await api.put<MaterialSourceSelection>(
         `/tenders/${tenderId}/material-sourcing`,
         payload,
@@ -3160,6 +3325,30 @@ export const MaterialSourcingPage = () => {
 
             {!isLoading ? (
               <>
+                {showMissingProductConfigurationBanner ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-semibold text-amber-950">
+                          Product Configuration needs at least one selected product with Requested Quantity set.
+                        </p>
+                        <p className="mt-1">
+                          You can still save a draft here, but this workflow will not be ready to progress until at least one product is selected and every selected product has Requested Quantity defined.
+                        </p>
+                      </div>
+                      <Button
+                        className="w-full sm:w-auto"
+                        type="button"
+                        variant="outline"
+                        onClick={() => navigate(`/tenders/${tenderId}/product-configuration`)}
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        Open Product Configuration
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+
                 <TenderSummaryBar
                   totalTenderCost={aggregate.totalMaterialCostEgp}
                   satisfiedCount={satisfiedComponentsCount}

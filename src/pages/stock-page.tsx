@@ -10,7 +10,7 @@ import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { api, isApiConfigured } from "../lib/api";
-import type { Material, StockItem, Supplier } from "../../shared/types";
+import type { Material, StockItem, StockReservationStatus, Supplier } from "../../shared/types";
 
 const toMillimeterInputValue = (value: number | string | null | undefined) => {
   if (value === null || value === undefined || value === "") {
@@ -45,12 +45,19 @@ type StockForm = Omit<
   | "rollLengthM"
   | "unitCostUsdPerM2"
   | "landedCostEgp"
+  | "reservationStatus"
 > & {
   unitCount: string;
   rollWidthM: string;
   rollLengthM: string;
   unitCostUsdPerM2: string;
   landedCostEgp: string;
+  reservationStatus: "" | StockReservationStatus;
+};
+
+const reservationStatusLabels: Record<StockReservationStatus, string> = {
+  reserved: "Reserved",
+  unavailable: "Unavailable",
 };
 
 const initialForm: StockForm = {
@@ -63,6 +70,10 @@ const initialForm: StockForm = {
   rollLengthM: "",
   unitCostUsdPerM2: "",
   landedCostEgp: "",
+  reservationStatus: "",
+  reservedForTenderId: null,
+  reservedForTenderNumber: null,
+  reservedAt: null,
   active: true,
 };
 
@@ -76,8 +87,33 @@ const toForm = (record: StockItem): StockForm => ({
   rollLengthM: toMillimeterInputValue(record.rollLengthM),
   unitCostUsdPerM2: record.unitCostUsdPerM2?.toString() ?? "",
   landedCostEgp: record.landedCostEgp?.toString() ?? "",
+  reservationStatus: record.reservationStatus ?? "",
+  reservedForTenderId: record.reservedForTenderId ?? null,
+  reservedForTenderNumber: record.reservedForTenderNumber ?? null,
+  reservedAt: record.reservedAt ?? null,
   active: record.active,
 });
+
+const formatReservationStatus = (record: StockItem) => {
+  if (!record.reservationStatus) {
+    return {
+      label: "Available",
+      detail: "Not reserved",
+      tone: "text-emerald-700 bg-emerald-50 border-emerald-200",
+    };
+  }
+
+  const tenderReference = record.reservedForTenderNumber || record.reservedForTenderId;
+
+  return {
+    label: reservationStatusLabels[record.reservationStatus],
+    detail: tenderReference ? `Tender ${tenderReference}` : "No tender linked",
+    tone:
+      record.reservationStatus === "unavailable"
+        ? "text-rose-700 bg-rose-50 border-rose-200"
+        : "text-amber-700 bg-amber-50 border-amber-200",
+  };
+};
 
 export const StockPage = () => {
   const [records, setRecords] = useState<StockItem[]>([]);
@@ -131,6 +167,9 @@ export const StockPage = () => {
           record.stockId,
           supplierName,
           materialName,
+          record.reservationStatus ?? "",
+          record.reservedForTenderNumber ?? "",
+          record.reservedForTenderId ?? "",
           record.unitCount?.toString() ?? "",
           record.rollWidthM?.toString() ?? "",
           record.rollLengthM?.toString() ?? "",
@@ -166,6 +205,10 @@ export const StockPage = () => {
       unitCostUsdPerM2:
         form.unitCostUsdPerM2.trim() === "" ? null : Number(form.unitCostUsdPerM2),
       landedCostEgp: form.landedCostEgp.trim() === "" ? null : Number(form.landedCostEgp),
+      reservationStatus: form.reservationStatus || null,
+      reservedForTenderId: form.reservationStatus ? form.reservedForTenderId ?? null : null,
+      reservedForTenderNumber: form.reservationStatus ? form.reservedForTenderNumber ?? null : null,
+      reservedAt: form.reservationStatus ? form.reservedAt ?? null : null,
       active: form.active,
       createdAt: "",
       updatedAt: "",
@@ -224,54 +267,82 @@ export const StockPage = () => {
               description="Add a stock record to represent currently available supplier material."
             />
           ) : (
-            <Table>
+            <Table className="min-w-[1120px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Stock Item</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead>Material</TableHead>
-                  <TableHead>Roll Width (mm)</TableHead>
-                  <TableHead>Roll Length (mm)</TableHead>
-                  <TableHead>Cost</TableHead>
-                  <TableHead>Landing Cost EGP / m²</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead className="text-right">Roll Width (mm)</TableHead>
+                  <TableHead className="text-right">Roll Length (mm)</TableHead>
+                  <TableHead className="text-right">Cost</TableHead>
+                  <TableHead className="text-right">Landing Cost EGP / m²</TableHead>
+                  <TableHead>Reservation</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((record) => (
-                  <TableRow key={record.stockId}>
-                    <TableCell>
-                      <p className="font-medium text-slate-900">{record.stockId}</p>
+                  <TableRow key={record.stockId} className="[&>td]:align-middle">
+                    <TableCell className="w-[280px]">
+                      <p className="break-all font-medium leading-6 text-slate-900">{record.stockId}</p>
                       <p className="text-xs text-muted-foreground">In-stock material record</p>
                     </TableCell>
-                    <TableCell>{supplierMap[record.supplierId] ?? record.supplierId ?? "-"}</TableCell>
-                    <TableCell>{materialMap[record.materialId] ?? record.materialId ?? "-"}</TableCell>
-                    <TableCell>{toMillimeterInputValue(record.rollWidthM) || "-"}</TableCell>
-                    <TableCell>{toMillimeterInputValue(record.rollLengthM) || "-"}</TableCell>
-                    <TableCell>
+                    <TableCell className="whitespace-nowrap font-medium text-slate-800">
+                      {supplierMap[record.supplierId] ?? record.supplierId ?? "-"}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap font-medium text-slate-800">
+                      {materialMap[record.materialId] ?? record.materialId ?? "-"}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-right font-medium tabular-nums text-slate-800">
+                      {toMillimeterInputValue(record.rollWidthM) || "-"}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-right font-medium tabular-nums text-slate-800">
+                      {toMillimeterInputValue(record.rollLengthM) || "-"}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">
                       {record.unitCostUsdPerM2 !== null
                         ? `${record.unitCostUsdPerM2.toFixed(3)} USD/m²`
                         : "-"}
                     </TableCell>
-                    <TableCell>{record.landedCostEgp !== null ? `${record.landedCostEgp.toFixed(2)} EGP` : "-"}</TableCell>
-                    <TableCell><StatusBadge active={record.active} /></TableCell>
-                    <TableCell className="space-x-2">
-                      <Button
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                        onClick={() => {
-                          setEditing(record);
-                          setForm(toForm(record));
-                          setOpen(true);
-                        }}
-                      >
-                        Edit
-                      </Button>
-                      <Button size="sm" type="button" variant="outline" onClick={() => void archive(record)}>
-                        {record.active ? "Archive" : "Delete"}
-                      </Button>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">
+                      {record.landedCostEgp !== null ? `${record.landedCostEgp.toFixed(2)} EGP` : "-"}
+                    </TableCell>
+                    <TableCell className="w-[190px]">
+                      {(() => {
+                        const reservation = formatReservationStatus(record);
+                        return (
+                          <div className={`inline-flex w-full max-w-[170px] flex-col rounded-2xl border px-3 py-2 leading-tight ${reservation.tone}`}>
+                            <span className="text-sm font-semibold">{reservation.label}</span>
+                            <span className="mt-1 truncate text-xs opacity-90">{reservation.detail}</span>
+                          </div>
+                        );
+                      })()}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex justify-center">
+                        <StatusBadge active={record.active} />
+                      </div>
+                    </TableCell>
+                    <TableCell className="w-[180px]">
+                      <div className="flex justify-end gap-2 whitespace-nowrap">
+                        <Button
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                          onClick={() => {
+                            setEditing(record);
+                            setForm(toForm(record));
+                            setOpen(true);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button size="sm" type="button" variant="outline" onClick={() => void archive(record)}>
+                          {record.active ? "Archive" : "Delete"}
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -353,6 +424,27 @@ export const StockPage = () => {
                 setForm((current) => ({ ...current, landedCostEgp: event.target.value }))
               }
             />
+          </label>
+          <label className="space-y-2 text-sm font-medium text-slate-700">
+            Reservation
+            <Select
+              value={form.reservationStatus}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  reservationStatus: event.target.value as StockForm["reservationStatus"],
+                }))
+              }
+            >
+              <option value="">Available</option>
+              <option value="reserved">Reserved</option>
+              <option value="unavailable">Unavailable</option>
+            </Select>
+            {editing?.reservedForTenderNumber || editing?.reservedForTenderId ? (
+              <p className="text-xs text-muted-foreground">
+                Linked tender: {editing.reservedForTenderNumber || editing.reservedForTenderId}
+              </p>
+            ) : null}
           </label>
           <label className="flex items-center gap-3 rounded-2xl border border-border bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
             <input checked={form.active} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />

@@ -352,26 +352,28 @@ export const AccessoriesPage = () => {
           {filtered.length === 0 ? (
             <EmptyState title="No accessories found" description="Create accessory master data to reuse in product configurations." />
           ) : (
-            <Table>
+            <Table className="min-w-[980px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Accessory</TableHead>
                   <TableHead>Type / Category</TableHead>
-                  <TableHead>Total Price Per Bag (EGP)</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead className="text-right">Total Price Per Bag (EGP)</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((record) => (
-                  <TableRow key={record.accessoryId}>
-                    <TableCell><p className="font-medium text-slate-900">{record.accessoryName}</p><p className="text-xs text-muted-foreground">{record.accessoryId}</p></TableCell>
+                  <TableRow key={record.accessoryId} className="[&>td]:align-middle">
+                    <TableCell className="w-[280px]"><p className="font-medium text-slate-900">{record.accessoryName}</p><p className="text-xs text-muted-foreground">{record.accessoryId}</p></TableCell>
                     <TableCell>{record.pricingItems.map((item) => item.key).filter(Boolean).join(", ") || "-"}</TableCell>
-                    <TableCell>{record.totalPricePerBagEgp !== null ? `${record.totalPricePerBagEgp.toFixed(2)} EGP` : "-"}</TableCell>
-                    <TableCell><StatusBadge active={record.active} /></TableCell>
-                    <TableCell className="space-x-2">
-                      <Button size="sm" variant="ghost" type="button" onClick={() => openEdit(record)}>Edit</Button>
-                      <Button size="sm" variant="outline" type="button" onClick={() => void archive(record)}>{record.active ? "Archive" : "Delete"}</Button>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">{record.totalPricePerBagEgp !== null ? `${record.totalPricePerBagEgp.toFixed(2)} EGP` : "-"}</TableCell>
+                    <TableCell className="text-center"><div className="flex justify-center"><StatusBadge active={record.active} /></div></TableCell>
+                    <TableCell className="w-[180px]">
+                      <div className="flex justify-end gap-2 whitespace-nowrap">
+                        <Button size="sm" variant="ghost" type="button" onClick={() => openEdit(record)}>Edit</Button>
+                        <Button size="sm" variant="outline" type="button" onClick={() => void archive(record)}>{record.active ? "Archive" : "Delete"}</Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

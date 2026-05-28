@@ -323,31 +323,37 @@ export const MaterialsPage = () => {
               description="Add a material to start building reusable pricing inputs."
             />
           ) : (
-            <Table>
+            <Table className="min-w-[920px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Material</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Base Material</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead className="text-center">Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((record) => (
-                  <TableRow key={record.materialId}>
-                    <TableCell>
+                  <TableRow key={record.materialId} className="[&>td]:align-middle">
+                    <TableCell className="w-[300px]">
                       <p className="font-medium text-slate-900">{record.materialName}</p>
                       <p className="text-xs text-muted-foreground">{record.materialId}</p>
                     </TableCell>
-                    <TableCell>{materialCategoryLabels[record.category]}</TableCell>
-                    <TableCell>{record.baseMaterial || "-"}</TableCell>
-                    <TableCell><StatusBadge active={record.active} /></TableCell>
-                    <TableCell className="space-x-2">
-                      <Button size="sm" variant="ghost" onClick={() => openEdit(record)} type="button">Edit</Button>
-                      <Button size="sm" variant="outline" onClick={() => void archive(record)} type="button">
+                    <TableCell className="whitespace-nowrap font-medium text-slate-800">{materialCategoryLabels[record.category]}</TableCell>
+                    <TableCell className="text-slate-700">{record.baseMaterial || "-"}</TableCell>
+                    <TableCell className="text-center">
+                      <div className="flex justify-center">
+                        <StatusBadge active={record.active} />
+                      </div>
+                    </TableCell>
+                    <TableCell className="w-[180px]">
+                      <div className="flex justify-end gap-2 whitespace-nowrap">
+                        <Button size="sm" variant="ghost" onClick={() => openEdit(record)} type="button">Edit</Button>
+                        <Button size="sm" variant="outline" onClick={() => void archive(record)} type="button">
                         {record.active ? "Archive" : "Delete"}
-                      </Button>
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
