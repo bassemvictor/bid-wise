@@ -433,6 +433,28 @@ test("saves material sourcing with tender-based keys and updates tender status",
           return {};
         }
 
+        if (key.PK === "TENANT#tenant-a" && key.SK === "STOCK#stock-FAB-1") {
+          return {
+            Item: {
+              PK: "TENANT#tenant-a",
+              SK: "STOCK#stock-FAB-1",
+              entityType: "STOCK_ITEM",
+              tenantId: "tenant-a",
+              stockId: "stock-FAB-1",
+              supplierId: "SUP-1",
+              materialId: "FAB-1",
+              unitCount: 1,
+              rollWidthM: 1.8,
+              rollLengthM: 200,
+              unitCostUsdPerM2: 1.2,
+              landedCostEgp: 60,
+              active: true,
+              createdAt: "2026-05-13T10:00:00.000Z",
+              updatedAt: "2026-05-13T10:00:00.000Z",
+            },
+          };
+        }
+
         return {
           Item: {
             PK: "TENANT#tenant-a",
@@ -540,6 +562,13 @@ test("saves material sourcing with tender-based keys and updates tender status",
   assert.equal(sourcingItem.SK, "MATERIAL_SOURCE#base");
   assert.equal(sourcingItem.entityType, "MATERIAL_SOURCE_SELECTION");
 
+  const reservedStockItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "STOCK#stock-FAB-1")
+    ?.input?.Item as Record<string, unknown>;
+  assert.equal(reservedStockItem.PK, "TENANT#tenant-a");
+  assert.equal(reservedStockItem.reservationStatus, "reserved");
+  assert.equal(reservedStockItem.reservedForTenderId, "TDR-5001");
+  assert.equal(reservedStockItem.reservedForTenderNumber, "TEN-3");
+
   const auditItem = putCommands.find(
     (command) =>
       (command.input?.Item as Record<string, unknown>)?.entityType === "USER_ACTIVITY_AUDIT_LOG" &&
@@ -561,6 +590,272 @@ test("saves material sourcing with tender-based keys and updates tender status",
   assert.equal(body.PK, undefined);
   assert.equal(body.SK, undefined);
   assert.equal(body.entityType, "MATERIAL_SOURCE_SELECTION");
+});
+
+test("blocks reserving stock already used by another tender", async () => {
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      if (command.constructor.name === "GetCommand") {
+        const key = command.input?.Key as Record<string, string>;
+
+        if (key.PK === "TENDER#TDR-5002") {
+          return {};
+        }
+
+        if (key.PK === "TENANT#tenant-a" && key.SK === "STOCK#stock-FAB-2") {
+          return {
+            Item: {
+              PK: "TENANT#tenant-a",
+              SK: "STOCK#stock-FAB-2",
+              entityType: "STOCK_ITEM",
+              tenantId: "tenant-a",
+              stockId: "stock-FAB-2",
+              supplierId: "SUP-2",
+              materialId: "FAB-2",
+              unitCount: 1,
+              rollWidthM: 1.8,
+              rollLengthM: 120,
+              unitCostUsdPerM2: 1.1,
+              landedCostEgp: 55,
+              reservedForTenderId: "TDR-OTHER",
+              reservedForTenderNumber: "TEN-OTHER",
+              reservedAt: "2026-05-13T11:00:00.000Z",
+              active: true,
+              createdAt: "2026-05-13T10:00:00.000Z",
+              updatedAt: "2026-05-13T10:00:00.000Z",
+            },
+          };
+        }
+
+        return {
+          Item: {
+            PK: "TENANT#tenant-a",
+            SK: "TENDER#TDR-5002",
+            GSI1PK: "TENANT#tenant-a#TENDERS",
+            GSI1SK: "UPDATED#2026-05-13T10:00:00.000Z",
+            entityType: "TENDER_REQUEST",
+            tenderId: "TDR-5002",
+            tenantId: "tenant-a",
+            customerName: "Acme",
+            tenderNumber: "TEN-5002",
+            internalInquiryNumber: "INQ-5002",
+            tenderDueDate: "2026-06-03",
+            requestType: "inquiry",
+            requestedMaterial: "Foil",
+            bagDiameterMm: 220,
+            bagLengthMm: 700,
+            topDesign: "Top A",
+            bottomDesign: "Bottom A",
+            accessoriesMaterial: "ACC",
+            requestedMaterialNotes: "",
+            knownRequiredPrice: null,
+            knownCompetitorPrice: null,
+            customerCommissionPercent: null,
+            priceNegotiationExpected: false,
+            requestedDeliveryTime: "14 days",
+            deliveryPlace: "factory",
+            transportationRequired: false,
+            installationRequired: false,
+            notes: "",
+            status: "MATERIAL_ROLL_CALCULATION",
+            createdAt: "2026-05-13T10:00:00.000Z",
+            updatedAt: "2026-05-13T10:00:00.000Z",
+          },
+        };
+      }
+
+      return {};
+    }) as DynamoDBDocumentClient,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/tenders/TDR-5002/material-sourcing",
+        pathParameters: { tenderId: "TDR-5002", section: "material-sourcing" },
+        queryStringParameters: { tenantId: "tenant-a" },
+        requestContext: { http: { method: "PUT" } },
+        body: JSON.stringify({
+          productConfigId: "base",
+          materialId: "FAB-2",
+          sourcingStrategy: "single-source",
+          selectedSources: [
+            {
+              sourceId: "stock-FAB-2",
+              sourceName: "Reserved stock",
+              sourceType: "stock",
+            },
+          ],
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 409);
+  assert.match(response.body ?? "", /is reserved by tender TEN-OTHER/);
+});
+
+test("marks reserved stock as unavailable when pricing approval approves the tender", async () => {
+  const seenCommands: MockCommand[] = [];
+
+  setHandlerClientsForTesting(
+    createMockClient((command) => {
+      seenCommands.push(command);
+
+      if (command.constructor.name === "GetCommand") {
+        const key = command.input?.Key as Record<string, string>;
+
+        if (key.PK === "TENDER#TDR-5100" && key.SK === "MATERIAL_SOURCE#base") {
+          return {
+            Item: {
+              PK: "TENDER#TDR-5100",
+              SK: "MATERIAL_SOURCE#base",
+              entityType: "MATERIAL_SOURCE_SELECTION",
+              tenantId: "tenant-a",
+              tenderId: "TDR-5100",
+              productConfigId: "base",
+              materialId: "FAB-1",
+              sourcingStrategy: "single-source",
+              selectedSources: [
+                {
+                  sourceId: "stock-FAB-9",
+                  sourceName: "Reserved stock",
+                  sourceType: "stock",
+                },
+              ],
+              componentSelections: [],
+              totalAllocatedQtyM2: 100,
+              weightedAverageUnitCostUsdPerM2: 1.2,
+              exchangeRate: 50,
+              currencySafetyFactorPercent: 3,
+              effectiveExchangeRate: 51.5,
+              freightCostPerM2Egp: 0,
+              customsCostPerM2Egp: 0,
+              otherChargesPerM2Egp: 0,
+              landedCostEgpPerM2: 60,
+              materialCostPerBagEgp: 10,
+              totalMaterialCostEgp: 1000,
+              totalLeadTimeDays: 0,
+              createdAt: "2026-05-13T10:00:00.000Z",
+              updatedAt: "2026-05-13T10:00:00.000Z",
+            },
+          };
+        }
+
+        if (key.PK === "TENANT#tenant-a" && key.SK === "STOCK#stock-FAB-9") {
+          return {
+            Item: {
+              PK: "TENANT#tenant-a",
+              SK: "STOCK#stock-FAB-9",
+              entityType: "STOCK_ITEM",
+              tenantId: "tenant-a",
+              stockId: "stock-FAB-9",
+              supplierId: "SUP-9",
+              materialId: "FAB-1",
+              unitCount: 1,
+              rollWidthM: 1.8,
+              rollLengthM: 200,
+              unitCostUsdPerM2: 1.2,
+              landedCostEgp: 60,
+              reservationStatus: "reserved",
+              reservedForTenderId: "TDR-5100",
+              reservedForTenderNumber: "TEN-5100",
+              reservedAt: "2026-05-13T11:00:00.000Z",
+              active: true,
+              createdAt: "2026-05-13T10:00:00.000Z",
+              updatedAt: "2026-05-13T10:00:00.000Z",
+            },
+          };
+        }
+
+        if (key.PK === "TENDER#TDR-5100") {
+          return {};
+        }
+
+        return {
+          Item: {
+            PK: "TENANT#tenant-a",
+            SK: "TENDER#TDR-5100",
+            GSI1PK: "TENANT#tenant-a#TENDERS",
+            GSI1SK: "UPDATED#2026-05-13T10:00:00.000Z",
+            entityType: "TENDER_REQUEST",
+            tenderId: "TDR-5100",
+            tenantId: "tenant-a",
+            customerName: "Acme",
+            tenderNumber: "TEN-5100",
+            internalInquiryNumber: "INQ-5100",
+            tenderDueDate: "2026-06-03",
+            requestType: "inquiry",
+            requestedMaterial: "Foil",
+            bagDiameterMm: 220,
+            bagLengthMm: 700,
+            topDesign: "Top A",
+            bottomDesign: "Bottom A",
+            accessoriesMaterial: "ACC",
+            requestedMaterialNotes: "",
+            knownRequiredPrice: null,
+            knownCompetitorPrice: null,
+            customerCommissionPercent: null,
+            priceNegotiationExpected: false,
+            requestedDeliveryTime: "14 days",
+            deliveryPlace: "factory",
+            transportationRequired: false,
+            installationRequired: false,
+            notes: "",
+            status: "PENDING_APPROVAL",
+            createdAt: "2026-05-13T10:00:00.000Z",
+            updatedAt: "2026-05-13T10:00:00.000Z",
+          },
+        };
+      }
+
+      return {};
+    }) as DynamoDBDocumentClient,
+  );
+
+  const response = asHttpResponse(
+    await handler(
+      {
+        rawPath: "/tenders/TDR-5100/pricing-approval",
+        pathParameters: { tenderId: "TDR-5100", section: "pricing-approval" },
+        queryStringParameters: { tenantId: "tenant-a" },
+        requestContext: { http: { method: "PUT" } },
+        body: JSON.stringify({
+          approvalId: "base",
+          currency: "EGP",
+          approvalsOpen: 1,
+          status: "approved",
+          decisions: [
+            {
+              scenarioId: "SCN-1",
+              label: "Scenario 1",
+              status: "approved",
+              pricePerBag: 100,
+              totalPrice: 10000,
+            },
+          ],
+        }),
+      } as never,
+      {} as never,
+      {} as never,
+    ),
+  );
+
+  assert.equal(response.statusCode, 200);
+
+  const putCommands = seenCommands.filter((command) => command.constructor.name === "PutCommand");
+  const stockReservationWrite = putCommands.find(
+    (command) => (command.input?.Item as Record<string, unknown>)?.SK === "STOCK#stock-FAB-9",
+  )?.input?.Item as Record<string, unknown>;
+  assert.equal(stockReservationWrite.reservationStatus, "unavailable");
+  assert.equal(stockReservationWrite.reservedForTenderId, "TDR-5100");
+  assert.equal(stockReservationWrite.reservedForTenderNumber, "TEN-5100");
+
+  const tenderItem = putCommands.find((command) => (command.input?.Item as Record<string, unknown>)?.SK === "TENDER#TDR-5100")
+    ?.input?.Item as Record<string, unknown>;
+  assert.equal(tenderItem.status, "APPROVED");
 });
 
 test("saves cost build-up with tender-based keys and updates tender status", async () => {

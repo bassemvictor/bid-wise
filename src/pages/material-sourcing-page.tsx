@@ -37,6 +37,7 @@ import type {
   ProductConfiguration,
   RollCalculation,
   SelectedMaterialSource,
+  StockReservationStatus,
   StockItem,
   Supplier,
   TenderRequest,
@@ -108,6 +109,9 @@ type SourceOption = {
   customsPercent: number | null;
   customsEstimate: number | null;
   availabilityLabel: string;
+  reservationStatus?: StockReservationStatus | null;
+  reservedForTenderId?: string | null;
+  reservedForTenderNumber?: string | null;
 };
 
 type SourceLineMetrics = {
@@ -388,6 +392,7 @@ const getRequestedAndAppliedTotals = (
 };
 
 const SourceSelectionDrawer = ({
+  currentTenderId,
   component,
   metrics,
   sources,
@@ -408,6 +413,7 @@ const SourceSelectionDrawer = ({
   onSelectSource,
   onTabChange,
 }: {
+  currentTenderId: string;
   component: ComponentSourcingForm;
   metrics: ComponentMetrics | undefined;
   sources: SourceOption[];
@@ -657,20 +663,30 @@ const SourceSelectionDrawer = ({
                   const isAlreadyAdded = component.selectedSources.some(
                     (selectedSource) => selectedSource.sourceId === source.sourceId,
                   );
+                  const isReservedByAnotherTender =
+                    source.sourceType === "stock" &&
+                    Boolean(source.reservedForTenderId) &&
+                    source.reservedForTenderId !== currentTenderId;
+                  const isDisabled = isAlreadyAdded || isReservedByAnotherTender;
+                  const availabilityText = isReservedByAnotherTender
+                    ? `${
+                        source.reservationStatus === "unavailable" ? "Unavailable" : "Reserved"
+                      } by tender ${source.reservedForTenderNumber || source.reservedForTenderId}`
+                    : availability;
 
                   return (
                     <button
                       key={source.sourceId}
-                      disabled={isAlreadyAdded}
+                      disabled={isDisabled}
                       className={cn(
                         "w-full rounded-2xl border px-4 py-4 text-left transition-colors",
-                        isAlreadyAdded && "border-slate-200 bg-slate-100/80 opacity-70",
+                        isDisabled && "border-slate-200 bg-slate-100/80 opacity-70",
                         isSelected
                           ? "border-primary bg-primary/5 shadow-sm"
                           : "border-border bg-white hover:bg-slate-50",
                       )}
                       onClick={() => {
-                        if (!isAlreadyAdded) {
+                        if (!isDisabled) {
                           onSelectSource(source.sourceId);
                         }
                       }}
@@ -696,21 +712,27 @@ const SourceSelectionDrawer = ({
                                 : formatMetric(source.unitCostUsdPerM2, 3, " USD/m²")
                               : formatMetric(source.unitCostUsdPerM2, 2, " EGP/bag")}
                           </p>
-                          <p className="mt-2 text-sm text-muted-foreground">Availability: {availability}</p>
+                          <p className="mt-2 text-sm text-muted-foreground">Availability: {availabilityText}</p>
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-3">
                           <Button
-                            disabled={isAlreadyAdded}
+                            disabled={isDisabled}
                             onClick={(event) => {
                               event.stopPropagation();
-                              if (!isAlreadyAdded) {
+                              if (!isDisabled) {
                                 onSelectAndConfirm(source.sourceId);
                               }
                             }}
                             type="button"
                             variant={isSelected ? "default" : "outline"}
                           >
-                            {isAlreadyAdded ? "Added" : "Select"}
+                            {isAlreadyAdded
+                              ? "Added"
+                              : isReservedByAnotherTender
+                                ? source.reservationStatus === "unavailable"
+                                  ? "Unavailable"
+                                  : "Reserved"
+                                : "Select"}
                           </Button>
                         </div>
                       </div>
@@ -1289,6 +1311,9 @@ const buildSourceOptions = (
         customsPercent: 0,
         customsEstimate: 0,
         availabilityLabel: "In stock",
+        reservationStatus: item.reservationStatus ?? null,
+        reservedForTenderId: item.reservedForTenderId ?? null,
+        reservedForTenderNumber: item.reservedForTenderNumber ?? null,
       };
     });
 
@@ -3356,6 +3381,7 @@ export const MaterialSourcingPage = () => {
         <SourceSelectionDrawer
           activeTab={activeTab}
           component={form.componentSelections[sourcePickerState.componentIndex]}
+          currentTenderId={form.tenderId}
           materials={materials}
           metrics={componentMetrics[sourcePickerState.componentIndex]}
           onClose={() => setSourcePickerState(null)}

@@ -39,6 +39,8 @@ import type {
   ProductConfiguration,
   RollCalculation,
   ScenarioAlternative,
+  SelectedMaterialSource,
+  StockReservationStatus,
   StockItem,
   Supplier,
   SupplierOffer,
@@ -469,6 +471,15 @@ const normalizeStockItemPayload = (payload: Partial<StockItem>, tenantId: string
   rollLengthM: toNullableNumber(payload.rollLengthM),
   unitCostUsdPerM2: toNullableNumber(payload.unitCostUsdPerM2),
   landedCostEgp: toNullableNumber(payload.landedCostEgp),
+  reservationStatus:
+    payload.reservationStatus === "unavailable"
+      ? "unavailable"
+      : payload.reservationStatus === "reserved"
+        ? "reserved"
+        : null,
+  reservedForTenderId: payload.reservedForTenderId?.trim() || null,
+  reservedForTenderNumber: payload.reservedForTenderNumber?.trim() || null,
+  reservedAt: payload.reservedAt?.trim() || null,
   active: payload.active ?? true,
   createdAt: payload.createdAt ?? "",
   updatedAt: payload.updatedAt ?? "",
@@ -1038,6 +1049,15 @@ const sanitizeStockItem = (item: StoredEntity | null): StockItem | null => {
     rollLengthM: toNullableNumber(item.rollLengthM),
     unitCostUsdPerM2: toNullableNumber(item.unitCostUsdPerM2),
     landedCostEgp: toNullableNumber(item.landedCostEgp),
+    reservationStatus:
+      item.reservationStatus === "unavailable"
+        ? "unavailable"
+        : item.reservationStatus === "reserved"
+          ? "reserved"
+          : null,
+    reservedForTenderId: String(item.reservedForTenderId ?? "").trim() || null,
+    reservedForTenderNumber: String(item.reservedForTenderNumber ?? "").trim() || null,
+    reservedAt: String(item.reservedAt ?? "").trim() || null,
     active: Boolean(item.active),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -2720,6 +2740,132 @@ const getMaterialSourcingRecord = async (tableName: string, tenderId: string) =>
 const getMaterialSourcing = async (context: RequestContext, tenderId: string) =>
   sanitizeMaterialSourceSelection(await getMaterialSourcingRecord(context.tableName, tenderId));
 
+const getReservedStockSourceIds = (selection: Partial<MaterialSourceSelection> | null | undefined) => {
+  const stockIds = new Set<string>();
+  const collect = (sources: Partial<SelectedMaterialSource>[] | undefined) => {
+    sources?.forEach((source) => {
+      const sourceId = source.sourceId?.trim();
+      if (source.sourceType === "stock" && sourceId) {
+        stockIds.add(sourceId);
+      }
+    });
+  };
+
+  collect(selection?.selectedSources);
+  selection?.componentSelections?.forEach((component) => collect(component.selectedSources));
+  return stockIds;
+};
+
+const saveStockReservationState = async (
+  context: RequestContext,
+  stockItem: StockItem,
+  reservation: Pick<
+    StockItem,
+    "reservationStatus" | "reservedForTenderId" | "reservedForTenderNumber" | "reservedAt"
+  >,
+) => {
+  const item = {
+    PK: tenantPk(context.tenantId),
+    SK: `STOCK#${stockItem.stockId}`,
+    ...baseEnvelope(
+      {
+        ...stockItem,
+        ...reservation,
+      },
+      "STOCK_ITEM",
+      stockItem.createdAt,
+    ),
+  } satisfies StoredEntity;
+
+  await putRecord(context.tableName, item);
+};
+
+const syncTenderStockReservations = async (
+  context: RequestContext,
+  tenderId: string,
+  nextSelection: Partial<MaterialSourceSelection> | null | undefined,
+  reservationStatus?: StockReservationStatus,
+) => {
+  const [existingSelection, tender] = await Promise.all([
+    getMaterialSourcing(context, tenderId),
+    getTender(context, tenderId),
+  ]);
+
+  if (!tender) {
+    throw new Error(`Tender ${tenderId} not found.`);
+  }
+
+  const previousStockIds = getReservedStockSourceIds(existingSelection);
+  const nextStockIds = getReservedStockSourceIds(nextSelection);
+  const stockIds = [...new Set([...previousStockIds, ...nextStockIds])];
+
+  if (stockIds.length === 0) {
+    return;
+  }
+
+  const stockItems = await Promise.all(stockIds.map((stockId) => getStockItem(context, stockId)));
+  const stockById = new Map(
+    stockItems
+      .filter((item): item is StockItem => Boolean(item))
+      .map((item) => [item.stockId, item]),
+  );
+
+  for (const stockId of nextStockIds) {
+    const stockItem = stockById.get(stockId);
+    if (!stockItem) {
+      throw new Error(`Stock item ${stockId} not found.`);
+    }
+
+    if (stockItem.reservedForTenderId && stockItem.reservedForTenderId !== tenderId) {
+      const reservedFor = stockItem.reservedForTenderNumber || stockItem.reservedForTenderId;
+      const statusLabel = stockItem.reservationStatus === "unavailable" ? "unavailable" : "reserved";
+      throw new Error(`Stock item ${stockId} is ${statusLabel} by tender ${reservedFor}.`);
+    }
+  }
+
+  const reservationTimestamp = isoNow();
+  const nextReservationStatus = reservationStatus ?? (tender.status === "APPROVED" ? "unavailable" : "reserved");
+
+  await Promise.all(
+    stockIds.map(async (stockId) => {
+      const stockItem = stockById.get(stockId);
+      if (!stockItem) {
+        return;
+      }
+
+      const shouldReserve = nextStockIds.has(stockId);
+      const isReservedByCurrentTender = stockItem.reservedForTenderId === tenderId;
+
+      if (shouldReserve) {
+        if (
+          isReservedByCurrentTender &&
+          stockItem.reservedForTenderNumber === (tender.tenderNumber || tender.tenderId) &&
+          stockItem.reservationStatus === nextReservationStatus
+        ) {
+          return;
+        }
+
+        await saveStockReservationState(context, stockItem, {
+          reservationStatus: nextReservationStatus,
+          reservedForTenderId: tenderId,
+          reservedForTenderNumber: tender.tenderNumber || tender.tenderId,
+          reservedAt: reservationTimestamp,
+        });
+        return;
+      }
+
+      if (isReservedByCurrentTender) {
+        await saveStockReservationState(context, stockItem, {
+          reservationStatus: null,
+          reservedForTenderId: null,
+          reservedForTenderNumber: null,
+          reservedAt: null,
+        });
+      }
+    }),
+  );
+};
+
 const saveMaterialSourcing = async (
   context: RequestContext,
   tenderId: string,
@@ -2739,6 +2885,7 @@ const saveMaterialSourcing = async (
     ...timestamps,
   } satisfies StoredEntity;
 
+  await syncTenderStockReservations(context, tenderId, normalized);
   await putRecord(context.tableName, item);
   await createAuditEntriesForStage(context, tenderId, "MATERIAL_SOURCE_SELECTION", existing, item);
   await updateTenderStatus(context, tenderId, "MATERIAL_SOURCING");
@@ -2864,7 +3011,14 @@ const listStockItems = async (context: RequestContext) =>
   listTenantEntities<StockItem>(context.tableName, context.tenantId, "STOCK#", sanitizeStockItem);
 
 const saveStockItem = async (context: RequestContext, payload: Partial<StockItem>) => {
-  const normalized = normalizeStockItemPayload(payload, context.tenantId);
+  const existing = payload.stockId ? await getStockItem(context, payload.stockId) : null;
+  const normalized = normalizeStockItemPayload(
+    {
+      ...existing,
+      ...payload,
+    },
+    context.tenantId,
+  );
   return saveTenantEntity(
     context.tableName,
     context.tenantId,
@@ -3195,6 +3349,12 @@ const savePricingApproval = async (
   });
 
   await createAuditEntriesForStage(context, tenderId, "PRICING_APPROVAL", existing, item);
+  if (overallStatus === "approved") {
+    const currentSourcing = await getMaterialSourcing(context, tenderId);
+    if (currentSourcing) {
+      await syncTenderStockReservations(context, tenderId, currentSourcing, "unavailable");
+    }
+  }
   await updateTenderStatus(context, tenderId, overallStatus === "approved" ? "APPROVED" : "PENDING_APPROVAL");
   return sanitizePricingApproval(item)!;
 };
@@ -4126,14 +4286,22 @@ export const handler: APIGatewayProxyHandlerV2 = async (event) => {
       }
 
       if (section === "material-sourcing") {
-        return json(
-          200,
-          await saveMaterialSourcing(
-            context,
-            tenderId,
-            parseBody<Partial<MaterialSourceSelection>>(event.body),
-          ),
-        );
+        try {
+          return json(
+            200,
+            await saveMaterialSourcing(
+              context,
+              tenderId,
+              parseBody<Partial<MaterialSourceSelection>>(event.body),
+            ),
+          );
+        } catch (error) {
+          if (error instanceof Error && error.message.startsWith("Stock item ")) {
+            return json(409, { message: error.message });
+          }
+
+          throw error;
+        }
       }
 
       if (section === "cost-build-up") {

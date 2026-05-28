@@ -419,6 +419,8 @@ export type Material = EntityEnvelope & {
   active: boolean;
 };
 
+export type StockReservationStatus = "reserved" | "unavailable";
+
 export type StockItem = EntityEnvelope & {
   stockId: string;
   supplierId: string;
@@ -428,6 +430,10 @@ export type StockItem = EntityEnvelope & {
   rollLengthM: number | null;
   unitCostUsdPerM2: number | null;
   landedCostEgp: number | null;
+  reservationStatus?: StockReservationStatus | null;
+  reservedForTenderId?: string | null;
+  reservedForTenderNumber?: string | null;
+  reservedAt?: string | null;
   active: boolean;
 };
 

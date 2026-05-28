@@ -1490,7 +1490,7 @@ export const ProductConfigurationPage = () => {
 
                       {!collapsedProducts[product.productId] ? (
                         <div className="space-y-5 px-4 py-4 sm:px-5 sm:py-5">
-                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                             <label className="space-y-2 text-sm font-medium text-slate-700">
                               Product Name
                               <Input
